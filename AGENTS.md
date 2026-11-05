@@ -4,15 +4,17 @@ This file provides guidance to AI coding assistants working in this repository.
 
 ## 1. Project Overview
 
-Anti-Fraud is a payment risk-scoring service modeled on the Xsolla Anti-fraud system. Every incoming payment is evaluated in three stages:
+Anti-Fraud is a real-time fraud scoring and review console for in-game purchases. It is a simplified version of the rule, review, and blocklist workflow that payment anti-fraud products use, inspired by the capabilities Xsolla publishes for its Anti-fraud product. Xsolla's actual rules are not public, so do not describe this project as "how Xsolla's anti-fraud works".
+
+Every purchase is scored in three stages and receives one of three outcomes: `allow`, `review`, or `block`.
 
 | Stage | Check | Possible outcome |
 |---|---|---|
-| 1. Blocklist | User, email, IP, or card is blocked | Decline |
-| 2. Rules | Velocity, amount limit, region lock, country mismatch | Review or Decline |
-| 3. ML model | Fraud probability score | Approve, Review, or Decline |
+| 1. Blocklist | Card, device, player, or IP address is blocked | Block |
+| 2. Rules | Weighted rules add points; the total is compared to review and block thresholds | Allow, Review, or Block |
+| 3. ML model | Fraud risk score, used as a second opinion | Can clear a review or add one. **Never blocks** |
 
-Payments marked for review are handled by analysts in a review dashboard.
+Purchases marked for review are decided by analysts in the review console.
 
 | Item | Value |
 |---|---|
@@ -24,44 +26,105 @@ Payments marked for review are handled by analysts in a review dashboard.
 
 | Component | Technology | Location | Status |
 |---|---|---|---|
-| Backend | Go, standard library `net/http` | `backend/` | Initialized |
-| Frontend | React, JavaScript | `frontend/` | Not started |
-| ML model | LightGBM, IEEE-CIS Fraud Detection dataset | — | Not started |
+| Backend | Go, standard library `net/http`, sqlc, pgx | `backend/` | Initialized |
+| Database | PostgreSQL | — | Not started |
+| Frontend | React, TypeScript | `frontend/` | Not started |
+| ML training | Python, LightGBM | `ml/` | Not started |
+| ML serving | LightGBM model file loaded by the Go service | `backend/` | Not started |
+| Local setup | Docker Compose | Repository root | Not started |
 
-## 3. Repository Structure
+## 3. Architecture
+
+The backend, frontend, and ML code live in one repository. The system is a **modular monolith**: one Go service and one PostgreSQL database, with the code split into packages by feature and deployed as a single binary. Python runs only offline to prepare data and train the model.
+
+### 3.1 Decisions
+
+| Area | Decision |
+|---|---|
+| Backend shape | Modular monolith in Go |
+| Code layout | Package by feature, with a pure scoring core that has no SQL or HTTP |
+| Database access | SQL files compiled to typed Go code with sqlc, using the pgx driver |
+| Frontend | React with TypeScript |
+| Model role | Assist only: it can clear a review or add one, but never produces a block |
+| Model serving | Trained in Python, exported to a file, and run inside the Go service |
+| Model data | IEEE-CIS converted to the API format and replayed through scoring (section 3.3) |
+| Demo traffic | A seeded simulator that sends purchases in the same API format |
+| Caching | None. Indexed PostgreSQL queries only, no Redis |
+| Console updates | Polling every few seconds, no WebSockets |
+| API authentication | API key for the score endpoint |
+
+### 3.2 Backend Layout
+
+```
+backend/
+├── cmd/api/main.go     Wiring only
+└── internal/
+    ├── scoring/        Pure rule evaluation, no SQL or HTTP
+    ├── score/          Score flow and HTTP handler
+    ├── rulesets/       Rule configuration
+    ├── reviews/        Review queue and decisions
+    ├── blocklist/      Blocklist entries
+    ├── stats/          Dashboard queries
+    ├── simulator/      Demo traffic generator
+    ├── lgbm/           Model loader and prediction
+    ├── db/             sqlc-generated queries
+    └── platform/       Config, database pool, error helper
+```
+
+Each feature package registers its own routes, so `main.go` contains only wiring.
+
+### 3.3 Model Data Pipeline
+
+1. A script downloads IEEE-CIS from Kaggle. The raw and converted data are never committed to Git.
+2. Each row is converted into a score request in the API format: `TransactionAmt` becomes the amount, `TransactionDT` the event time, `card1`–`card6` a stand-in card token, `card1` + `addr1` + `D1` a stand-in player ID, and `card4`, `card6`, `P_emaildomain`, and `DeviceType` map to their matching fields.
+3. The converted rows are replayed through the scoring flow, so the history-based model inputs (such as card velocity) are computed by the same Go and SQL code that serves live traffic, and saved on each decision.
+4. Fraud labels are stored in a separate table that scoring code never reads.
+5. The saved model inputs and labels are exported, and LightGBM is trained in Python.
+
+IEEE-CIS has no IP country, device ID, or account creation time, so these API fields are optional. Rules that need a missing field do not fire. The anonymized IEEE-CIS columns (`C`, `D`, `M`, `V`, `id_*`) are not used as model inputs.
+
+## 4. Repository Structure
 
 ```
 anti-fraud/
 ├── AGENTS.md                 This file
 ├── CLAUDE.md                 Imports this file for Claude Code
 ├── .agent/
-│   └── skills/               Project skills (see section 5)
-└── backend/
-    ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
-    └── cmd/server/main.go    HTTP server entry point
+│   └── skills/               Project skills (see section 6)
+├── backend/
+│   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
+│   ├── cmd/api/main.go       HTTP server entry point
+│   └── internal/             Feature packages (see section 3.2)
+├── frontend/                 React app (not started)
+└── ml/                       Data preparation and model training (not started)
 ```
 
-## 4. Development
+## 5. Development
 
 Run the backend:
 
 ```bash
 cd backend
-go run ./cmd/server
+go run ./cmd/api
 ```
 
 The server listens on the port given by the `PORT` environment variable (default `8080`) and exposes `GET /health`.
 
-## 5. Skills
+## 6. Skills
 
 Read the relevant skill before performing the matching task.
 
 | Skill | File | Use before |
 |---|---|---|
-| Commit style | `.agent/skills/commit-style/SKILL.md` | Creating any git commit |
+| Commit style | `.agent/skills/commit-style/SKILL.md` | Creating any git commit or branch |
+| Jira task creator | `.agent/skills/jira-task-creator/SKILL.md` | Creating, editing, or planning any Jira work item |
 
-## 6. General Rules
+## 7. General Rules
 
 1. Implement only what was requested. Do not scaffold or add unrequested components.
 2. Never mention AI tools or assistants in code or documentation.
-3. ML features must use only fields that the API receives at request time.
+3. Model inputs must use only values available at scoring time: fields in the score request, plus history computed from earlier transactions. Never use IDs, card tokens, IP addresses, fraud labels, rule outcomes, review results, or anonymized IEEE-CIS columns.
+4. Never fill a missing field with a value derived from the fraud label.
+5. The model can never produce a `block`. Blocks come only from the blocklist or the rules.
+6. Store money as integer minor units and all times in UTC.
+7. Never commit the IEEE-CIS dataset or files derived from it.
