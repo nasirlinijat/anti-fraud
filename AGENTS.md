@@ -33,6 +33,7 @@ Payments marked for review are handled by analysts in a review dashboard.
 ```
 anti-fraud/
 ├── AGENTS.md                 This file
+├── CLAUDE.md                 Imports this file for Claude Code
 ├── .agent/
 │   └── skills/               Project skills (see section 5)
 └── backend/

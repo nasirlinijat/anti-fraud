@@ -46,7 +46,7 @@ Commit messages follow the [Conventional Commits](https://www.conventionalcommit
 
 ## 3. Authorship
 
-- Every commit is authored solely by the repository owner, using their configured git identity.
+- Every commit is authored solely by the developer using the assistant, with their own configured git identity.
 - Commit messages must not mention AI tools or assistants.
 - No `Co-Authored-By` or other attribution trailers may be added.
 
@@ -54,19 +54,19 @@ Commit messages follow the [Conventional Commits](https://www.conventionalcommit
 
 No git command that changes the repository, including `git add`, may be run before approval.
 
-1. Present a commit plan to the repository owner containing:
+1. Present a commit plan to the developer containing:
    - the files to be included,
    - the files that will be left out, if any,
    - the exact commands, in a code block,
    - the commit message.
-2. Wait for explicit approval from the repository owner.
-3. If the owner requests changes, update the plan and present it again.
+2. Wait for explicit approval from the developer.
+3. If the developer requests changes, update the plan and present it again.
 4. Run the commands only after approval is given, exactly as presented.
 5. Report the result: the commit hash, author, and message.
 
 ## 5. Pushing
 
-The assistant never pushes. The repository owner decides which branch to push and performs every push personally.
+The assistant never pushes. The developer decides which branch to push and performs every push personally.
 
 ## 6. Excluded Files
 
