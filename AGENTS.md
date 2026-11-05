@@ -16,7 +16,7 @@ Payments marked for review are handled by analysts in a review dashboard.
 
 | Item | Value |
 |---|---|
-| Deadline | 2026-11-19 |
+| Deadline | 2026-11-17 |
 | Jira | Project `AF` on nasirlinijatdev.atlassian.net (Scrum, one-week sprints) |
 | Repository | `nasirlinijat/anti-fraud` (private) |
 
