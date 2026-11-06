@@ -35,3 +35,27 @@ type Ruleset struct {
 	BlockThreshold  int
 	Rules           map[RuleName]RuleConfig
 }
+
+// FiredRule is a rule that fired and the points it added.
+type FiredRule struct {
+	Name   RuleName
+	Points int
+}
+
+// Result is the scoring decision for one purchase.
+type Result struct {
+	Outcome    Outcome
+	Score      int
+	FiredRules []FiredRule
+}
+
+func decide(score int, rs Ruleset) Outcome {
+	switch {
+	case score >= rs.BlockThreshold:
+		return OutcomeBlock
+	case score >= rs.ReviewThreshold:
+		return OutcomeReview
+	default:
+		return OutcomeAllow
+	}
+}
