@@ -39,5 +39,13 @@ services:
       db:
         condition: service_healthy
 
+  sqlc:
+    image: sqlc/sqlc:1.31.1
+    profiles: [tools]
+    volumes:
+      - ./backend:/src
+    working_dir: /src
+    command: generate
+
 volumes:
   db-data:
