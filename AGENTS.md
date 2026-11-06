@@ -27,7 +27,7 @@ Purchases marked for review are decided by analysts in the review console.
 | Component | Technology | Location | Status |
 |---|---|---|---|
 | Backend | Go, standard library `net/http`, sqlc, pgx | `backend/` | Initialized |
-| Database | PostgreSQL | — | Not started |
+| Database | PostgreSQL | Docker Compose | Initialized |
 | Frontend | React, TypeScript | `frontend/` | Not started |
 | ML training | Python, LightGBM | `ml/` | Not started |
 | ML serving | LightGBM model file loaded by the Go service | `backend/` | Not started |
@@ -111,14 +111,27 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Run the backend directly:
+Run the backend directly, with PostgreSQL in Docker:
+
+```bash
+docker compose up -d db
+cd backend
+DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable" go run ./cmd/api
+```
+
+The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` is required, and the server exits with an error if it is missing.
+
+| Endpoint | Response |
+|---|---|
+| `GET /health` | 200 while the process is running |
+| `GET /ready` | 200 when the database is reachable, 503 when it is not |
+
+Run the tests. The PostgreSQL test is skipped unless `TEST_DATABASE_URL` is set:
 
 ```bash
 cd backend
-go run ./cmd/api
+TEST_DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable" go test ./...
 ```
-
-The server listens on the port given by the `PORT` environment variable (default `8080`) and exposes `GET /health`.
 
 ## 6. Skills
 

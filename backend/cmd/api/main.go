@@ -1,23 +1,28 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
-	"os"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	cfg, err := platform.LoadConfig()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
-	})
+	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("create database pool: %v", err)
+	}
+	defer pool.Close()
 
-	log.Printf("anti-fraud backend listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	mux := http.NewServeMux()
+	platform.RegisterHealthRoutes(mux, pool)
+
+	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
+	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
 }
