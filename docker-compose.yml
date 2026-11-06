@@ -19,6 +19,7 @@ services:
     build: ./backend
     environment:
       PORT: ${PORT:?set PORT in .env}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
     ports:
       - "127.0.0.1:${PORT:?set PORT in .env}:${PORT:?set PORT in .env}"
     depends_on:
