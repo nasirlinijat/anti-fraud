@@ -96,6 +96,7 @@ anti-fraud/
 ├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
+├── .github/workflows/ci.yml  CI pipeline
 ├── backend/
 │   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
@@ -147,6 +148,10 @@ make migrate
 
 - Each change is a pair of files with the next sequence number: `NNNNNN_description.up.sql` and `NNNNNN_description.down.sql`.
 - Never edit a migration that has been merged. Add a new one instead.
+
+### 5.2 Continuous Integration
+
+GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, then runs `go vet`, `go test` against PostgreSQL, and `go build`.
 
 ## 6. Skills
 
