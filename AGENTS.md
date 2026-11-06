@@ -91,6 +91,7 @@ IEEE-CIS has no IP country, device ID, or account creation time, so these API fi
 anti-fraud/
 ├── AGENTS.md                 This file
 ├── CLAUDE.md                 Imports this file for Claude Code
+├── README.md                 Prerequisites and local setup
 ├── Makefile                  Development commands
 ├── docker-compose.yml        Local PostgreSQL, backend, and migration runner
 ├── .env.example              Required environment variables
@@ -109,20 +110,16 @@ anti-fraud/
 
 ## 5. Development
 
-Start PostgreSQL and the backend in Docker:
+Local setup is described in `README.md`. Create the environment file once with `cp .env.example .env`, then use the Makefile:
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-Run the backend directly, with PostgreSQL in Docker:
-
-```bash
-docker compose up -d db
-cd backend
-DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable" go run ./cmd/api
-```
+| Command | What it does |
+|---|---|
+| `make up` | Builds and starts PostgreSQL and the backend in Docker |
+| `make down` | Stops the containers and keeps the database data |
+| `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
+| `make test` | Starts PostgreSQL in Docker and runs the tests |
+| `make lint` | Checks formatting with `gofmt` and runs `go vet` |
+| `make migrate` | Applies all pending database migrations |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` is required, and the server exits with an error if it is missing.
 
@@ -131,12 +128,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 
-Run the tests. The PostgreSQL test is skipped unless `TEST_DATABASE_URL` is set:
-
-```bash
-cd backend
-TEST_DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable" go test ./...
-```
+`make test` sets `TEST_DATABASE_URL` from `DATABASE_URL`. A direct `go test` skips the PostgreSQL test unless `TEST_DATABASE_URL` is set.
 
 ### 5.1 Database Migrations
 
