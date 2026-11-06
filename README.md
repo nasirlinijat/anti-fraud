@@ -61,9 +61,32 @@ Go is needed for `make run`, `make test`, and `make lint`. The other commands ru
 | `make up` | Builds and starts PostgreSQL and the backend in Docker |
 | `make down` | Stops the containers and keeps the database data |
 | `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
-| `make test` | Starts PostgreSQL in Docker and runs the tests |
+| `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
+| `make generate` | Regenerates the database code from the SQL queries |
+
+## Database Queries
+
+Database code is generated from SQL files with [sqlc](https://sqlc.dev). Do not edit the generated files in `backend/internal/db/` by hand.
+
+To add a query:
+
+1. Write it in a `.sql` file in `backend/queries/`, with a name line above it:
+
+   ```sql
+   -- name: GetActiveRuleset :one
+   SELECT version, review_threshold, block_threshold
+   FROM rulesets
+   WHERE is_active;
+   ```
+
+   `:one` returns one row, `:many` returns a list, and `:exec` returns nothing.
+
+2. Run `make generate`.
+3. Commit the `.sql` file together with the generated code.
+
+sqlc reads the table definitions from `backend/migrations/`, so a query on a new table needs its migration first.
 
 ## Troubleshooting
 
