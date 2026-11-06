@@ -145,7 +145,7 @@ def main():
     }
 
     (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
-    golden = x_test.sample(n=min(2000, len(x_test)), random_state=SEED)
+    golden = export.synthetic_rows(x_train, 2000, SEED)
     model_path = export.export(model, features.FEATURES, args.version, args.models_dir, golden, report)
 
     print(json.dumps({name: report[name]["test"] for name in ("logistic_regression", "lightgbm")}, indent=2))

@@ -1,0 +1,9 @@
+TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,P_emaildomain,R_emaildomain,D1
+1,0,3456000,50.00,W,1001,111,150,visa,226,debit,100,87,gmail.com,,30
+2,0,3456600,20.00,W,1001,111,150,visa,226,debit,100,87,gmail.com,,30
+3,0,3459600,50.00,W,1001,111,150,visa,226,debit,100,87,gmail.com,,30
+4,1,3460000,250.00,W,1001,222,150,visa,226,debit,100,87,yahoo.com,hotmail.com,30
+5,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,gmail.com,,20
+6,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,gmail.com,gmail.com,20
+7,0,3633000,30.00,W,1001,111,150,visa,226,debit,100,87,gmail.com,,32
+8,0,3640000,15.50,S,3003,,,discover,,charge card,,,,,

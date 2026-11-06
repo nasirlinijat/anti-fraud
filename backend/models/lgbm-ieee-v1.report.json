@@ -311,6 +311,6 @@
     "version": "lgbm-ieee-v1",
     "trees": 581,
     "golden_rows": 2000,
-    "tree_reader_max_difference": 8.326672684688674e-16
+    "tree_reader_max_difference": 9.159339953157541e-16
   }
 }

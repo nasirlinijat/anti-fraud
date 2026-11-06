@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 
 def choose_thresholds(y_val, score_val, review_rate, max_missed_fraud):
@@ -31,6 +32,21 @@ def policy_effect(y, score, thresholds):
         "cleared_legit_share": round(float((cleared & legit).sum() / max(int(legit.sum()), 1)), 4),
         "fraud_missed_by_clearing": round(float((cleared & fraud).sum() / max(int(fraud.sum()), 1)), 4),
     }
+
+
+def synthetic_rows(reference, count, seed, missing_share=0.1):
+    rng = np.random.default_rng(seed)
+    rows = {}
+    for name in reference.columns:
+        values = reference[name].to_numpy()
+        values = values[values != -1.0]
+        low, high = (np.quantile(values, [0.01, 0.99]) if len(values) else (0.0, 1.0))
+        column = rng.uniform(low, high, count)
+        if np.all(np.mod(values, 1) == 0):
+            column = np.round(column)
+        column[rng.random(count) < missing_share] = -1.0
+        rows[name] = column
+    return pd.DataFrame(rows, columns=reference.columns)
 
 
 def check_supported(node):
