@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 data/
 output/
 .venv/
 __pycache__/
+=======
+# IEEE-CIS dataset and derived files must never be committed
+data/
+>>>>>>> origin/main

@@ -1,6 +1,6 @@
 ---
 name: commit-style
-description: Defines the commit message format and the commit procedure for the Anti-Fraud project. Use before creating any git commit.
+description: Defines the commit message format, the commit procedure, and the branching rules for the Anti-Fraud project. Use before creating any git commit or branch.
 ---
 
 # Commit Style
@@ -68,7 +68,16 @@ No git command that changes the repository, including `git add`, may be run befo
 
 The assistant never pushes. The developer decides which branch to push and performs every push personally.
 
-## 6. Excluded Files
+## 6. Branching
+
+- Each Jira task is done on its own branch, created from an up-to-date `main`.
+- Branch names use the format `<jira-key>-<short-description>`, in lowercase with hyphens: `af-7-score-endpoint`.
+- Small changes without a Jira task, such as typo fixes or a configuration tweak, use a branch without a Jira key: `fix-readme-typo`. Several small changes may share one branch.
+- Branches are short-lived and merged within one or two days. A task that takes longer is split into smaller tasks.
+- Changes reach `main` only through a pull request reviewed by another team member. Nobody commits directly to `main`.
+- A branch is deleted after it is merged.
+
+## 7. Excluded Files
 
 The following must never be staged:
 
