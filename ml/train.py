@@ -86,7 +86,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv")
     parser.add_argument("--out", default="output")
-    parser.add_argument("--version", default="lgbm-ieee-v1")
+    parser.add_argument("--version", default="lgbm-ieee-v2")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)

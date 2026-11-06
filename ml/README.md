@@ -4,7 +4,7 @@ Trains the fraud model on the IEEE-CIS dataset. Python is used only offline; the
 
 ## Setup
 
-1. Download `train_transaction.csv` from the [IEEE-CIS competition](https://www.kaggle.com/competitions/ieee-fraud-detection/data) (accept the competition rules first) and put it in `ml/data/`. The `data/` folder is ignored by Git and must never be committed.
+1. Download `train_transaction.csv` and `train_identity.csv` from the [IEEE-CIS competition](https://www.kaggle.com/competitions/ieee-fraud-detection/data) (accept the competition rules first) and put them in `ml/data/`. The identity file is joined automatically when it sits next to the transaction file. The `data/` folder is ignored by Git and must never be committed.
 2. Create the environment from the `ml` folder:
 
    ```bash
@@ -22,14 +22,22 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 | File | Content |
 |---|---|
-| `backend/models/lgbm-ieee-v1.json` | LightGBM model dump that the Go service loads |
-| `backend/models/lgbm-ieee-v1.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
-| `backend/models/lgbm-ieee-v1.report.json` | Metrics, thresholds and export checks |
+| `backend/models/lgbm-ieee-v2.json` | LightGBM model dump that the Go service loads |
+| `backend/models/lgbm-ieee-v2.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
+| `backend/models/lgbm-ieee-v2.report.json` | Metrics, thresholds and export checks |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
 
-The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows.
+The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows. Change `--version` whenever the feature list changes, so the service never loads a model with the wrong inputs.
+
+## Compare feature groups
+
+```bash
+.venv/Scripts/python experiment.py data/train_transaction.csv
+```
+
+Trains one model per feature set (base, base plus each group, all groups, all minus each group) and prints test ROC-AUC, PR-AUC, first-fraud PR-AUC and precision at fixed false-positive rates. Groups are defined in `FEATURE_GROUPS` in `features.py`; `SELECTED_GROUPS` picks the ones the model uses. Results are written to `output/experiments.json`.
 
 ## Tests
 
@@ -59,8 +67,14 @@ All history features use only transactions that happened before the current one,
 | `player_uses_1h`, `player_uses_24h`, `card_uses_1h`, `card_uses_24h` | Earlier purchases by the player or card in the last hour and day |
 | `player_same_amount_count` | Earlier purchases by the player with the same amount |
 | `player_distinct_cards`, `player_distinct_emails`, `email_is_new_for_player` | Cards and email domains the player used before |
+| `has_device_info`, `device_type` | Whether device data was sent, and desktop or mobile |
+| `device_info_share`, `device_players_share` | How common the device name is among earlier purchases and players |
+| `device_is_new_for_player`, `player_distinct_devices` | Device names the player used before |
+| `card_distinct_players` | Players who used this card before |
+| `card1_distinct_players`, `card1_distinct_addresses`, `card1_distinct_emails` | Players, billing regions and emails seen with this `card1` value before |
+| `billing_distance` | Distance field from the request (`dist1`) |
 
-Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`.
+Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`. Money-velocity features (amount spent per card or player in a time window) were tested and left out because they did not improve the model.
 
 ## Evaluation
 

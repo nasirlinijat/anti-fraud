@@ -69,6 +69,23 @@ def test_missing_fields_become_minus_one(raw):
     assert not build_for(raw)[features.FEATURES].isna().any().any()
 
 
+def test_device_features(raw):
+    built = build_for(raw)
+    assert built.loc[4, "device_is_new_for_player"] == 1
+    assert built.loc[4, "device_type"] == 1
+    assert built.loc[7, "player_distinct_devices"] == 2
+    assert built.loc[7, "device_info_share"] == pytest.approx(0.5)
+    assert built.loc[6, "device_type"] == features.MISSING
+    assert built.loc[6, "player_distinct_devices"] == 0
+
+
+def test_shared_entity_features(raw):
+    built = build_for(raw)
+    assert built.loc[4, "card_distinct_players"] == 0
+    assert built.loc[4, "card1_distinct_players"] == 1
+    assert built.loc[7, "card1_distinct_emails"] == 2
+
+
 def test_split_follows_days_and_skips_warm_up():
     data = pd.DataFrame({"day": np.arange(0, 184)})
     train, validation, test = features.split(data)
