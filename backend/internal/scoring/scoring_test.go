@@ -1,9 +1,101 @@
 package scoring
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestEvaluate(t *testing.T) {
+	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	created := event.Add(-2 * time.Hour)
+	ip := "TR"
+
+	purchase := Input{
+		AmountMinor:           60000,
+		CardCountry:           "AZ",
+		IPCountry:             &ip,
+		AccountCreatedAt:      &created,
+		EventTime:             event,
+		CardPurchasesLastHour: 1,
+	}
+
+	allRules := func() map[RuleName]RuleConfig {
+		return map[RuleName]RuleConfig{
+			RuleHighAmount:      {Enabled: true, Weight: 30, Limit: 50000},
+			RuleCardVelocity:    {Enabled: true, Weight: 40, Limit: 5},
+			RuleNewAccount:      {Enabled: true, Weight: 20, Limit: 24},
+			RuleCountryMismatch: {Enabled: true, Weight: 25},
+		}
+	}
+
+	disabled := allRules()
+	disabled[RuleNewAccount] = RuleConfig{Enabled: false, Weight: 20, Limit: 24}
+
+	missing := allRules()
+	delete(missing, RuleCountryMismatch)
+
+	tests := []struct {
+		name      string
+		in        Input
+		rules     map[RuleName]RuleConfig
+		wantScore int
+		wantOut   Outcome
+		wantFired []FiredRule
+	}{
+		{
+			name:      "three rules fire",
+			in:        purchase,
+			rules:     allRules(),
+			wantScore: 75,
+			wantOut:   OutcomeReview,
+			wantFired: []FiredRule{
+				{RuleHighAmount, 30},
+				{RuleNewAccount, 20},
+				{RuleCountryMismatch, 25},
+			},
+		},
+		{
+			name:      "disabled rule is skipped",
+			in:        purchase,
+			rules:     disabled,
+			wantScore: 55,
+			wantOut:   OutcomeReview,
+			wantFired: []FiredRule{
+				{RuleHighAmount, 30},
+				{RuleCountryMismatch, 25},
+			},
+		},
+		{
+			name:      "missing rule is skipped",
+			in:        purchase,
+			rules:     missing,
+			wantScore: 50,
+			wantOut:   OutcomeReview,
+			wantFired: []FiredRule{
+				{RuleHighAmount, 30},
+				{RuleNewAccount, 20},
+			},
+		},
+		{
+			name:      "no rule fires",
+			in:        Input{AmountMinor: 1000, CardCountry: "AZ", EventTime: event},
+			rules:     allRules(),
+			wantScore: 0,
+			wantOut:   OutcomeAllow,
+			wantFired: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		rs := Ruleset{ReviewThreshold: 50, BlockThreshold: 80, Rules: tt.rules}
+		got := Evaluate(tt.in, rs)
+		if got.Score != tt.wantScore || got.Outcome != tt.wantOut || !reflect.DeepEqual(got.FiredRules, tt.wantFired) {
+			t.Errorf("%s: got %+v, want score %d, outcome %q, fired %+v",
+				tt.name, got, tt.wantScore, tt.wantOut, tt.wantFired)
+		}
+	}
+}
 
 func TestDecide(t *testing.T) {
 	rs := Ruleset{ReviewThreshold: 50, BlockThreshold: 80}

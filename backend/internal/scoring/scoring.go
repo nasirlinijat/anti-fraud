@@ -49,6 +49,23 @@ type Result struct {
 	FiredRules []FiredRule
 }
 
+// Evaluate runs the enabled rules against a purchase and decides its outcome.
+func Evaluate(in Input, rs Ruleset) Result {
+	var res Result
+	for _, r := range rules {
+		cfg, ok := rs.Rules[r.name]
+		if !ok || !cfg.Enabled {
+			continue
+		}
+		if r.check(in, cfg.Limit) {
+			res.Score += cfg.Weight
+			res.FiredRules = append(res.FiredRules, FiredRule{Name: r.name, Points: cfg.Weight})
+		}
+	}
+	res.Outcome = decide(res.Score, rs)
+	return res
+}
+
 func decide(score int, rs Ruleset) Outcome {
 	switch {
 	case score >= rs.BlockThreshold:

@@ -12,6 +12,16 @@ const (
 	RuleCountryMismatch RuleName = "country_mismatch"
 )
 
+var rules = []struct {
+	name  RuleName
+	check func(Input, int64) bool
+}{
+	{RuleHighAmount, highAmount},
+	{RuleCardVelocity, cardVelocity},
+	{RuleNewAccount, newAccount},
+	{RuleCountryMismatch, countryMismatch},
+}
+
 func highAmount(in Input, limit int64) bool {
 	return in.AmountMinor >= limit
 }
