@@ -93,6 +93,26 @@ func TestActiveAfterSwitch(t *testing.T) {
 	}
 }
 
+func TestRulesetVersionsCannotChange(t *testing.T) {
+	pool := testPool(t)
+	statements := []string{
+		`UPDATE ruleset_rules SET weight = 90 WHERE ruleset_version = 1`,
+		`DELETE FROM ruleset_rules WHERE ruleset_version = 1`,
+		`UPDATE rulesets SET block_threshold = 90 WHERE version = 1`,
+		`DELETE FROM rulesets WHERE version = 1`,
+	}
+
+	for _, s := range statements {
+		t.Run(s, func(t *testing.T) {
+			tx := txWith(t, pool)
+			_, err := tx.Exec(context.Background(), s)
+			if err == nil || !strings.Contains(err.Error(), "cannot be changed") {
+				t.Errorf("error = %v, want the change to be rejected", err)
+			}
+		})
+	}
+}
+
 func TestActiveUnknownRule(t *testing.T) {
 	tx := txWith(t, testPool(t),
 		`UPDATE rulesets SET is_active = false WHERE is_active`,
