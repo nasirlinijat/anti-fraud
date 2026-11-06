@@ -31,7 +31,7 @@ Purchases marked for review are decided by analysts in the review console.
 | Frontend | React, TypeScript | `frontend/` | Not started |
 | ML training | Python, LightGBM | `ml/` | Not started |
 | ML serving | LightGBM model file loaded by the Go service | `backend/` | Not started |
-| Local setup | Docker Compose | Repository root | Not started |
+| Local setup | Docker Compose | Repository root | Initialized |
 
 ## 3. Architecture
 
@@ -89,9 +89,12 @@ IEEE-CIS has no IP country, device ID, or account creation time, so these API fi
 anti-fraud/
 ├── AGENTS.md                 This file
 ├── CLAUDE.md                 Imports this file for Claude Code
+├── docker-compose.yml        Local PostgreSQL and backend
+├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
 ├── backend/
+│   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
 │   ├── cmd/api/main.go       HTTP server entry point
 │   └── internal/             Feature packages (see section 3.2)
@@ -101,7 +104,14 @@ anti-fraud/
 
 ## 5. Development
 
-Run the backend:
+Start PostgreSQL and the backend in Docker:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Run the backend directly:
 
 ```bash
 cd backend
