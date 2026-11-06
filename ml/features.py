@@ -3,6 +3,8 @@
 Every history feature uses only transactions that happened before the current one,
 so the same values can be computed by the live scoring service.
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -12,14 +14,16 @@ MISSING = -1.0
 RAW_COLUMNS = [
     "TransactionID", "isFraud", "TransactionDT", "TransactionAmt", "ProductCD",
     "card1", "card2", "card3", "card4", "card5", "card6", "addr1", "addr2",
-    "P_emaildomain", "R_emaildomain", "D1",
+    "dist1", "P_emaildomain", "R_emaildomain", "D1",
 ]
+DEVICE_COLUMNS = ["DeviceType", "DeviceInfo"]
 
 PRODUCT_CODES = {"W": 0, "H": 1, "C": 2, "S": 3, "R": 4}
 CARD_NETWORKS = {"visa": 0, "mastercard": 1, "american express": 2, "discover": 3}
 CARD_TYPES = {"debit": 0, "credit": 1, "debit or credit": 2, "charge card": 3}
+DEVICE_TYPES = {"desktop": 0, "mobile": 1}
 
-FEATURES = [
+BASE_FEATURES = [
     "amount",
     "cents",
     "product_code",
@@ -49,11 +53,49 @@ FEATURES = [
     "email_players_share",
 ]
 
+FEATURE_GROUPS = {
+    "device": [
+        "has_device_info",
+        "device_type",
+        "device_info_share",
+        "device_players_share",
+        "device_is_new_for_player",
+        "player_distinct_devices",
+    ],
+    "shared": [
+        "card_distinct_players",
+        "card1_distinct_players",
+        "card1_distinct_addresses",
+        "card1_distinct_emails",
+    ],
+    "money": [
+        "card_amount_1h",
+        "card_amount_24h",
+        "player_amount_24h",
+    ],
+    "distance": [
+        "billing_distance",
+    ],
+}
+
+ALL_FEATURES = BASE_FEATURES + [name for group in FEATURE_GROUPS.values() for name in group]
+SELECTED_GROUPS = ["device", "shared", "distance"]
+FEATURES = BASE_FEATURES + [name for group in SELECTED_GROUPS for name in FEATURE_GROUPS[group]]
+
 WARM_UP_DAYS = 30
 
 
-def load(path):
-    df = pd.read_csv(path, usecols=RAW_COLUMNS)
+def load(path, identity_path=None):
+    path = Path(path)
+    wanted = set(RAW_COLUMNS + DEVICE_COLUMNS)
+    df = pd.read_csv(path, usecols=lambda column: column in wanted)
+    identity_path = Path(identity_path) if identity_path else path.with_name("train_identity.csv")
+    if identity_path.exists() and "DeviceInfo" not in df.columns:
+        identity = pd.read_csv(identity_path, usecols=["TransactionID", *DEVICE_COLUMNS])
+        df = df.merge(identity, on="TransactionID", how="left")
+    for column in [*RAW_COLUMNS, *DEVICE_COLUMNS]:
+        if column not in df.columns:
+            df[column] = np.nan
     df = df.sort_values(["TransactionDT", "TransactionID"], kind="stable").reset_index(drop=True)
     df["day"] = df["TransactionDT"] // SECONDS_PER_DAY
     return df
@@ -70,6 +112,9 @@ def add_keys(df):
         card_id = card_id + "|" + text(df[column])
     df["card_id"] = card_id
     df["email"] = df["P_emaildomain"].fillna("none")
+    df["device"] = df["DeviceInfo"].fillna("none")
+    df["card1_key"] = text(df["card1"])
+    df["address"] = text(df["addr1"])
     return df
 
 
@@ -80,6 +125,22 @@ def window_counts(times, groups, window):
         starts = np.searchsorted(group_times, group_times - window, side="right")
         counts[index] = np.arange(len(index)) - starts
     return counts
+
+
+def window_sums(times, groups, values, window):
+    sums = np.zeros(len(times), dtype=float)
+    for index in groups.groupby(groups, sort=False).indices.values():
+        group_times = times[index]
+        totals = np.concatenate([[0.0], np.cumsum(values[index])])
+        starts = np.searchsorted(group_times, group_times - window, side="right")
+        positions = np.arange(len(index))
+        sums[index] = totals[positions] - totals[starts]
+    return sums
+
+
+def distinct_before(df, entity, other):
+    first_pair = ~df.duplicated([entity, other])
+    return first_pair.groupby(df[entity], sort=False).cumsum() - first_pair
 
 
 def build(df):
@@ -135,7 +196,31 @@ def build(df):
     players_seen = first_seen_player.cumsum() - first_seen_player
     out["email_players_share"] = (email_players / players_seen).where(players_seen > 0)
 
-    out = out[FEATURES].astype(float).fillna(MISSING)
+    has_device = df["DeviceType"].notna() | df["DeviceInfo"].notna()
+    out["has_device_info"] = has_device.astype(int)
+    out["device_type"] = df["DeviceType"].map(DEVICE_TYPES)
+    known_device = df["DeviceInfo"].notna()
+    out["device_info_share"] = (df.groupby("device", sort=False).cumcount() / earlier_rows).where(known_device & (earlier_rows > 0))
+    device_players = distinct_before(df, "device", "player_id")
+    out["device_players_share"] = (device_players / players_seen).where(known_device & (players_seen > 0))
+    first_device_use = ~df.duplicated(["player_id", "device"])
+    out["device_is_new_for_player"] = (first_device_use & known_device & (out["player_txn_count"] > 0)).astype(int)
+    first_known_device = first_device_use & known_device
+    out["player_distinct_devices"] = first_known_device.groupby(df["player_id"], sort=False).cumsum() - first_known_device
+
+    out["card_distinct_players"] = distinct_before(df, "card_id", "player_id")
+    out["card1_distinct_players"] = distinct_before(df, "card1_key", "player_id")
+    out["card1_distinct_addresses"] = distinct_before(df, "card1_key", "address")
+    out["card1_distinct_emails"] = distinct_before(df, "card1_key", "email")
+
+    amounts = amount.to_numpy(dtype=float)
+    out["card_amount_1h"] = window_sums(time_values, df["card_id"], amounts, 3600)
+    out["card_amount_24h"] = window_sums(time_values, df["card_id"], amounts, SECONDS_PER_DAY)
+    out["player_amount_24h"] = window_sums(time_values, df["player_id"], amounts, SECONDS_PER_DAY)
+
+    out["billing_distance"] = df["dist1"]
+
+    out = out[ALL_FEATURES].astype(float).fillna(MISSING)
     out["is_fraud"] = df["isFraud"].to_numpy()
     out["day"] = df["day"].to_numpy()
     out["player_id"] = df["player_id"].to_numpy()

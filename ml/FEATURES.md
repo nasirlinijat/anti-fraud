@@ -60,8 +60,19 @@ Any other or missing value is `-1`.
 | 25 | `player_same_amount_count` | Earlier purchases by the player with exactly the same amount |
 | 26 | `player_distinct_emails` | Distinct emails the player used before |
 | 27 | `email_players_share` | Distinct earlier players who used this email, divided by all distinct earlier players |
+| 28 | `has_device_info` | 1 if the request has a device type or device name, else 0 |
+| 29 | `device_type` | desktop 0, mobile 1, else `-1` |
+| 30 | `device_info_share` | Earlier purchases (all players) with this device name, divided by all earlier purchases; `-1` when the device name is missing |
+| 31 | `device_players_share` | Distinct earlier players who used this device name, divided by all distinct earlier players; `-1` when the device name is missing |
+| 32 | `device_is_new_for_player` | 1 if the device name is present, the player has earlier purchases, and none used this device name, else 0 |
+| 33 | `player_distinct_devices` | Distinct known device names the player used before (missing names are not counted) |
+| 34 | `card_distinct_players` | Distinct players who used this card ID before |
+| 35 | `card1_distinct_players` | Distinct players who used this `card1` value before |
+| 36 | `card1_distinct_addresses` | Distinct billing regions (`addr1`, missing counts as `none`) used with this `card1` value before |
+| 37 | `card1_distinct_emails` | Distinct purchaser emails (missing counts as `none`) used with this `card1` value before |
+| 38 | `billing_distance` | Distance field from the request (`dist1`) |
 
-Features 19 and 27 count over all players, so the service needs running totals per email domain and overall, not only per player.
+Features 19, 27, 30 and 31 count over all players, so the service needs running totals per email domain, per device name and overall, not only per player.
 
 ## Mapping to the score request
 
@@ -73,6 +84,8 @@ Features 19 and 27 count over all players, so the service needs running totals p
 | Card parts | `card1`-`card6` | card token parts (network, type, country, category) |
 | Billing region and country | `addr1`, `addr2` | billing address codes |
 | Emails | `P_emaildomain`, `R_emaildomain` | purchaser and recipient email domains |
+| Distance | `dist1` | distance between billing and other addresses |
+| Device | `DeviceType`, `DeviceInfo` (identity file, joined on `TransactionID`) | device type and device name |
 
 `hour_of_day` depends on the clock's reference point. IEEE-CIS times are offsets from an unknown start, so for live traffic the hour will be shifted; treat this feature as approximate until the team decides how to align it.
 
