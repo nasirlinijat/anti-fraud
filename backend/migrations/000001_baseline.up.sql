@@ -1,0 +1,1 @@
+-- Baseline for the migration history. It makes no schema changes.

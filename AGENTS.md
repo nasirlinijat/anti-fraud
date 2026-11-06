@@ -28,6 +28,7 @@ Purchases marked for review are decided by analysts in the review console.
 |---|---|---|---|
 | Backend | Go, standard library `net/http`, sqlc, pgx | `backend/` | Initialized |
 | Database | PostgreSQL | Docker Compose | Initialized |
+| Migrations | golang-migrate, run from its Docker image | `backend/migrations/` | Initialized |
 | Frontend | React, TypeScript | `frontend/` | Not started |
 | ML training | Python, LightGBM | `ml/` | Not started |
 | ML serving | LightGBM model file loaded by the Go service | `backend/` | Not started |
@@ -44,6 +45,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Backend shape | Modular monolith in Go |
 | Code layout | Package by feature, with a pure scoring core that has no SQL or HTTP |
 | Database access | SQL files compiled to typed Go code with sqlc, using the pgx driver |
+| Schema changes | Versioned SQL migration files applied with golang-migrate |
 | Frontend | React with TypeScript |
 | Model role | Assist only: it can clear a review or add one, but never produces a block |
 | Model serving | Trained in Python, exported to a file, and run inside the Go service |
@@ -89,7 +91,8 @@ IEEE-CIS has no IP country, device ID, or account creation time, so these API fi
 anti-fraud/
 ├── AGENTS.md                 This file
 ├── CLAUDE.md                 Imports this file for Claude Code
-├── docker-compose.yml        Local PostgreSQL and backend
+├── Makefile                  Development commands
+├── docker-compose.yml        Local PostgreSQL, backend, and migration runner
 ├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
@@ -97,6 +100,7 @@ anti-fraud/
 │   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
 │   ├── cmd/api/main.go       HTTP server entry point
+│   ├── migrations/           Versioned SQL migrations
 │   └── internal/             Feature packages (see section 3.2)
 ├── frontend/                 React app (not started)
 └── ml/                       Data preparation and model training (not started)
@@ -132,6 +136,17 @@ Run the tests. The PostgreSQL test is skipped unless `TEST_DATABASE_URL` is set:
 cd backend
 TEST_DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable" go test ./...
 ```
+
+### 5.1 Database Migrations
+
+The schema changes only through migration files in `backend/migrations/`, applied with [golang-migrate](https://github.com/golang-migrate/migrate). The tool runs from its Docker image, so it needs no local install. Apply all pending migrations to the local database:
+
+```bash
+make migrate
+```
+
+- Each change is a pair of files with the next sequence number: `NNNNNN_description.up.sql` and `NNNNNN_description.down.sql`.
+- Never edit a migration that has been merged. Add a new one instead.
 
 ## 6. Skills
 
