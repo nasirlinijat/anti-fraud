@@ -50,6 +50,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Migrate
+        run: >-
+          docker run --rm --network host
+          -v "$PWD/migrations:/migrations:ro"
+          migrate/migrate:v4.20.1
+          -path=/migrations -database "$TEST_DATABASE_URL" up
+
       - name: Test
         run: go test ./...
 
