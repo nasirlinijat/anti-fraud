@@ -47,8 +47,18 @@ jobs:
             exit 1
           fi
 
+      - name: Check generated code
+        run: docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 diff
+
       - name: Vet
         run: go vet ./...
+
+      - name: Migrate
+        run: >-
+          docker run --rm --network host
+          -v "$PWD/migrations:/migrations:ro"
+          migrate/migrate:v4.20.1
+          -path=/migrations -database "$TEST_DATABASE_URL" up
 
       - name: Test
         run: go test ./...

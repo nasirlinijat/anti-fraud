@@ -22,6 +22,16 @@ var rules = []struct {
 	{RuleCountryMismatch, countryMismatch},
 }
 
+// Known reports whether the scoring core implements a rule with this name.
+func (n RuleName) Known() bool {
+	for _, r := range rules {
+		if r.name == n {
+			return true
+		}
+	}
+	return false
+}
+
 func highAmount(in Input, limit int64) bool {
 	return in.AmountMinor >= limit
 }

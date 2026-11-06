@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: up down db run test lint migrate
+.PHONY: up down db run test lint migrate generate
 
 up:
 	docker compose up -d --build --wait
@@ -15,7 +15,7 @@ db:
 run: db
 	cd backend && go run ./cmd/api
 
-test: db
+test: migrate
 	cd backend && TEST_DATABASE_URL="$(DATABASE_URL)" go test ./...
 
 lint:
@@ -29,3 +29,6 @@ lint:
 
 migrate:
 	docker compose run --rm migrate
+
+generate:
+	docker compose run --rm sqlc

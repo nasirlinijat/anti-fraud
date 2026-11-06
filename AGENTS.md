@@ -46,6 +46,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Code layout | Package by feature, with a pure scoring core that has no SQL or HTTP |
 | Database access | SQL files compiled to typed Go code with sqlc, using the pgx driver |
 | Schema changes | Versioned SQL migration files applied with golang-migrate |
+| Rule configuration | Versioned rulesets in the database. A stored version never changes: a change adds a new version and makes it the only active one, in one transaction |
 | Frontend | React with TypeScript |
 | Model role | Assist only: it can clear a review or add one, but never produces a block |
 | Model serving | Trained in Python, exported to a file, and run inside the Go service |
@@ -93,7 +94,7 @@ anti-fraud/
 ├── CLAUDE.md                 Imports this file for Claude Code
 ├── README.md                 Prerequisites and local setup
 ├── Makefile                  Development commands
-├── docker-compose.yml        Local PostgreSQL, backend, and migration runner
+├── docker-compose.yml        Local PostgreSQL, backend, migration runner, and sqlc
 ├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
@@ -101,8 +102,10 @@ anti-fraud/
 ├── backend/
 │   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
+│   ├── sqlc.yaml             sqlc configuration
 │   ├── cmd/api/main.go       HTTP server entry point
 │   ├── migrations/           Versioned SQL migrations
+│   ├── queries/              SQL queries compiled by sqlc into internal/db/
 │   └── internal/             Feature packages (see section 3.2)
 ├── frontend/                 React app (not started)
 └── ml/                       Data preparation and model training (not started)
@@ -117,9 +120,10 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make up` | Builds and starts PostgreSQL and the backend in Docker |
 | `make down` | Stops the containers and keeps the database data |
 | `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
-| `make test` | Starts PostgreSQL in Docker and runs the tests |
+| `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
+| `make generate` | Regenerates the database code from the SQL queries |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` is required, and the server exits with an error if it is missing.
 
@@ -128,7 +132,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 
-`make test` sets `TEST_DATABASE_URL` from `DATABASE_URL`. A direct `go test` skips the PostgreSQL test unless `TEST_DATABASE_URL` is set.
+`make test` sets `TEST_DATABASE_URL` from `DATABASE_URL`. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set.
 
 ### 5.1 Database Migrations
 
@@ -143,7 +147,11 @@ make migrate
 
 ### 5.2 Continuous Integration
 
-GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, then runs `go vet`, `go test` against PostgreSQL, and `go build`.
+GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, then runs `go test` against PostgreSQL and `go build`.
+
+### 5.3 Database Queries
+
+Queries are written in `backend/queries/` and compiled to typed Go code in `backend/internal/db/` with [sqlc](https://sqlc.dev), which runs from its Docker image. Run `make generate` after changing a query or a migration, and commit the generated code. Never edit the generated files by hand.
 
 ## 6. Skills
 
