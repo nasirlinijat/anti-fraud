@@ -23,13 +23,23 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 | File | Content |
 |---|---|
 | `backend/models/lgbm-ieee-v1.json` | LightGBM model dump that the Go service loads |
-| `backend/models/lgbm-ieee-v1.golden.csv` | 2,000 test rows with the expected model score, for the Go tests |
+| `backend/models/lgbm-ieee-v1.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
 | `backend/models/lgbm-ieee-v1.report.json` | Metrics, thresholds and export checks |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
 
 The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows.
+
+## Tests
+
+```bash
+.venv/Scripts/python -m pytest tests
+```
+
+The tests use synthetic purchases in `testdata/`, so they run without the dataset. They check exact feature values, that adding later purchases never changes earlier features, the window boundaries, the time split and the model export. After changing a feature, regenerate the expected values with `python make_fixture.py` and check the differences.
+
+The exact feature definitions for the Go service are in `FEATURES.md`.
 
 ## Features
 
