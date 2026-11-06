@@ -31,7 +31,11 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 
 	rules := make(map[scoring.RuleName]scoring.RuleConfig, len(ruleRows))
 	for _, r := range ruleRows {
-		rules[scoring.RuleName(r.RuleName)] = scoring.RuleConfig{
+		name := scoring.RuleName(r.RuleName)
+		if !name.Known() {
+			return scoring.Ruleset{}, fmt.Errorf("ruleset %d has unknown rule %q", row.Version, r.RuleName)
+		}
+		rules[name] = scoring.RuleConfig{
 			Enabled: r.Enabled,
 			Weight:  int(r.Weight),
 			Limit:   r.RuleLimit,

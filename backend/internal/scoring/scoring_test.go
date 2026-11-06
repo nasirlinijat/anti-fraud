@@ -119,6 +119,26 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+func TestRuleNameKnown(t *testing.T) {
+	tests := []struct {
+		name RuleName
+		want bool
+	}{
+		{RuleHighAmount, true},
+		{RuleCardVelocity, true},
+		{RuleNewAccount, true},
+		{RuleCountryMismatch, true},
+		{"high_ammount", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		if got := tt.name.Known(); got != tt.want {
+			t.Errorf("RuleName(%q).Known() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestHighAmount(t *testing.T) {
 	tests := []struct {
 		amount int64
