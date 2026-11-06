@@ -34,6 +34,28 @@ func TestLoadConfigDefaultsPort(t *testing.T) {
 	}
 }
 
+func TestLoadConfigModelPathIsOptional(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("MODEL_PATH", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ModelPath != "" {
+		t.Errorf("ModelPath = %q, want empty", cfg.ModelPath)
+	}
+
+	t.Setenv("MODEL_PATH", "models/lgbm-ieee-v2.json")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ModelPath != "models/lgbm-ieee-v2.json" {
+		t.Errorf("ModelPath = %q", cfg.ModelPath)
+	}
+}
+
 func TestLoadConfigMissingDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 

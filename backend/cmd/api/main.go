@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
@@ -12,6 +13,16 @@ func main() {
 	cfg, err := platform.LoadConfig()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+
+	if cfg.ModelPath == "" {
+		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
+	} else {
+		model, err := lgbm.Load(cfg.ModelPath)
+		if err != nil {
+			log.Fatalf("load fraud model: %v", err)
+		}
+		log.Printf("fraud model %s loaded: %d trees, %d features", model.Version(), model.Trees(), len(model.Features()))
 	}
 
 	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
