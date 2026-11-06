@@ -11,6 +11,8 @@ const defaultPort = "8080"
 type Config struct {
 	Port        string
 	DatabaseURL string
+	// ModelPath is the fraud model file. When it is empty, scoring uses rules only.
+	ModelPath string
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -19,6 +21,7 @@ func LoadConfig() (Config, error) {
 	cfg := Config{
 		Port:        os.Getenv("PORT"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+		ModelPath:   os.Getenv("MODEL_PATH"),
 	}
 	if cfg.Port == "" {
 		cfg.Port = defaultPort
