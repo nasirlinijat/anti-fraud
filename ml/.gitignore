@@ -1,2 +1,5 @@
 # IEEE-CIS dataset and derived files must never be committed
 data/
+output/
+.venv/
+__pycache__/
