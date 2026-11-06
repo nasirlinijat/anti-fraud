@@ -16,6 +16,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
+import export
 import features
 
 SEED = 1234
@@ -85,6 +86,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv")
     parser.add_argument("--out", default="output")
+    parser.add_argument("--version", default="lgbm-ieee-v1")
+    parser.add_argument("--models-dir", default="../backend/models")
+    parser.add_argument("--review-rate", type=float, default=0.005)
+    parser.add_argument("--max-missed-fraud", type=float, default=0.02)
     args = parser.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(exist_ok=True)
@@ -113,7 +118,8 @@ def main():
     model = lightgbm_model()
     model.fit(
         x_train, y_train,
-        eval_set=[(x_val, y_val)],
+        eval_X=x_val,
+        eval_y=y_val,
         eval_metric="average_precision",
         callbacks=[lgb.early_stopping(200, verbose=False)],
     )
@@ -130,8 +136,21 @@ def main():
         },
     }
 
-    (out_dir / "af13_report.json").write_text(json.dumps(report, indent=2))
+    model_val = model.predict_proba(x_val)[:, 1]
+    thresholds = export.choose_thresholds(y_val, model_val, args.review_rate, args.max_missed_fraud)
+    report["policy"] = {
+        **thresholds,
+        "validation_effect": export.policy_effect(y_val, model_val, thresholds),
+        "test_effect": export.policy_effect(y_test, model_test, thresholds),
+    }
+
+    (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
+    golden = x_test.sample(n=min(2000, len(x_test)), random_state=SEED)
+    model_path = export.export(model, features.FEATURES, args.version, args.models_dir, golden, report)
+
     print(json.dumps({name: report[name]["test"] for name in ("logistic_regression", "lightgbm")}, indent=2))
+    print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
+    print(f"model written to {model_path}")
     print(f"done in {time.time() - started:.0f}s")
 
 

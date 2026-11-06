@@ -46,8 +46,10 @@ FEATURES = [
     "player_uses_24h",
     "player_same_amount_count",
     "player_distinct_emails",
-    "email_players_seen",
+    "email_players_share",
 ]
+
+WARM_UP_DAYS = 30
 
 
 def load(path):
@@ -128,7 +130,10 @@ def build(df):
     out["player_same_amount_count"] = df.groupby(["player_id", "TransactionAmt"], sort=False).cumcount()
     out["player_distinct_emails"] = first_email_use.groupby(df["player_id"], sort=False).cumsum() - first_email_use
     first_player_for_email = ~df.duplicated(["email", "player_id"])
-    out["email_players_seen"] = first_player_for_email.groupby(df["email"], sort=False).cumsum() - first_player_for_email
+    email_players = first_player_for_email.groupby(df["email"], sort=False).cumsum() - first_player_for_email
+    first_seen_player = ~df.duplicated(["player_id"])
+    players_seen = first_seen_player.cumsum() - first_seen_player
+    out["email_players_share"] = (email_players / players_seen).where(players_seen > 0)
 
     out = out[FEATURES].astype(float).fillna(MISSING)
     out["is_fraud"] = df["isFraud"].to_numpy()
@@ -138,7 +143,7 @@ def build(df):
 
 
 def split(data):
-    train = data[data["day"] <= 120]
+    train = data[(data["day"] > WARM_UP_DAYS) & (data["day"] <= 120)]
     validation = data[(data["day"] >= 136) & (data["day"] <= 152)]
     test = data[data["day"] >= 153]
     return train, validation, test
