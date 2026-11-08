@@ -29,3 +29,12 @@ JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'
 ORDER BY d.decided_at, d.purchase_id
 LIMIT $1;
+
+-- name: CountCardPurchasesLastHour :one
+-- Counts purchases with the card in the hour before the given time. Purchases
+-- at exactly that time are already saved, so they come earlier and are counted.
+SELECT count(*)
+FROM purchases
+WHERE card_token = sqlc.arg(card_token)
+  AND event_time > sqlc.arg(event_time)::timestamptz - interval '1 hour'
+  AND event_time <= sqlc.arg(event_time)::timestamptz;

@@ -14,7 +14,7 @@ const (
 // Input is the purchase data the rules check. The caller provides history counts.
 type Input struct {
 	AmountMinor           int64
-	CardCountry           string
+	CardCountry           string // empty when unknown
 	IPCountry             *string
 	AccountCreatedAt      *time.Time
 	EventTime             time.Time

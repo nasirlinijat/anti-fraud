@@ -3,6 +3,7 @@ package score
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/netip"
 	"os"
 	"reflect"
@@ -221,8 +222,46 @@ func TestSaveRejectsDuplicateTransaction(t *testing.T) {
 	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); err != nil {
 		t.Fatalf("first Save: %v", err)
 	}
-	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); err == nil {
-		t.Error("second Save with the same transaction ID succeeded, want an error")
+	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); !errors.Is(err, ErrDuplicateTransaction) {
+		t.Errorf("second Save error = %v, want ErrDuplicateTransaction", err)
+	}
+}
+
+func TestCardPurchasesLastHour(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	store := NewStore(tx)
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	d := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+
+	saved := []struct {
+		id   string
+		card string
+		at   time.Time
+	}{
+		{"v-exactly-1h", "card-v", now.Add(-time.Hour)},
+		{"v-59m", "card-v", now.Add(-59 * time.Minute)},
+		{"v-1m", "card-v", now.Add(-time.Minute)},
+		{"v-same-second", "card-v", now},
+		{"v-later", "card-v", now.Add(time.Minute)},
+		{"v-other-card", "card-other", now.Add(-time.Minute)},
+	}
+	for _, s := range saved {
+		p := minimalPurchase(s.id)
+		p.CardToken = s.card
+		p.EventTime = s.at
+		if _, err := store.Save(ctx, p, d); err != nil {
+			t.Fatalf("Save %s: %v", s.id, err)
+		}
+	}
+
+	got, err := store.CardPurchasesLastHour(ctx, "card-v", now)
+	if err != nil {
+		t.Fatalf("CardPurchasesLastHour: %v", err)
+	}
+	// 59m, 1m, and same second. Exactly one hour earlier, later, and other cards are not counted.
+	if got != 3 {
+		t.Errorf("CardPurchasesLastHour = %d, want 3", got)
 	}
 }
 

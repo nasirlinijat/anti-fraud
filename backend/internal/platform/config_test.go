@@ -8,6 +8,7 @@ import (
 func TestLoadConfig(t *testing.T) {
 	t.Setenv("PORT", "9090")
 	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("API_KEY", "test-key")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -19,11 +20,15 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.DatabaseURL != "postgres://localhost/antifraud" {
 		t.Errorf("DatabaseURL = %q", cfg.DatabaseURL)
 	}
+	if cfg.APIKey != "test-key" {
+		t.Errorf("APIKey = %q, want test-key", cfg.APIKey)
+	}
 }
 
 func TestLoadConfigDefaultsPort(t *testing.T) {
 	t.Setenv("PORT", "")
 	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("API_KEY", "test-key")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -36,6 +41,7 @@ func TestLoadConfigDefaultsPort(t *testing.T) {
 
 func TestLoadConfigModelPathIsOptional(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("API_KEY", "test-key")
 	t.Setenv("MODEL_PATH", "")
 
 	cfg, err := LoadConfig()
@@ -58,6 +64,7 @@ func TestLoadConfigModelPathIsOptional(t *testing.T) {
 
 func TestLoadConfigMissingDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("API_KEY", "test-key")
 
 	_, err := LoadConfig()
 	if err == nil {
@@ -65,5 +72,18 @@ func TestLoadConfigMissingDatabaseURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "DATABASE_URL") {
 		t.Errorf("error %q does not name DATABASE_URL", err)
+	}
+}
+
+func TestLoadConfigMissingAPIKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("API_KEY", "")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("LoadConfig returned no error")
+	}
+	if !strings.Contains(err.Error(), "API_KEY") {
+		t.Errorf("error %q does not name API_KEY", err)
 	}
 }

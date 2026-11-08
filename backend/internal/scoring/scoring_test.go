@@ -209,16 +209,18 @@ func TestCountryMismatch(t *testing.T) {
 
 	tests := []struct {
 		name string
+		card string
 		ip   *string
 		want bool
 	}{
-		{"missing IP country", nil, false},
-		{"same country", country("AZ"), false},
-		{"different country", country("TR"), true},
+		{"missing IP country", "AZ", nil, false},
+		{"missing card country", "", country("TR"), false},
+		{"same country", "AZ", country("AZ"), false},
+		{"different country", "AZ", country("TR"), true},
 	}
 
 	for _, tt := range tests {
-		in := Input{CardCountry: "AZ", IPCountry: tt.ip}
+		in := Input{CardCountry: tt.card, IPCountry: tt.ip}
 		if got := countryMismatch(in, 0); got != tt.want {
 			t.Errorf("countryMismatch(%s) = %v, want %v", tt.name, got, tt.want)
 		}

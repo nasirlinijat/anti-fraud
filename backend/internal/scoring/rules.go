@@ -49,7 +49,7 @@ func newAccount(in Input, limit int64) bool {
 }
 
 func countryMismatch(in Input, _ int64) bool {
-	if in.IPCountry == nil {
+	if in.IPCountry == nil || in.CardCountry == "" {
 		return false
 	}
 	return *in.IPCountry != in.CardCountry

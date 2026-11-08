@@ -19,6 +19,7 @@ services:
     build: ./backend
     environment:
       PORT: ${PORT:?set PORT in .env}
+      API_KEY: ${API_KEY:?set API_KEY in .env}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
       MODEL_PATH: /models/lgbm-ieee-v2.json
     ports:

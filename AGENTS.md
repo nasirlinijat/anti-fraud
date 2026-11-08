@@ -125,12 +125,13 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make migrate` | Applies all pending database migrations |
 | `make generate` | Regenerates the database code from the SQL queries |
 
-The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` is required, and the server exits with an error if it is missing.
+The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing.
 
 | Endpoint | Response |
 |---|---|
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
+| `POST /score` | Scores a purchase, saves the decision, and returns the outcome, rule score, and fired rules. Requires the `X-API-Key` header. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a transaction ID that was already scored |
 
 `make test` sets `TEST_DATABASE_URL` from `DATABASE_URL`. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set.
 
