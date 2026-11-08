@@ -49,7 +49,17 @@ Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for
 
    The response should be `{"status":"ready"}`.
 
-6. Stop everything when you are done. Your database data is kept:
+6. Score a purchase. The API key is `API_KEY` from `.env`:
+
+   ```bash
+   curl -X POST http://localhost:8080/score \
+     -H "X-API-Key: local-dev-key" \
+     -d '{"transaction_id":"demo-1","event_time":"2026-11-08T10:00:00Z","amount_minor":1999,"player_id":"player-1","card_token":"card-1"}'
+   ```
+
+   The response contains the outcome (`allow`, `review`, or `block`), the rule score, and the rules that fired.
+
+7. Stop everything when you are done. Your database data is kept:
 
    ```bash
    make down
@@ -122,6 +132,7 @@ sqlc reads the table definitions from `backend/migrations/`, so a query on a new
 | Problem | Fix |
 |---|---|
 | `set POSTGRES_USER in .env`, or a similar message | Run `cp .env.example .env` |
+| `set API_KEY in .env`, or `API_KEY is not set` | Add `API_KEY=local-dev-key` to your `.env`, as in `.env.example` |
 | `make run` reports that the port is already in use | Run `make down` to stop the backend container started by `make up` |
 | Port `5432` or `8080` is used by another program | Change `POSTGRES_PORT` or `PORT` in `.env`, and update the port in `DATABASE_URL` to match `POSTGRES_PORT` |
 | You want an empty database | Run `docker compose down -v`, which deletes the local database data, then `make up` and `make migrate` |

@@ -3,11 +3,13 @@ package score
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -51,21 +53,39 @@ type Decision struct {
 	ModelScore *float64
 }
 
-// Beginner starts a database transaction. *pgxpool.Pool and pgx.Tx implement it.
-type Beginner interface {
+// ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.
+var ErrDuplicateTransaction = errors.New("transaction ID is already saved")
+
+// Conn runs queries and starts transactions. *pgxpool.Pool and pgx.Tx implement it.
+type Conn interface {
+	db.DBTX
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-// Store saves scored purchases and their decisions.
+// Store saves scored purchases and their decisions, and reads purchase history.
 type Store struct {
-	conn Beginner
+	conn Conn
 }
 
-func NewStore(conn Beginner) *Store {
+func NewStore(conn Conn) *Store {
 	return &Store{conn: conn}
 }
 
-// Save stores a purchase and its decision in one transaction and returns the purchase ID.
+// CardPurchasesLastHour counts saved purchases with the card in the hour before
+// at. A purchase exactly one hour earlier is not counted.
+func (s *Store) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error) {
+	n, err := db.New(s.conn).CountCardPurchasesLastHour(ctx, db.CountCardPurchasesLastHourParams{
+		CardToken: cardToken,
+		EventTime: timestamptz(&at),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count card purchases: %w", err)
+	}
+	return int(n), nil
+}
+
+// Save stores a purchase and its decision in one transaction and returns the
+// purchase ID. It returns ErrDuplicateTransaction if the transaction ID is already saved.
 func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error) {
 	firedRules := d.Result.FiredRules
 	if firedRules == nil {
@@ -117,6 +137,10 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 		AccountCreatedAt:     timestamptz(p.AccountCreatedAt),
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "purchases_transaction_id_key" {
+			return 0, ErrDuplicateTransaction
+		}
 		return 0, fmt.Errorf("insert purchase %s: %w", p.TransactionID, err)
 	}
 
@@ -138,6 +162,8 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 	}
 	return id, nil
 }
+
+const uniqueViolation = "23505"
 
 func text(s *string) pgtype.Text {
 	if s == nil {

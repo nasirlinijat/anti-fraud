@@ -12,6 +12,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countCardPurchasesLastHour = `-- name: CountCardPurchasesLastHour :one
+SELECT count(*)
+FROM purchases
+WHERE card_token = $1
+  AND event_time > $2::timestamptz - interval '1 hour'
+  AND event_time <= $2::timestamptz
+`
+
+type CountCardPurchasesLastHourParams struct {
+	CardToken string
+	EventTime pgtype.Timestamptz
+}
+
+// Counts purchases with the card in the hour before the given time. Purchases
+// at exactly that time are already saved, so they come earlier and are counted.
+func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardPurchasesLastHourParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCardPurchasesLastHour, arg.CardToken, arg.EventTime)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score
