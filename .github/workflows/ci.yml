@@ -8,9 +8,16 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run still in progress for it.
+# Runs on main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -61,7 +68,10 @@ jobs:
           -path=/migrations -database "$TEST_DATABASE_URL" up
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: Verify modules
+        run: go mod verify
 
       - name: Build
         run: go build ./...
