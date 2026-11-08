@@ -35,5 +35,5 @@ func main() {
 	platform.RegisterHealthRoutes(mux, pool)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
+	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
 }
