@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -63,10 +64,30 @@ func (f *fakePurchases) Save(_ context.Context, p Purchase, d Decision) (int64, 
 	return int64(len(f.saved)), nil
 }
 
+// fakeBlocklist matches every purchase when matched is set, and records the
+// subject it was asked about.
+type fakeBlocklist struct {
+	entry   blocklist.Entry
+	matched bool
+	err     error
+	subject blocklist.Subject
+}
+
+func (f *fakeBlocklist) Match(_ context.Context, s blocklist.Subject) (blocklist.Entry, bool, error) {
+	f.subject = s
+	return f.entry, f.matched, f.err
+}
+
+// serve sends a request to a handler whose blocklist is empty.
 func serve(t *testing.T, r Rulesets, p Purchases, key, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveWith(t, r, &fakeBlocklist{}, p, key, body)
+}
+
+func serveWith(t *testing.T, r Rulesets, b Blocklist, p Purchases, key, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewHandler(r, p), testKey)
+	RegisterRoutes(mux, NewHandler(r, b, p), testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
 	if key != "" {
 		req.Header.Set(platform.APIKeyHeader, key)
@@ -320,11 +341,123 @@ func TestScoreInternalErrors(t *testing.T) {
 	}
 }
 
+const blocklistBody = `{
+	"transaction_id": "txn-bl",
+	"event_time": "2026-11-08T10:00:00Z",
+	"amount_minor": 1999,
+	"player_id": "player-9",
+	"card_token": "card-9",
+	"device_id": "device-9",
+	"ip_address": "203.0.113.9"
+}`
+
+func wantBlocklistSubject() blocklist.Subject {
+	addr := netip.MustParseAddr("203.0.113.9")
+	return blocklist.Subject{CardToken: "card-9", PlayerID: "player-9", DeviceID: ptr("device-9"), IPAddress: &addr}
+}
+
+func TestScoreBlocksBlocklistMatch(t *testing.T) {
+	purchases := &fakePurchases{}
+	bl := &fakeBlocklist{entry: blocklist.Entry{Type: blocklist.TypeCard, Value: "card-9", Reason: "chargebacks"}, matched: true}
+	rec := serveWith(t, fakeRulesets{rs: testRuleset}, bl, purchases, testKey, blocklistBody)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeJSON[scoreResponse](t, rec)
+	want := scoreResponse{
+		TransactionID:  "txn-bl",
+		Outcome:        scoring.OutcomeBlock,
+		FiredRules:     []scoring.FiredRule{},
+		RulesetVersion: 7,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("response = %+v, want %+v", got, want)
+	}
+	if want := wantBlocklistSubject(); !reflect.DeepEqual(bl.subject, want) {
+		t.Errorf("blocklist asked about %+v, want %+v", bl.subject, want)
+	}
+	if purchases.countCard != "" {
+		t.Errorf("the rules ran: card history was read for %q", purchases.countCard)
+	}
+	if len(purchases.decisions) != 1 {
+		t.Fatalf("saved %d decisions, want 1", len(purchases.decisions))
+	}
+	if d := purchases.decisions[0]; d.RulesetVersion != 7 || d.Result.Outcome != scoring.OutcomeBlock || d.Result.Score != 0 {
+		t.Errorf("saved decision = %+v, want ruleset 7, block, score 0", d)
+	}
+}
+
+func TestScoreContinuesToRulesOnBlocklistMiss(t *testing.T) {
+	purchases := &fakePurchases{}
+	bl := &fakeBlocklist{}
+	rec := serveWith(t, fakeRulesets{rs: testRuleset}, bl, purchases, testKey, blocklistBody)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeJSON[scoreResponse](t, rec); got.Outcome != scoring.OutcomeAllow {
+		t.Errorf("outcome = %s, want allow", got.Outcome)
+	}
+	if want := wantBlocklistSubject(); !reflect.DeepEqual(bl.subject, want) {
+		t.Errorf("blocklist asked about %+v, want %+v", bl.subject, want)
+	}
+	if purchases.countCard != "card-9" {
+		t.Errorf("card history was read for %q, want card-9", purchases.countCard)
+	}
+}
+
+func TestScoreBlocklistError(t *testing.T) {
+	purchases := &fakePurchases{}
+	bl := &fakeBlocklist{err: errors.New("database is down")}
+	rec := serveWith(t, fakeRulesets{rs: testRuleset}, bl, purchases, testKey, minimalBody)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "database is down") {
+		t.Errorf("response %s exposes the internal error", rec.Body.String())
+	}
+	if len(purchases.saved) != 0 {
+		t.Error("a purchase was saved although the blocklist check failed")
+	}
+}
+
+// TestScoreBlocklistWithPostgres blocks a purchase whose player is on the
+// blocklist and checks the saved decision.
+func TestScoreBlocklistWithPostgres(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	if _, err := tx.Exec(ctx, `INSERT INTO blocklist_entries (entry_type, value, reason) VALUES ('player', 'bl-player', 'fraud ring')`); err != nil {
+		t.Fatalf("insert blocklist entry: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), NewStore(tx)), testKey)
+	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(`{"transaction_id": "bl-1",
+		"event_time": "2026-11-08T10:00:00Z", "amount_minor": 1000, "player_id": "bl-player", "card_token": "bl-card"}`))
+	req.Header.Set(platform.APIKeyHeader, testKey)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if got := decodeJSON[scoreResponse](t, rec); rec.Code != http.StatusOK || got.Outcome != scoring.OutcomeBlock {
+		t.Fatalf("status %d, response %s, want 200 with outcome block", rec.Code, rec.Body.String())
+	}
+	var outcome string
+	var score int
+	err := tx.QueryRow(ctx, `
+		SELECT d.outcome, d.rule_score FROM decisions d JOIN purchases p ON p.id = d.purchase_id
+		WHERE p.transaction_id = 'bl-1'`).Scan(&outcome, &score)
+	if err != nil || outcome != "block" || score != 0 {
+		t.Errorf("saved decision = (%s, %d, %v), want (block, 0)", outcome, score, err)
+	}
+}
+
 // TestScoreWithPostgres runs the endpoint against the database: the sixth
 // purchase on a card within an hour fires card_velocity under the default ruleset.
 func TestScoreWithPostgres(t *testing.T) {
 	tx := testTx(t)
-	h := NewHandler(rulesets.NewStore(tx), NewStore(tx))
+	h := NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), NewStore(tx))
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, h, testKey)
 
