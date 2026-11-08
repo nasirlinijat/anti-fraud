@@ -29,7 +29,7 @@ Purchases marked for review are decided by analysts in the review console.
 | Backend | Go, standard library `net/http`, sqlc, pgx | `backend/` | Initialized |
 | Database | PostgreSQL | Docker Compose | Initialized |
 | Migrations | golang-migrate, run from its Docker image | `backend/migrations/` | Initialized |
-| Frontend | React, TypeScript | `frontend/` | Not started |
+| Frontend | React, TypeScript, Vite | `frontend/` | Initialized |
 | ML training | Python, LightGBM | `ml/` | Not started |
 | ML serving | LightGBM model file loaded by the Go service | `backend/` | Not started |
 | Local setup | Docker Compose | Repository root | Initialized |
@@ -107,7 +107,7 @@ anti-fraud/
 │   ├── migrations/           Versioned SQL migrations
 │   ├── queries/              SQL queries compiled by sqlc into internal/db/
 │   └── internal/             Feature packages (see section 3.2)
-├── frontend/                 React app (not started)
+├── frontend/                 React app built with Vite
 └── ml/                       Data preparation and model training (not started)
 ```
 
