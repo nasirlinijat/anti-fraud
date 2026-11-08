@@ -217,7 +217,7 @@ func TestScoreRejectsInvalidRequests(t *testing.T) {
 		{"missing player", strings.Replace(minimalBody, `"player_id": "player-1",`, ``, 1), "player_id", ""},
 		{"missing event time", strings.Replace(minimalBody, `"event_time": "2026-11-08T10:00:00Z",`, ``, 1), "event_time", ""},
 		{"event time without zone", strings.Replace(minimalBody, `2026-11-08T10:00:00Z`, `2026-11-08 10:00:00`, 1), "", "RFC 3339"},
-		{"event time as number", strings.Replace(minimalBody, `"2026-11-08T10:00:00Z"`, `1762596000`, 1), "event_time", ""},
+		{"event time as number", strings.Replace(minimalBody, `"2026-11-08T10:00:00Z"`, `1762596000`, 1), "", "RFC 3339"},
 		{"invalid IP address", with(`"amount_minor": 1999, "ip_address": "300.1.1.1"`), "ip_address", ""},
 		{"negative distance", with(`"amount_minor": 1999, "billing_distance": -1`), "billing_distance", ""},
 		{"account created after event", with(`"amount_minor": 1999, "account_created_at": "2026-11-08T11:00:00Z"`), "account_created_at", ""},
