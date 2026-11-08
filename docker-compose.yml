@@ -49,5 +49,15 @@ services:
     working_dir: /src
     command: generate
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.31.0
+    profiles: [tools]
+    environment:
+      SWAGGER_JSON: /spec/openapi.yaml
+    volumes:
+      - ./openapi.yaml:/spec/openapi.yaml:ro
+    ports:
+      - "127.0.0.1:${SWAGGER_PORT:-8090}:8080"
+
 volumes:
   db-data:
