@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: up down db run test lint migrate generate
+.PHONY: up down db run test lint migrate generate docs
 
 up:
 	docker compose up -d --build --wait
@@ -32,3 +32,7 @@ migrate:
 
 generate:
 	docker compose run --rm sqlc
+
+docs:
+	@echo "Swagger UI: http://localhost:$${SWAGGER_PORT:-8090} (press Ctrl+C to stop)"
+	docker compose up swagger-ui
