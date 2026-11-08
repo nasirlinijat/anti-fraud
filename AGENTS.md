@@ -147,7 +147,7 @@ make migrate
 
 ### 5.2 Continuous Integration
 
-GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, then runs `go test` against PostgreSQL and `go build`.
+GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, then runs `go test` with the race detector against PostgreSQL, `go mod verify`, and `go build`. The job times out after 15 minutes, and a new push to a pull request cancels the run still in progress for it.
 
 ### 5.3 Database Queries
 
