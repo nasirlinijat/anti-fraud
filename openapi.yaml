@@ -1,0 +1,437 @@
+openapi: 3.0.3
+
+info:
+  title: Anti-Fraud API
+  version: 0.1.0
+  description: |
+    Real-time fraud scoring for in-game purchases. Every purchase gets one of
+    three outcomes: `allow`, `review`, or `block`.
+
+    This file is written by hand and is the agreed format for the score
+    request and response. The backend, the simulator, the frontend, and the
+    conversion of the IEEE-CIS data all use these fields.
+
+    Conventions:
+
+    - Amounts are integers in minor units, never decimals.
+    - Times are RFC 3339 and are converted to UTC. The response and the
+      stored data use UTC.
+    - Optional fields can be omitted. A rule that needs an omitted field does
+      not fire.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server.
+
+tags:
+  - name: Score
+    description: Score a purchase.
+
+paths:
+  /score:
+    post:
+      tags: [Score]
+      operationId: scorePurchase
+      summary: Score a purchase
+      description: |
+        Scores a purchase, saves the purchase and its decision, and returns the
+        outcome.
+
+        1. If the card, player, device, or IP address is on the blocklist, the
+           purchase is blocked before the rules run. The score is 0 and no
+           rules fire.
+        2. Otherwise the enabled rules of the active ruleset add points. A
+           total at or above the block threshold is `block`, at or above the
+           review threshold is `review`, and anything lower is `allow`.
+
+        Purchases with the outcome `review` go to the review queue for an
+        analyst. A transaction ID can be scored only once.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScoreRequest"
+            examples:
+              minimal:
+                summary: Only the required fields.
+                value:
+                  transaction_id: txn-10042
+                  event_time: "2026-11-08T10:00:00Z"
+                  amount_minor: 1999
+                  player_id: player-381
+                  card_token: card-7f3a
+              full:
+                summary: Every field.
+                value:
+                  transaction_id: txn-10043
+                  event_time: "2026-11-08T14:00:00+04:00"
+                  amount_minor: 60000
+                  player_id: player-381
+                  card_token: card-7f3a
+                  card_issuer: "9500"
+                  card_network: visa
+                  card_type: debit
+                  card_country: AZ
+                  card_category: "226"
+                  product_code: W
+                  billing_region: "299"
+                  billing_country: "87"
+                  billing_distance: 12.5
+                  email_domain: gmail.com
+                  recipient_email_domain: outlook.com
+                  device_type: mobile
+                  device_name: SM-G991B
+                  device_id: device-55c1
+                  ip_address: 203.0.113.9
+                  ip_country: TR
+                  account_created_at: "2026-11-08T09:00:00Z"
+      responses:
+        "200":
+          description: The purchase was scored and saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoreResponse"
+              examples:
+                allow:
+                  summary: No rule fired.
+                  value:
+                    transaction_id: txn-10042
+                    outcome: allow
+                    score: 0
+                    fired_rules: []
+                    ruleset_version: 1
+                review:
+                  summary: Rules added 60 points, which is above the review threshold of 50.
+                  value:
+                    transaction_id: txn-10044
+                    outcome: review
+                    score: 60
+                    fired_rules:
+                      - name: card_velocity
+                        points: 40
+                      - name: new_account
+                        points: 20
+                    ruleset_version: 1
+                blockedByRules:
+                  summary: Rules added 115 points, which is above the block threshold of 80.
+                  value:
+                    transaction_id: txn-10043
+                    outcome: block
+                    score: 115
+                    fired_rules:
+                      - name: high_amount
+                        points: 30
+                      - name: card_velocity
+                        points: 40
+                      - name: new_account
+                        points: 20
+                      - name: country_mismatch
+                        points: 25
+                    ruleset_version: 1
+                blockedByBlocklist:
+                  summary: A blocklist entry matched, so the rules did not run.
+                  value:
+                    transaction_id: txn-10045
+                    outcome: block
+                    score: 0
+                    fired_rules: []
+                    ruleset_version: 1
+        "400":
+          description: >-
+            The request is not valid. When the problem is about specific
+            fields, `fields` names each one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidField:
+                  summary: A field has a wrong value.
+                  value:
+                    error: invalid request
+                    fields:
+                      amount_minor: must be a positive integer in minor units
+                missingField:
+                  summary: A required field is missing.
+                  value:
+                    error: invalid request
+                    fields:
+                      player_id: is required
+                unknownField:
+                  summary: The body has a field that is not in the request.
+                  value:
+                    error: invalid request
+                    fields:
+                      amount: is not a known field
+                badTime:
+                  summary: A time is not RFC 3339.
+                  value:
+                    error: times must be RFC 3339, for example 2026-11-08T10:00:00Z
+                badJson:
+                  summary: The body is not valid JSON.
+                  value:
+                    error: request body is not valid JSON
+        "401":
+          description: The `X-API-Key` header is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "409":
+          description: A purchase with this transaction ID was already scored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: a purchase with this transaction ID was already scored
+                fields:
+                  transaction_id: is already scored
+        "413":
+          description: The request body is larger than 65536 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: request body must not exceed 65536 bytes
+        "500":
+          description: >-
+            The purchase could not be scored, for example because the database
+            is unreachable. The response never contains the internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >-
+        The key from the `API_KEY` setting of the backend. Use a long random
+        value outside local development.
+
+  schemas:
+    ScoreRequest:
+      type: object
+      description: >-
+        A purchase to score. Fields that are not listed are rejected. Empty
+        optional strings count as omitted.
+      additionalProperties: false
+      required:
+        - transaction_id
+        - event_time
+        - amount_minor
+        - player_id
+        - card_token
+      properties:
+        transaction_id:
+          type: string
+          minLength: 1
+          description: >-
+            Unique ID of the purchase, chosen by the caller. Scoring the same
+            ID twice returns 409.
+          example: txn-10042
+        event_time:
+          type: string
+          format: date-time
+          description: >-
+            When the purchase happened, in RFC 3339 with a time zone. It is
+            converted to UTC.
+          example: "2026-11-08T10:00:00Z"
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Amount in minor units, for example 1999 for 19.99. It must be a
+            positive integer. Decimals and exponent forms such as 1e3 are
+            rejected. Used by the high_amount rule.
+          example: 1999
+        player_id:
+          type: string
+          minLength: 1
+          description: The player who made the purchase. Checked against the blocklist.
+          example: player-381
+        card_token:
+          type: string
+          minLength: 1
+          description: >-
+            Token that stands for the payment card, never the card number.
+            Checked against the blocklist and used by the card_velocity rule.
+          example: card-7f3a
+        card_issuer:
+          type: string
+          description: Identifier of the card issuer.
+          example: "9500"
+        card_network:
+          type: string
+          description: >-
+            Card network. The model knows visa, mastercard, american express,
+            and discover.
+          example: visa
+        card_type:
+          type: string
+          description: >-
+            Card type. The model knows debit, credit, debit or credit, and
+            charge card.
+          example: debit
+        card_country:
+          type: string
+          description: >-
+            Country code of the card. The country_mismatch rule compares it
+            with ip_country, so both must use the same format, for example
+            ISO 3166-1 alpha-2.
+          example: AZ
+        card_category:
+          type: string
+          description: Code of the card category.
+          example: "226"
+        product_code:
+          type: string
+          description: Code of the purchased product. The model knows W, H, C, S, and R.
+          example: W
+        billing_region:
+          type: string
+          description: Code of the billing address region.
+          example: "299"
+        billing_country:
+          type: string
+          description: Code of the billing address country.
+          example: "87"
+        billing_distance:
+          type: number
+          format: double
+          minimum: 0
+          description: Distance between the billing address and the other address of the purchase.
+          example: 12.5
+        email_domain:
+          type: string
+          description: Domain of the purchaser's email address, without the user name.
+          example: gmail.com
+        recipient_email_domain:
+          type: string
+          description: Domain of the recipient's email address, when the purchase is sent to someone else.
+          example: outlook.com
+        device_type:
+          type: string
+          description: Type of the device. The model knows desktop and mobile.
+          example: mobile
+        device_name:
+          type: string
+          description: Name or model of the device.
+          example: SM-G991B
+        device_id:
+          type: string
+          description: Unique ID of the device. Checked against the blocklist.
+          example: device-55c1
+        ip_address:
+          type: string
+          description: >-
+            IPv4 or IPv6 address of the purchase. Checked against the
+            blocklist.
+          example: 203.0.113.9
+        ip_country:
+          type: string
+          description: >-
+            Country code of the IP address. Compared with card_country by the
+            country_mismatch rule.
+          example: TR
+        account_created_at:
+          type: string
+          format: date-time
+          description: >-
+            When the player's account was created, in RFC 3339 with a time
+            zone. It must not be after event_time. Used by the new_account
+            rule.
+          example: "2026-11-08T09:00:00Z"
+
+    ScoreResponse:
+      type: object
+      description: The decision for a scored purchase.
+      required:
+        - transaction_id
+        - outcome
+        - score
+        - fired_rules
+        - ruleset_version
+      properties:
+        transaction_id:
+          type: string
+          description: The transaction ID from the request.
+          example: txn-10042
+        outcome:
+          type: string
+          enum: [allow, review, block]
+          description: >-
+            `allow` lets the purchase through. `review` sends it to an
+            analyst. `block` rejects it, because of a blocklist match or
+            because the rule score reached the block threshold.
+          example: allow
+        score:
+          type: integer
+          minimum: 0
+          description: Total points of the rules that fired. It is 0 for a blocklist match.
+          example: 0
+        fired_rules:
+          type: array
+          description: The rules that fired. The list is empty when none fired.
+          items:
+            $ref: "#/components/schemas/FiredRule"
+        ruleset_version:
+          type: integer
+          description: Version of the ruleset that scored the purchase.
+          example: 1
+
+    FiredRule:
+      type: object
+      description: A rule that fired and the points it added.
+      required:
+        - name
+        - points
+      properties:
+        name:
+          type: string
+          enum: [high_amount, card_velocity, new_account, country_mismatch]
+          description: >-
+            Name of the rule. high_amount fires when the amount reaches its
+            limit. card_velocity fires when the card has enough purchases in
+            the last hour. new_account fires when the account is newer than
+            its limit in hours. country_mismatch fires when the card country
+            differs from the IP country.
+          example: card_velocity
+        points:
+          type: integer
+          description: Points the rule added to the score.
+          example: 40
+
+    ErrorResponse:
+      type: object
+      description: The body of every error response.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: What went wrong, in one sentence.
+          example: invalid request
+        fields:
+          type: object
+          description: >-
+            Present when the error is about specific request fields. Maps each
+            field name to what is wrong with it.
+          additionalProperties:
+            type: string
+          example:
+            amount_minor: must be a positive integer in minor units
