@@ -10,6 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BlocklistEntry struct {
+	ID        int64
+	EntryType string
+	Value     string
+	Reason    string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Decision struct {
 	PurchaseID     int64
 	RulesetVersion int32

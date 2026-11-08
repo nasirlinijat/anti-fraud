@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -24,6 +25,11 @@ type Rulesets interface {
 	Active(ctx context.Context) (scoring.Ruleset, error)
 }
 
+// Blocklist finds the blocklist entry that matches a purchase.
+type Blocklist interface {
+	Match(ctx context.Context, s blocklist.Subject) (blocklist.Entry, bool, error)
+}
+
 // Purchases reads purchase history and saves scored purchases.
 type Purchases interface {
 	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
@@ -33,11 +39,12 @@ type Purchases interface {
 // Handler serves the score endpoint.
 type Handler struct {
 	rulesets  Rulesets
+	blocklist Blocklist
 	purchases Purchases
 }
 
-func NewHandler(rulesets Rulesets, purchases Purchases) *Handler {
-	return &Handler{rulesets: rulesets, purchases: purchases}
+func NewHandler(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Handler {
+	return &Handler{rulesets: rulesets, blocklist: blocklist, purchases: purchases}
 }
 
 // RegisterRoutes registers POST /score behind API key authentication.
@@ -98,23 +105,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, p, err)
 		return
 	}
-	cardUses, err := h.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
+
+	// A blocklist match blocks the purchase before the rules run.
+	_, blocked, err := h.blocklist.Match(ctx, blocklist.Subject{
+		CardToken: p.CardToken,
+		PlayerID:  p.PlayerID,
+		DeviceID:  p.DeviceID,
+		IPAddress: p.IPAddress,
+	})
 	if err != nil {
 		h.internalError(w, p, err)
 		return
 	}
 
-	in := scoring.Input{
-		AmountMinor:           p.AmountMinor,
-		IPCountry:             p.IPCountry,
-		AccountCreatedAt:      p.AccountCreatedAt,
-		EventTime:             p.EventTime,
-		CardPurchasesLastHour: cardUses,
+	var result scoring.Result
+	if blocked {
+		result = scoring.Result{Outcome: scoring.OutcomeBlock}
+	} else {
+		cardUses, err := h.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
+		if err != nil {
+			h.internalError(w, p, err)
+			return
+		}
+
+		in := scoring.Input{
+			AmountMinor:           p.AmountMinor,
+			IPCountry:             p.IPCountry,
+			AccountCreatedAt:      p.AccountCreatedAt,
+			EventTime:             p.EventTime,
+			CardPurchasesLastHour: cardUses,
+		}
+		if p.CardCountry != nil {
+			in.CardCountry = *p.CardCountry
+		}
+		result = scoring.Evaluate(in, rs)
 	}
-	if p.CardCountry != nil {
-		in.CardCountry = *p.CardCountry
-	}
-	result := scoring.Evaluate(in, rs)
 	if result.FiredRules == nil {
 		result.FiredRules = []scoring.FiredRule{}
 	}
