@@ -94,7 +94,8 @@ anti-fraud/
 ├── CLAUDE.md                 Imports this file for Claude Code
 ├── README.md                 Prerequisites and local setup
 ├── Makefile                  Development commands
-├── docker-compose.yml        Local PostgreSQL, backend, migration runner, and sqlc
+├── openapi.yaml              Hand-written OpenAPI spec of the score API
+├── docker-compose.yml        Local PostgreSQL, backend, migration runner, sqlc, and Swagger UI
 ├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
@@ -124,6 +125,7 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
 | `make generate` | Regenerates the database code from the SQL queries |
+| `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing.
 

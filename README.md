@@ -76,6 +76,21 @@ Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
 | `make generate` | Regenerates the database code from the SQL queries |
+| `make docs` | Shows the API spec in Swagger UI at http://localhost:8090 |
+
+## API Documentation
+
+The score API is described in `openapi.yaml`, which is written by hand. It lists every field of the score request and response, the error responses, and the API key header.
+
+To read it in Swagger UI, run:
+
+```bash
+make docs
+```
+
+Then open http://localhost:8090 and stop the server with Ctrl+C. To use another port, set `SWAGGER_PORT` in `.env`. Swagger UI only shows the API. Its "Try it out" button cannot call the backend from the browser, because the backend does not allow cross-origin requests. Use `curl` as in the setup steps instead.
+
+When the score request or response changes, change `openapi.yaml` in the same pull request.
 
 ## Frontend
 
