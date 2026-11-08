@@ -10,8 +10,9 @@ A real-time fraud scoring and review console for in-game purchases.
 | Docker with the Compose plugin | Docker Engine running, Compose v2 |
 | GNU Make | Any recent version |
 | Go | 1.26.5 or newer |
+| Node.js | 26 or newer, with npm |
 
-Go is needed for `make run`, `make test`, and `make lint`. The other commands run in Docker.
+Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for the frontend. The other commands run in Docker.
 
 ## Setup
 
@@ -65,6 +66,34 @@ Go is needed for `make run`, `make test`, and `make lint`. The other commands ru
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
 | `make generate` | Regenerates the database code from the SQL queries |
+
+## Frontend
+
+The frontend is a React and TypeScript app in `frontend/`, built with [Vite](https://vite.dev).
+
+1. Start the backend with `make up` or `make run`.
+2. Install the dependencies once:
+
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+3. Start the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+4. Open http://localhost:5173. The page shows whether the backend is ready.
+
+The development server forwards backend requests to `http://localhost:8080`, so the browser needs no CORS setup. If the backend runs on another port, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Starts the development server with hot reload |
+| `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
+| `npm run build` | Type checks and builds the production files into `frontend/dist/` |
 
 ## Database Queries
 
