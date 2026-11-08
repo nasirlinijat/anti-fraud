@@ -38,8 +38,8 @@ type Ruleset struct {
 
 // FiredRule is a rule that fired and the points it added.
 type FiredRule struct {
-	Name   RuleName
-	Points int
+	Name   RuleName `json:"name"`
+	Points int      `json:"points"`
 }
 
 // Result is the scoring decision for one purchase.

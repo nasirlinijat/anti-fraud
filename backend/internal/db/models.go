@@ -5,8 +5,48 @@
 package db
 
 import (
+	"net/netip"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type Decision struct {
+	PurchaseID     int64
+	RulesetVersion int32
+	Outcome        string
+	RuleScore      int32
+	FiredRules     []byte
+	ModelInputs    []byte
+	ModelScore     pgtype.Float8
+	DecidedAt      pgtype.Timestamptz
+}
+
+type Purchase struct {
+	ID                   int64
+	TransactionID        string
+	EventTime            pgtype.Timestamptz
+	AmountMinor          int64
+	PlayerID             string
+	CardToken            string
+	CardIssuer           pgtype.Text
+	CardNetwork          pgtype.Text
+	CardType             pgtype.Text
+	CardCountry          pgtype.Text
+	CardCategory         pgtype.Text
+	ProductCode          pgtype.Text
+	BillingRegion        pgtype.Text
+	BillingCountry       pgtype.Text
+	BillingDistance      pgtype.Float8
+	EmailDomain          pgtype.Text
+	RecipientEmailDomain pgtype.Text
+	DeviceType           pgtype.Text
+	DeviceName           pgtype.Text
+	DeviceID             pgtype.Text
+	IpAddress            *netip.Addr
+	IpCountry            pgtype.Text
+	AccountCreatedAt     pgtype.Timestamptz
+	ReceivedAt           pgtype.Timestamptz
+}
 
 type Ruleset struct {
 	Version         int32
