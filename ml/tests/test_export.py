@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -23,6 +24,21 @@ def test_tree_reader_matches_lightgbm(model_and_rows):
     dump = model.booster_.dump_model()
     reproduced = export.predict_from_dump(dump, rows.to_numpy())
     assert np.max(np.abs(reproduced - model.predict_proba(rows)[:, 1])) < 1e-9
+
+
+def test_fast_reader_matches_tree_reader(model_and_rows):
+    model, rows, _ = model_and_rows
+    dump = model.booster_.dump_model()
+    values = rows.to_numpy()
+    assert np.max(np.abs(export.predict_fast(dump, values) - export.predict_from_dump(dump, values))) < 1e-12
+
+
+def test_fast_reader_matches_exported_golden_rows():
+    models = Path(__file__).resolve().parents[2] / "backend" / "models"
+    dump = json.loads((models / "lgbm-ieee-v3.json").read_text())
+    golden = pd.read_csv(models / "lgbm-ieee-v3.golden.csv")
+    scores = export.predict_fast(dump, golden[dump["feature_names"]].to_numpy())
+    assert np.max(np.abs(scores - golden["expected"].to_numpy())) < 1e-9
 
 
 def test_unsupported_split_is_rejected():

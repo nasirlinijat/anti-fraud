@@ -39,6 +39,61 @@ The export fails if the model uses a split type the Go reader does not support, 
 
 Trains one model per feature set (base, base plus each group, all groups, all minus each group) and prints test ROC-AUC, PR-AUC, first-fraud PR-AUC and precision at fixed false-positive rates. Groups are defined in `FEATURE_GROUPS` in `features.py`; `SELECTED_GROUPS` picks the ones the model uses. Results are written to `output/experiments.json`.
 
+## Replay through the score API
+
+`replay.py` sends IEEE-CIS purchases to a running backend through `POST /score`, in time order and in the API format, and compares the live decisions with Python. Fraud labels never reach the service; they stay in the script and in the report.
+
+The live features count every purchase already saved, so the backend must start from an empty database. To keep your development data, use a separate database:
+
+```bash
+docker compose exec db createdb -U antifraud antifraud_replay
+docker compose run --rm migrate -path=/migrations "-database=postgres://antifraud:antifraud@db:5432/antifraud_replay?sslmode=disable" up
+```
+
+Then run a second backend on it from `backend` (PowerShell):
+
+```powershell
+$env:PORT="8082"; $env:API_KEY="replay-key"; $env:MODEL_PATH="models/lgbm-ieee-v3.json"; $env:DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud_replay?sslmode=disable"; go run ./cmd/api
+```
+
+Use the `POSTGRES_PORT` from `.env` in `DATABASE_URL`. Then, from `ml`:
+
+```bash
+.venv/Scripts/python replay.py data/train_transaction.csv --url http://localhost:8082 --api-key replay-key
+```
+
+By default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 3000` for a quick check. A full run sends about 170,000 purchases and takes about 45 minutes on a laptop. To run again, empty the tables first with `TRUNCATE decisions, purchases, feature_counts` in that database.
+
+It writes to `output/replay/`:
+
+| File | Content |
+|---|---|
+| `replay_report.json` | Live vs Python score differences, test month quality of the live model score, rules only vs rules and model, and latency |
+| `replay_rows.csv` | One row per purchase: label, Python score, live score, outcome, rule score and latency |
+
+The Python score comes from the same features computed on the same replayed purchases and the exported model, so it should equal the live score up to float rounding. Because the replay starts with only 30 days of history, the test month scores are lower than in the training report, which uses the history from day 1.
+
+### Results (days 123 to 182, run on 2026-11-09)
+
+| Check | Result |
+|---|---|
+| Purchases sent | 170,474 in 37.5 minutes, none failed |
+| Live score equals Python score (within 1e-9) | 170,465 of 170,474 (99.995%) |
+| Largest score difference | 0.0008, on 9 purchases |
+| Same flag decision as Python | 100% |
+| Latency p50 / p95 / p99 | 11.2 / 24.6 / 39.7 ms |
+
+The 9 differences all come from `player_avg_amount`. The service computes it from whole cents (57.95), while `features.py` adds float amounts (57.950000000000045). The model has a split at that value, so one tree takes the other branch. No decision changed. Computing the average from `amount_minor` in `features.py` and retraining would remove the difference.
+
+Test month (days 153 to 182, 85,430 purchases, 3.5% fraud):
+
+| Decision | Sent to review | Fraud among them | Fraud stopped |
+|---|---|---|---|
+| Rules only | 0.14% | 4.2% | 0.17% |
+| Rules and model | 2.25% | 26.4% | 17.0% |
+
+The live model score has ROC-AUC 0.829 and PR-AUC 0.188, the same as Python. Rules alone stop almost nothing here, because IEEE-CIS has no IP country or account creation time, so two of the four rules never fire. The model flags 2.1% of purchases instead of the 1% expected from training, because its history features see only 30 days.
+
 ## Tests
 
 ```bash
