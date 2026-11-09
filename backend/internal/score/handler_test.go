@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -41,18 +42,24 @@ type fakeRulesets struct {
 func (f fakeRulesets) Active(context.Context) (scoring.Ruleset, error) { return f.rs, f.err }
 
 type fakePurchases struct {
-	cardUses  int
-	countErr  error
-	saveErr   error
-	countCard string
-	countAt   time.Time
-	saved     []Purchase
-	decisions []Decision
+	cardUses   int
+	countErr   error
+	historyErr error
+	history    features.History
+	saveErr    error
+	countCard  string
+	countAt    time.Time
+	saved      []Purchase
+	decisions  []Decision
 }
 
 func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
 	f.countCard, f.countAt = card, at
 	return f.cardUses, f.countErr
+}
+
+func (f *fakePurchases) FeatureHistory(context.Context, features.Input) (features.History, error) {
+	return f.history, f.historyErr
 }
 
 func (f *fakePurchases) Save(_ context.Context, p Purchase, d Decision) (int64, error) {
@@ -149,8 +156,11 @@ func TestScoreAllowsMinimalPurchase(t *testing.T) {
 		t.Errorf("saved purchases = %+v, want [%+v]", purchases.saved, wantPurchase)
 	}
 	d := purchases.decisions[0]
-	if d.RulesetVersion != 7 || d.Result.Outcome != scoring.OutcomeAllow || d.ModelScore != nil || d.ModelInputs == nil {
-		t.Errorf("saved decision = %+v, want ruleset 7, allow, no model score, empty model inputs", d)
+	if d.RulesetVersion != 7 || d.Result.Outcome != scoring.OutcomeAllow || d.ModelScore != nil {
+		t.Errorf("saved decision = %+v, want ruleset 7, allow, no model score", d)
+	}
+	if len(d.ModelInputs) != len(features.Names) || d.ModelInputs["amount"] != 19.99 || d.ModelInputs["player_txn_count"] != 0 {
+		t.Errorf("model inputs = %v, want all %d features with amount 19.99 and no history", d.ModelInputs, len(features.Names))
 	}
 }
 
@@ -326,6 +336,7 @@ func TestScoreInternalErrors(t *testing.T) {
 	}{
 		{"ruleset", fakeRulesets{err: boom}, &fakePurchases{}},
 		{"history", fakeRulesets{rs: testRuleset}, &fakePurchases{countErr: boom}},
+		{"feature history", fakeRulesets{rs: testRuleset}, &fakePurchases{historyErr: boom}},
 		{"save", fakeRulesets{rs: testRuleset}, &fakePurchases{saveErr: boom}},
 	}
 	for _, tt := range tests {

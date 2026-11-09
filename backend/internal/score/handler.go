@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -33,6 +34,7 @@ type Blocklist interface {
 // Purchases reads purchase history and saves scored purchases.
 type Purchases interface {
 	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
+	FeatureHistory(ctx context.Context, in features.Input) (features.History, error)
 	Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 }
 
@@ -118,6 +120,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Model inputs are computed for every purchase, blocked ones too, so that
+	// all saved purchases can be exported for training.
+	in := p.FeatureInput()
+	history, err := h.purchases.FeatureHistory(ctx, in)
+	if err != nil {
+		h.internalError(w, p, err)
+		return
+	}
+	modelInputs := features.Map(features.Vector(in, history))
+
 	var result scoring.Result
 	if blocked {
 		result = scoring.Result{Outcome: scoring.OutcomeBlock}
@@ -147,7 +159,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, err = h.purchases.Save(ctx, p, Decision{
 		RulesetVersion: rs.Version,
 		Result:         result,
-		ModelInputs:    map[string]float64{},
+		ModelInputs:    modelInputs,
+		FeatureHistory: history,
 	})
 	if errors.Is(err, ErrDuplicateTransaction) {
 		platform.WriteJSON(w, http.StatusConflict, platform.ErrorResponse{

@@ -29,6 +29,13 @@ type Decision struct {
 	DecidedAt      pgtype.Timestamptz
 }
 
+type FeatureCount struct {
+	Kind      string
+	Key       string
+	Purchases int64
+	Players   int64
+}
+
 type Purchase struct {
 	ID                   int64
 	TransactionID        string
