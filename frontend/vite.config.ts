@@ -21,6 +21,8 @@ export default defineConfig(({ mode }) => {
         '/ready': backendUrl,
         // The tester uses the API key from the dev server.
         '/score': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        '/stats': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        '/blocklist': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
         // Forward the key entered in the review queue.
         '/reviews': backendUrl,
       },
