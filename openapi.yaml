@@ -104,6 +104,7 @@ paths:
                     score: 0
                     fired_rules: []
                     ruleset_version: 1
+                    model_score: 0.0074
                 review:
                   summary: Rules added 60 points, which is above the review threshold of 50.
                   value:
@@ -116,6 +117,7 @@ paths:
                       - name: new_account
                         points: 20
                     ruleset_version: 1
+                    model_score: 0.0074
                 blockedByRules:
                   summary: Rules added 115 points, which is above the block threshold of 80.
                   value:
@@ -132,6 +134,7 @@ paths:
                       - name: country_mismatch
                         points: 25
                     ruleset_version: 1
+                    model_score: 0.0074
                 blockedByBlocklist:
                   summary: A blocklist entry matched, so the rules did not run.
                   value:
@@ -140,6 +143,7 @@ paths:
                     score: 0
                     fired_rules: []
                     ruleset_version: 1
+                    model_score: 0.0074
         "400":
           description: >-
             The request is not valid. When the problem is about specific
@@ -366,6 +370,7 @@ components:
         - score
         - fired_rules
         - ruleset_version
+        - model_score
       properties:
         transaction_id:
           type: string
@@ -377,7 +382,10 @@ components:
           description: >-
             `allow` lets the purchase through. `review` sends it to an
             analyst. `block` rejects it, because of a blocklist match or
-            because the rule score reached the block threshold.
+            because the rule score reached the block threshold. When a fraud
+            model is loaded, a review with a model score below `clear_below`
+            becomes `allow`, and an allow with a model score at or above
+            `flag_at` becomes `review`. The model never blocks a purchase.
           example: allow
         score:
           type: integer
@@ -393,6 +401,16 @@ components:
           type: integer
           description: Version of the ruleset that scored the purchase.
           example: 1
+        model_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: >-
+            Fraud risk from the model, from 0 to 1. It is null when the
+            service runs without a model (MODEL_PATH is empty).
+          example: 0.0074
 
     FiredRule:
       type: object

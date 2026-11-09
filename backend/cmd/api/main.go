@@ -18,16 +18,6 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	if cfg.ModelPath == "" {
-		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
-	} else {
-		model, err := lgbm.Load(cfg.ModelPath)
-		if err != nil {
-			log.Fatalf("load fraud model: %v", err)
-		}
-		log.Printf("fraud model %s loaded: %d trees, %d features", model.Version(), model.Trees(), len(model.Features()))
-	}
-
 	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("create database pool: %v", err)
@@ -36,7 +26,25 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
-	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(pool), blocklist.NewStore(pool), score.NewStore(pool)), cfg.APIKey)
+	handler := score.NewHandler(rulesets.NewStore(pool), blocklist.NewStore(pool), score.NewStore(pool))
+	if cfg.ModelPath == "" {
+		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
+	} else {
+		model, err := lgbm.Load(cfg.ModelPath)
+		if err != nil {
+			log.Fatalf("load fraud model: %v", err)
+		}
+		policy, err := lgbm.LoadPolicy(lgbm.ReportPath(cfg.ModelPath))
+		if err != nil {
+			log.Fatalf("load fraud model policy: %v", err)
+		}
+		if err := handler.UseModel(model, policy); err != nil {
+			log.Fatalf("use fraud model %s: %v", model.Version(), err)
+		}
+		log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
+			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
+	}
+	score.RegisterRoutes(mux, handler, cfg.APIKey)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
 	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
