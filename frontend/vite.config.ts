@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
         // The proxy adds the API key, so it never reaches the browser.
         '/score': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
         '/stats': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        '/blocklist': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
       },
     },
   }

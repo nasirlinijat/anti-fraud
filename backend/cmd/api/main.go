@@ -47,6 +47,7 @@ func main() {
 	}
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
+	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
 	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())

@@ -28,6 +28,8 @@ tags:
     description: Score a purchase.
   - name: Stats
     description: Decision statistics for the dashboard.
+  - name: Blocklist
+    description: Manage blocked cards, devices, players and IP addresses.
 
 paths:
   /score:
@@ -265,6 +267,171 @@ paths:
                 error: missing or invalid API key
         "500":
           description: The statistics could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+
+  /blocklist:
+    get:
+      tags: [Blocklist]
+      operationId: listBlocklist
+      summary: List blocklist entries
+      description: Returns all entries, the newest first.
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: All entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BlocklistEntry"
+        "401":
+          description: The API key is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "500":
+          description: The entries could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+    post:
+      tags: [Blocklist]
+      operationId: addBlocklistEntry
+      summary: Add a blocklist entry
+      description: |
+        Blocks a card token, device ID, player ID or IP address. The entry
+        applies to the next scored purchase. Values and reasons are trimmed.
+        IP addresses are stored in canonical form, so `::ffff:203.0.113.9`
+        is saved as `203.0.113.9`.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, value, reason]
+              additionalProperties: false
+              properties:
+                type:
+                  type: string
+                  enum: [card, device, player, ip]
+                value:
+                  type: string
+                  maxLength: 200
+                  example: 203.0.113.9
+                reason:
+                  type: string
+                  maxLength: 500
+                  example: proxy used in card testing
+      responses:
+        "201":
+          description: The saved entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlocklistEntry"
+        "400":
+          description: The entry is not valid. `fields` names each problem.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: invalid request
+                fields:
+                  value: must be an IPv4 or IPv6 address
+                  reason: is required
+        "401":
+          description: The API key is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "409":
+          description: The same type and value are already on the blocklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: this value is already on the blocklist
+                fields:
+                  value: is already on the blocklist
+        "500":
+          description: The entry could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+
+  /blocklist/{id}:
+    delete:
+      tags: [Blocklist]
+      operationId: removeBlocklistEntry
+      summary: Remove a blocklist entry
+      description: The value is no longer blocked from the next scored purchase on.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "204":
+          description: The entry was removed.
+        "400":
+          description: The ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: the entry ID must be a positive integer
+        "401":
+          description: The API key is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "404":
+          description: No entry has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: no blocklist entry has this ID
+        "500":
+          description: The entry could not be removed.
           content:
             application/json:
               schema:
@@ -534,6 +701,26 @@ components:
             scored: { type: integer, minimum: 0, description: Decisions with a model score. }
             flagged: { type: integer, minimum: 0, description: Purchases the rules allowed and the model sent to review. }
             cleared: { type: integer, minimum: 0, description: Purchases the rules sent to review and the model allowed. }
+
+    BlocklistEntry:
+      type: object
+      required: [id, type, value, reason, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        type:
+          type: string
+          enum: [card, device, player, ip]
+        value:
+          type: string
+          example: 203.0.113.9
+        reason:
+          type: string
+          example: proxy used in card testing
+        created_at:
+          type: string
+          format: date-time
 
     ErrorResponse:
       type: object

@@ -386,3 +386,41 @@ td {
   border-radius: 999px;
   background: var(--accent);
 }
+
+.blocklist h2 {
+  margin-top: 0;
+}
+
+.blocklist-form {
+  margin-bottom: 0.5rem;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.field select {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.blocklist-form button[type='submit'] {
+  margin-top: 1rem;
+}
+
+.blocklist td button {
+  padding: 0.25rem 0.75rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
