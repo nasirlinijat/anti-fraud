@@ -246,6 +246,8 @@ def main():
     })
     rows = pd.concat([rows, live], axis=1)
     rows.to_csv(out_dir / "replay_rows.csv", index=False)
+    # Labels stay outside the service; train.py --inputs joins them with the export.
+    rows[["transaction_id", "is_fraud"]].to_csv(out_dir / "labels.csv", index=False)
 
     report = build_report(rows, args, policy)
     (out_dir / "replay_report.json").write_text(json.dumps(report, indent=2))

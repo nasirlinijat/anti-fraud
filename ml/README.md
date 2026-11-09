@@ -112,6 +112,30 @@ Test month (days 153 to 182, 85,430 purchases, 3.5% fraud), model v3:
 
 The live model score has ROC-AUC 0.829 and PR-AUC 0.188, the same as Python. Rules alone stop almost nothing here, because IEEE-CIS has no IP country or account creation time, so two of the four rules never fire. The model flags 2.1% of purchases instead of the 1% expected from training, because its history features see only 30 days.
 
+## Train on the service's own data
+
+The service saves the 48 model inputs with every decision. Training can use them instead of the IEEE-CIS CSV, so a model learns from real traffic and is guaranteed to see exactly the values the service computes.
+
+1. Export the saved inputs (from `backend`):
+
+   ```bash
+   go run ./cmd/export-inputs -database "$DATABASE_URL" -out model_inputs.csv
+   ```
+
+   One row per decision, in event time order: `transaction_id`, `event_time`, `player_id`, `model_score`, then the features. Decisions saved for another feature list (an older model) are skipped and counted.
+
+2. Prepare a labels file kept outside the service: `transaction_id,is_fraud`. For the IEEE-CIS replay, `replay.py` writes `labels.csv` next to its report. For live traffic it comes from chargebacks and analyst decisions; analyst decisions are only ever labels, never model inputs, and the scoring code never reads this file.
+
+3. Train (from `ml`):
+
+   ```bash
+   .venv/Scripts/python train.py --inputs model_inputs.csv --labels labels.csv --train-days 123-150 --validation-days 151-165 --test-days 166-183
+   ```
+
+   `day` counts whole days since `--day-zero` (the replay's start by default). Purchases without a label are left out.
+
+Check (2026-11-10): 30,000 purchases replayed through the service and exported matched the Python features exactly on all 48 columns, and training from the export produced a model file identical to training from the Python features (test ROC-AUC 0.818, days 123-128 / 129-130 / 131-132).
+
 ## Tests
 
 ```bash

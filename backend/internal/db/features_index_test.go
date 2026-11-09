@@ -45,6 +45,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"TopFiredRules", topFiredRules, []any{at, int32(10)}},
 		{"CountReviewQueue", countReviewQueue, nil},
 		{"CountModelEffects", countModelEffects, []any{at}},
+		{"ListModelInputs", listModelInputs, []any{at, "txn-1", int32(5000)}},
 	}
 	for _, q := range queries {
 		t.Run(q.name, func(t *testing.T) {

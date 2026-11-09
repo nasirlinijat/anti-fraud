@@ -274,8 +274,36 @@ def build(df):
     return out
 
 
-def split(data):
-    train = data[(data["day"] > WARM_UP_DAYS) & (data["day"] <= 120)]
-    validation = data[(data["day"] >= 136) & (data["day"] <= 152)]
-    test = data[data["day"] >= 153]
-    return train, validation, test
+# Train, validation and test days for IEEE-CIS: days 1-30 only build history,
+# and days 121-135 keep training and validation apart.
+SPLIT_DAYS = {"train": (WARM_UP_DAYS + 1, 120), "validation": (136, 152), "test": (153, 183)}
+
+
+def split(data, days=None):
+    days = days or SPLIT_DAYS
+
+    def between(first, last):
+        return data[(data["day"] >= first) & (data["day"] <= last)]
+
+    return between(*days["train"]), between(*days["validation"]), between(*days["test"])
+
+
+def load_export(inputs_path, labels_path, day_zero):
+    """Reads model inputs exported by the service (backend/cmd/export-inputs)
+    and joins fraud labels from a separate CSV with transaction_id and
+    is_fraud. Purchases without a label are left out. day counts whole days
+    since day_zero, so the IEEE-CIS replay keeps its day numbers."""
+    inputs = pd.read_csv(inputs_path, dtype={"transaction_id": str, "player_id": str})
+    missing = [name for name in FEATURES if name not in inputs.columns]
+    if missing:
+        raise ValueError(f"export has no columns {missing}; it was made for another feature list")
+    labels = pd.read_csv(labels_path, dtype={"transaction_id": str})[["transaction_id", "is_fraud"]]
+    data = inputs.merge(labels, on="transaction_id", how="inner")
+    event_time = pd.to_datetime(data["event_time"], utc=True)
+    data["day"] = ((event_time - pd.Timestamp(day_zero)).dt.total_seconds() // SECONDS_PER_DAY).astype(int)
+    data = data.sort_values(["event_time", "transaction_id"], kind="stable").reset_index(drop=True)
+    out = data[FEATURES].astype(float)
+    out["is_fraud"] = data["is_fraud"].astype(int).to_numpy()
+    out["day"] = data["day"].to_numpy()
+    out["player_id"] = data["player_id"].to_numpy()
+    return out, len(inputs) - len(data)

@@ -132,6 +132,39 @@ def test_player_average_uses_minor_units(raw):
     assert built.loc[7, "player_avg_amount"] == (5000 + 2000 + 5000 + 25000) / 100 / 4
 
 
+def test_split_with_other_days():
+    data = pd.DataFrame({"day": np.arange(0, 50)})
+    train, validation, test = features.split(data, {"train": (1, 10), "validation": (20, 25), "test": (40, 49)})
+    assert (train["day"].min(), train["day"].max()) == (1, 10)
+    assert (validation["day"].min(), validation["day"].max()) == (20, 25)
+    assert (test["day"].min(), test["day"].max()) == (40, 49)
+
+
+def test_load_export_joins_labels_and_counts_days(tmp_path):
+    expected = pd.read_csv(TESTDATA / "expected_features.csv")
+    raw = features.load(TESTDATA / "transactions.csv")
+    start = pd.Timestamp("2017-12-01T00:00:00Z")
+    export = expected[["TransactionID", *features.FEATURES]].rename(columns={"TransactionID": "transaction_id"})
+    export.insert(1, "event_time", [(start + pd.Timedelta(seconds=int(s))).strftime("%Y-%m-%dT%H:%M:%SZ") for s in raw["TransactionDT"]])
+    export.insert(2, "player_id", ["p1"] * 4 + ["p2"] * 2 + ["p1", "p3"])
+    export.insert(3, "model_score", "")
+    export.to_csv(tmp_path / "inputs.csv", index=False)
+    pd.DataFrame({"transaction_id": [str(i) for i in range(1, 8)], "is_fraud": [0, 0, 0, 1, 0, 0, 0]}).to_csv(tmp_path / "labels.csv", index=False)
+
+    data, unlabelled = features.load_export(tmp_path / "inputs.csv", tmp_path / "labels.csv", start)
+    assert unlabelled == 1
+    assert len(data) == 7 and data["is_fraud"].tolist() == [0, 0, 0, 1, 0, 0, 0]
+    assert data["day"].tolist() == (raw["TransactionDT"].head(7) // features.SECONDS_PER_DAY).tolist()
+    pd.testing.assert_frame_equal(data[features.FEATURES], expected[features.FEATURES].head(7).astype(float))
+
+
+def test_load_export_rejects_another_feature_list(tmp_path):
+    pd.DataFrame({"transaction_id": ["1"], "event_time": ["2017-12-01T00:00:00Z"], "player_id": ["p"], "model_score": [""], "hour_of_day": [1.0]}).to_csv(tmp_path / "inputs.csv", index=False)
+    pd.DataFrame({"transaction_id": ["1"], "is_fraud": [0]}).to_csv(tmp_path / "labels.csv", index=False)
+    with pytest.raises(ValueError):
+        features.load_export(tmp_path / "inputs.csv", tmp_path / "labels.csv", "2017-12-01T00:00:00Z")
+
+
 def test_split_follows_days_and_skips_warm_up():
     data = pd.DataFrame({"day": np.arange(0, 184)})
     train, validation, test = features.split(data)

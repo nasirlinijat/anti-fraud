@@ -97,12 +97,19 @@ def first_fraud_only(data):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("csv")
+    parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
     parser.add_argument("--out", default="output")
     parser.add_argument("--version", default="lgbm-ieee-v4")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)
+    parser.add_argument("--inputs", help="train from model inputs exported by the service instead of the IEEE-CIS CSV")
+    parser.add_argument("--labels", help="CSV with transaction_id and is_fraud, needed with --inputs")
+    parser.add_argument("--day-zero", default="2017-12-01T00:00:00Z",
+                        help="with --inputs, the time of day 0 (the replay's start by default)")
+    parser.add_argument("--train-days", default=None, help="first-last day used for training, for example 31-120")
+    parser.add_argument("--validation-days", default=None, help="first-last validation day")
+    parser.add_argument("--test-days", default=None, help="first-last test day")
     parser.add_argument(
         "--review-cost", type=float,
         help="cost of reviewing one purchase, in the purchase currency; when set, "
@@ -112,10 +119,22 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(exist_ok=True)
 
+    days = dict(features.SPLIT_DAYS)
+    for name, value in [("train", args.train_days), ("validation", args.validation_days), ("test", args.test_days)]:
+        if value:
+            first, last = (int(part) for part in value.split("-"))
+            days[name] = (first, last)
+
     started = time.time()
-    data = features.build(features.load(args.csv))
+    if args.inputs:
+        if not args.labels:
+            parser.error("--inputs needs --labels")
+        data, unlabelled = features.load_export(args.inputs, args.labels, args.day_zero)
+        print(f"read {len(data)} exported purchases with labels; {unlabelled} without a label left out")
+    else:
+        data = features.build(features.load(args.csv))
     keep = first_fraud_only(data)
-    train, validation, test = features.split(data)
+    train, validation, test = features.split(data, days)
     print(f"features built in {time.time() - started:.0f}s: train {len(train)}, validation {len(validation)}, test {len(test)}")
 
     x_train, y_train = train[features.FEATURES], train["is_fraud"].to_numpy()
@@ -124,7 +143,11 @@ def main():
     test_keep = keep.loc[test.index].to_numpy()
     val_amount, test_amount = validation["amount"].to_numpy(), test["amount"].to_numpy()
 
-    report = {"features": features.FEATURES, "split_days": {"history_only": f"1-{features.WARM_UP_DAYS}", "train": f"{features.WARM_UP_DAYS + 1}-120", "validation": "136-152", "test": "153-183"}}
+    report = {
+        "features": features.FEATURES,
+        "data": "service export" if args.inputs else "IEEE-CIS",
+        "split_days": {name: f"{first}-{last}" for name, (first, last) in days.items()},
+    }
 
     baseline = baseline_model().fit(x_train, y_train)
     baseline_test = baseline.predict_proba(x_test)[:, 1]
