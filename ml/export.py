@@ -71,6 +71,43 @@ def predict_from_dump(dump, rows):
     return np.array([1 / (1 + math.exp(-sum(tree_value(tree, row) for tree in trees))) for row in rows])
 
 
+def flatten_tree(root):
+    """Turns a nested tree into arrays: split feature (-1 for a leaf), threshold
+    or leaf value, and the left and right child indexes."""
+    feature, value, left, right = [], [], [], []
+
+    def walk(node):
+        index = len(feature)
+        feature.append(node.get("split_feature", -1))
+        value.append(node["threshold"] if "split_feature" in node else node["leaf_value"])
+        left.append(-1)
+        right.append(-1)
+        if "split_feature" in node:
+            left[index] = walk(node["left_child"])
+            right[index] = walk(node["right_child"])
+        return index
+
+    walk(root)
+    return np.array(feature), np.array(value, dtype=float), np.array(left), np.array(right)
+
+
+def predict_fast(dump, rows):
+    """Same scores as predict_from_dump, computed for all rows at once."""
+    rows = np.asarray(rows, dtype=float)
+    total = np.zeros(len(rows))
+    for info in dump["tree_info"]:
+        feature, value, left, right = flatten_tree(info["tree_structure"])
+        node = np.zeros(len(rows), dtype=np.int64)
+        active = np.nonzero(feature[node] >= 0)[0]
+        while len(active):
+            current = node[active]
+            go_left = rows[active, feature[current]] <= value[current]
+            node[active] = np.where(go_left, left[current], right[current])
+            active = active[feature[node[active]] >= 0]
+        total += value[node]
+    return 1 / (1 + np.exp(-total))
+
+
 def export(model, feature_names, version, out_dir, golden_rows, report):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
