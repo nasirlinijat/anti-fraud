@@ -4,27 +4,35 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
-// Store reads rulesets from the database.
-type Store struct {
-	q *db.Queries
+// Conn runs queries and starts transactions.
+type Conn interface {
+	db.DBTX
+	Begin(context.Context) (pgx.Tx, error)
 }
 
-func NewStore(conn db.DBTX) *Store {
-	return &Store{q: db.New(conn)}
+// Store reads and publishes rulesets.
+type Store struct {
+	conn Conn
+}
+
+func NewStore(conn Conn) *Store {
+	return &Store{conn: conn}
 }
 
 // Active returns the active ruleset with its rules.
 func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
-	row, err := s.q.GetActiveRuleset(ctx)
+	q := db.New(s.conn)
+	row, err := q.GetActiveRuleset(ctx)
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("get active ruleset: %w", err)
 	}
 
-	ruleRows, err := s.q.ListRulesetRules(ctx, row.Version)
+	ruleRows, err := q.ListRulesetRules(ctx, row.Version)
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("list rules of ruleset %d: %w", row.Version, err)
 	}
@@ -48,4 +56,41 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 		BlockThreshold:  int(row.BlockThreshold),
 		Rules:           rules,
 	}, nil
+}
+
+// Publish saves a new version and activates it in the same transaction.
+func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Ruleset, error) {
+	err := pgx.BeginFunc(ctx, s.conn, func(tx pgx.Tx) error {
+		q := db.New(tx)
+		if err := q.LockRulesetsForPublish(ctx); err != nil {
+			return fmt.Errorf("lock rulesets: %w", err)
+		}
+		if err := q.DeactivateRuleset(ctx); err != nil {
+			return fmt.Errorf("deactivate ruleset: %w", err)
+		}
+		version, err := q.InsertRuleset(ctx, db.InsertRulesetParams{
+			ReviewThreshold: int32(rs.ReviewThreshold),
+			BlockThreshold:  int32(rs.BlockThreshold),
+		})
+		if err != nil {
+			return fmt.Errorf("insert ruleset: %w", err)
+		}
+		for name, rule := range rs.Rules {
+			if err := q.InsertRulesetRule(ctx, db.InsertRulesetRuleParams{
+				RulesetVersion: version,
+				RuleName:       string(name),
+				Enabled:        rule.Enabled,
+				Weight:         int32(rule.Weight),
+				RuleLimit:      rule.Limit,
+			}); err != nil {
+				return fmt.Errorf("insert rule %q: %w", name, err)
+			}
+		}
+		rs.Version = int(version)
+		return nil
+	})
+	if err != nil {
+		return scoring.Ruleset{}, fmt.Errorf("publish ruleset: %w", err)
+	}
+	return rs, nil
 }

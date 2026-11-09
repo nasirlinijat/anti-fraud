@@ -124,9 +124,13 @@ With the default ruleset the patterns give these outcomes:
 
 The pattern is never sent to the API. It is only used for the summary.
 
+## Ruleset API
+
+Use `GET /rulesets/active` to read the current version. To change settings, send the full configuration without its `version` field to `POST /rulesets`. Both endpoints require the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
+
 ## API Documentation
 
-The scoring, dashboard, blocklist, and review queue APIs are described in `openapi.yaml`. It documents their requests, responses, and shared API key header.
+The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and shared API key header.
 
 To read it in Swagger UI, run:
 

@@ -29,7 +29,9 @@ func main() {
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
 	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.APIKey)
-	handler := score.NewHandler(rulesets.NewStore(pool), blocklist.NewStore(pool), score.NewStore(pool))
+	rulesetStore := rulesets.NewStore(pool)
+	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey)
+	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
 	if cfg.ModelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
 	} else {

@@ -33,6 +33,9 @@ tags:
   - name: Reviews
     description: Browse purchases awaiting review.
 
+  - name: Rulesets
+    description: Read and publish scoring configuration.
+
 paths:
   /score:
     post:
@@ -490,6 +493,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /rulesets/active:
+    get:
+      tags: [Rulesets]
+      operationId: getActiveRuleset
+      summary: Read the active ruleset
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: The current version and its settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "401":
+          description: Missing or invalid API key.
+        "500":
+          description: The ruleset could not be read.
+
+  /rulesets:
+    post:
+      tags: [Rulesets]
+      operationId: publishRuleset
+      summary: Publish and activate a new ruleset version
+      description: |
+        Submit the complete configuration. Rules absent from `rules` are
+        disabled in the new version. Existing decisions retain their version.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesetConfig"
+      responses:
+        "201":
+          description: The new version was published and activated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "400":
+          description: Invalid configuration. Validation errors identify the fields to fix.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+        "413":
+          description: The request body exceeds 65536 bytes.
+        "500":
+          description: The ruleset could not be published.
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -550,6 +608,62 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FiredRule"
+
+    Ruleset:
+      allOf:
+        - $ref: "#/components/schemas/RulesetConfig"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              format: int32
+              example: 2
+
+    RulesetConfig:
+      type: object
+      required: [review_threshold, block_threshold, rules]
+      properties:
+        review_threshold:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 50
+        block_threshold:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Must be greater than `review_threshold`.
+          example: 80
+        rules:
+          type: object
+          description: |
+            Settings keyed by `high_amount`, `card_velocity`, `new_account`, or
+            `country_mismatch`. An empty object disables all weighted rules.
+            Enabled rule weights must add up to at most 2147483647.
+          additionalProperties:
+            type: object
+            required: [enabled, weight]
+            properties:
+              enabled:
+                type: boolean
+              weight:
+                type: integer
+                format: int32
+                minimum: 0
+              limit:
+                type: integer
+                format: int64
+                minimum: 0
+                description: |
+                  Amount in minor units for `high_amount`, earlier purchases in
+                  an hour for `card_velocity`, or account age in hours for
+                  `new_account`. Required except for `country_mismatch`.
+          example:
+            high_amount: { enabled: true, weight: 30, limit: 50000 }
+            card_velocity: { enabled: true, weight: 40, limit: 5 }
+            new_account: { enabled: true, weight: 20, limit: 24 }
+            country_mismatch: { enabled: true, weight: 25 }
 
     ScoreRequest:
       type: object
