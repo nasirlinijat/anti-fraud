@@ -26,6 +26,8 @@ servers:
 tags:
   - name: Score
     description: Score a purchase.
+  - name: Stats
+    description: Decision statistics for the dashboard.
 
 paths:
   /score:
@@ -209,6 +211,60 @@ paths:
           description: >-
             The purchase could not be scored, for example because the database
             is unreachable. The response never contains the internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+
+  /stats:
+    get:
+      tags: [Stats]
+      operationId: getStats
+      summary: Decision statistics
+      description: |
+        Counts the decisions made in a recent period by outcome, lists the
+        rules that fired most often, and shows what the fraud model changed.
+        The review queue size is always the current one, whatever the period.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: How far back to count. The default is `24h`.
+          schema:
+            type: string
+            enum: ["15m", "1h", "24h", "7d", "all"]
+            default: "24h"
+      responses:
+        "200":
+          description: The statistics for the period.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "400":
+          description: The period is not one of the allowed values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: invalid request
+                fields:
+                  period: must be one of 15m, 1h, 24h, 7d, all
+        "401":
+          description: The API key is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "500":
+          description: The statistics could not be read.
           content:
             application/json:
               schema:
@@ -433,6 +489,51 @@ components:
           type: integer
           description: Points the rule added to the score.
           example: 40
+
+    StatsResponse:
+      type: object
+      description: Decision statistics for a period.
+      required: [period, since, generated_at, outcomes, top_rules, review_queue, model]
+      properties:
+        period:
+          type: string
+          enum: ["15m", "1h", "24h", "7d", "all"]
+        since:
+          type: string
+          format: date-time
+          description: Decisions made at or after this time are counted.
+        generated_at:
+          type: string
+          format: date-time
+        outcomes:
+          type: object
+          required: [allow, review, block, total]
+          properties:
+            allow: { type: integer, minimum: 0 }
+            review: { type: integer, minimum: 0 }
+            block: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        top_rules:
+          type: array
+          description: Up to 10 rules, the most often fired first.
+          items:
+            type: object
+            required: [name, fired, points]
+            properties:
+              name: { type: string, example: high_amount }
+              fired: { type: integer, minimum: 0, description: Decisions in which the rule fired. }
+              points: { type: integer, minimum: 0, description: Points the rule added in total. }
+        review_queue:
+          type: integer
+          minimum: 0
+          description: Purchases with the outcome review, all time.
+        model:
+          type: object
+          required: [scored, flagged, cleared]
+          properties:
+            scored: { type: integer, minimum: 0, description: Decisions with a model score. }
+            flagged: { type: integer, minimum: 0, description: Purchases the rules allowed and the model sent to review. }
+            cleared: { type: integer, minimum: 0, description: Purchases the rules sent to review and the model allowed. }
 
     ErrorResponse:
       type: object

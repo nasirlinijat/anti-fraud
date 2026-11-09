@@ -10,6 +10,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 	}
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
+	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
 	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
