@@ -77,6 +77,52 @@ Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for
 | `make migrate` | Applies all pending database migrations |
 | `make generate` | Regenerates the database code from the SQL queries |
 | `make docs` | Shows the API spec in Swagger UI at http://localhost:8090 |
+| `make simulate` | Sends seeded demo purchases to the running backend (see below) |
+
+## Demo Traffic
+
+The simulator sends generated purchases to `POST /score` in the same format as real clients. Start the backend with `make up` or `make run`, apply the migrations, then run:
+
+```bash
+make simulate
+```
+
+It sends 500 purchases, 20 per second, and prints how many of each pattern were allowed, reviewed, or blocked. It reads `API_KEY` and `PORT` from `.env`. Pass options with `ARGS`, for example:
+
+```bash
+make simulate ARGS="-seed 7 -count 2000 -rate 50 -suspicious 0.2"
+```
+
+Without `make`, for example in Windows PowerShell, run it from `backend` with the same values as `.env`:
+
+```powershell
+$env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 1000 -rate 50
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-seed` | 1 | Random seed. The same seed and start give the same purchases |
+| `-start` | now | Event time of the first purchase, in RFC 3339 |
+| `-count` | 500 | Number of purchases to send |
+| `-rate` | 20 | Purchases sent per second, 0 for as fast as possible |
+| `-suspicious` | 0.1 | Share of traffic events that start a suspicious pattern |
+| `-players` | 300 | Number of regular players |
+| `-gap` | 20s | Mean simulated time between traffic events |
+| `-run` | built from seed and start | Prefix of all generated IDs |
+| `-url` | `http://localhost:$PORT` | Base URL of the backend |
+
+Event times are simulated, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix, so a new run does not clash with earlier ones. Sending the same run again fails with 409, because those transaction IDs are already scored.
+
+With the default ruleset the patterns give these outcomes:
+
+| Pattern | What happens | Outcome |
+|---|---|---|
+| `normal` | A regular player buys with their own card from their own country | allow |
+| `card_testing` | A new account tries 7 to 9 small purchases on one card from another country | allow, then block from the sixth purchase (velocity) |
+| `account_takeover` | An old account buys for a large amount from another country and a new device | review |
+| `new_account_spend` | An account created a few hours ago buys for a large amount | review |
+
+The pattern is never sent to the API. It is only used for the summary.
 
 ## API Documentation
 

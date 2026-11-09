@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: up down db run test lint migrate generate docs
+.PHONY: up down db run test lint migrate generate docs simulate
 
 up:
 	docker compose up -d --build --wait
@@ -36,3 +36,6 @@ generate:
 docs:
 	@echo "Swagger UI: http://localhost:$${SWAGGER_PORT:-8090} (press Ctrl+C to stop)"
 	docker compose up swagger-ui
+
+simulate:
+	cd backend && go run ./cmd/simulator $(ARGS)
