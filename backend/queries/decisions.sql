@@ -4,13 +4,15 @@ INSERT INTO purchases (
     card_issuer, card_network, card_type, card_country, card_category,
     product_code, billing_region, billing_country, billing_distance,
     email_domain, recipient_email_domain, device_type, device_name, device_id,
-    ip_address, ip_country, account_created_at
+    ip_address, ip_country, account_created_at,
+    client_os, client_browser, screen_resolution
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18, $19,
-    $20, $21, $22
+    $20, $21, $22,
+    $23, $24, $25
 )
 RETURNING id;
 

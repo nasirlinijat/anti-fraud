@@ -97,6 +97,9 @@ paths:
                   ip_address: 203.0.113.9
                   ip_country: TR
                   account_created_at: "2026-11-08T09:00:00Z"
+                  client_os: Windows 10
+                  client_browser: chrome 63.0
+                  screen_resolution: 1920x1080
       responses:
         "200":
           description: The purchase was scored and saved.
@@ -796,8 +799,26 @@ components:
           description: >-
             When the player's account was created, in RFC 3339 with a time
             zone. It must not be after event_time. Used by the new_account
-            rule.
+            rule and, as whole days, by the fraud model.
           example: "2026-11-08T09:00:00Z"
+        client_os:
+          type: string
+          description: >-
+            Operating system the client reports, for example "Windows 10" or
+            "iOS 11.2.1". Used by the fraud model.
+          example: Windows 10
+        client_browser:
+          type: string
+          description: >-
+            Browser or app the client reports, for example "chrome 63.0" or
+            "mobile safari 11.0". Used by the fraud model.
+          example: chrome 63.0
+        screen_resolution:
+          type: string
+          description: >-
+            Screen resolution as WIDTHxHEIGHT, for example "1920x1080". Used
+            by the fraud model.
+          example: 1920x1080
 
     ScoreResponse:
       type: object

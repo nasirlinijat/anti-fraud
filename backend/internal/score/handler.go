@@ -102,6 +102,9 @@ type scoreRequest struct {
 	IPAddress            *string    `json:"ip_address"`
 	IPCountry            *string    `json:"ip_country"`
 	AccountCreatedAt     *time.Time `json:"account_created_at"`
+	ClientOS             *string    `json:"client_os"`
+	ClientBrowser        *string    `json:"client_browser"`
+	ScreenResolution     *string    `json:"screen_resolution"`
 }
 
 type scoreResponse struct {
@@ -329,6 +332,9 @@ func (req scoreRequest) purchase() (Purchase, map[string]string) {
 		DeviceName:           optional(req.DeviceName),
 		DeviceID:             optional(req.DeviceID),
 		IPCountry:            optional(req.IPCountry),
+		ClientOS:             optional(req.ClientOS),
+		ClientBrowser:        optional(req.ClientBrowser),
+		ScreenResolution:     optional(req.ScreenResolution),
 	}
 
 	if req.EventTime.IsZero() {

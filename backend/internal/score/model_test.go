@@ -161,8 +161,8 @@ func TestUseModelRejectsMismatch(t *testing.T) {
 	}
 }
 
-func TestUseModelAcceptsV3Model(t *testing.T) {
-	const path = "../../models/lgbm-ieee-v3.json"
+func TestUseModelAcceptsV4Model(t *testing.T) {
+	const path = "../../models/lgbm-ieee-v4.json"
 	model, err := lgbm.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)

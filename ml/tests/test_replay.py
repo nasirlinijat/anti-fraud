@@ -32,9 +32,15 @@ def test_requests_use_the_api_format():
         "email_domain": "gmail.com",
         "device_type": "desktop",
         "device_name": "Windows",
+        "client_os": "Windows 10",
+        "client_browser": "chrome 63.0",
+        "screen_resolution": "1920x1080",
+        "account_created_at": "2017-12-11T00:00:00Z",
     }
     assert requests[4]["amount_minor"] == 10000
     assert "email_domain" not in requests[7] and "device_name" not in requests[7]
+    assert "client_os" not in requests[7] and "account_created_at" not in requests[7]
+    assert requests[5]["client_browser"] == "chrome 62.0" and "client_os" not in requests[5]
 
 
 def test_requests_keep_the_player_and_card_keys():

@@ -61,6 +61,9 @@ type Purchase struct {
 	IpCountry            pgtype.Text
 	AccountCreatedAt     pgtype.Timestamptz
 	ReceivedAt           pgtype.Timestamptz
+	ClientOs             pgtype.Text
+	ClientBrowser        pgtype.Text
+	ScreenResolution     pgtype.Text
 }
 
 type Ruleset struct {

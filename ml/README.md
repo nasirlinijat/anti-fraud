@@ -53,7 +53,7 @@ docker compose run --rm migrate -path=/migrations "-database=postgres://antifrau
 Then run a second backend on it from `backend` (PowerShell):
 
 ```powershell
-$env:PORT="8082"; $env:API_KEY="replay-key"; $env:MODEL_PATH="models/lgbm-ieee-v3.json"; $env:DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud_replay?sslmode=disable"; go run ./cmd/api
+$env:PORT="8082"; $env:API_KEY="replay-key"; $env:MODEL_PATH="models/lgbm-ieee-v4.json"; $env:DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud_replay?sslmode=disable"; go run ./cmd/api
 ```
 
 Use the `POSTGRES_PORT` from `.env` in `DATABASE_URL`. Then, from `ml`:
@@ -85,7 +85,9 @@ The Python score comes from the same features computed on the same replayed purc
 
 The 9 differences all come from `player_avg_amount`. The service computes it from whole cents (57.95), while `features.py` adds float amounts (57.950000000000045). The model has a split at that value, so one tree takes the other branch. No decision changed. Computing the average from `amount_minor` in `features.py` and retraining would remove the difference.
 
-Test month (days 153 to 182, 85,430 purchases, 3.5% fraud):
+With model v4 (2026-11-10, first 30,000 purchases from day 123): the live score equals the Python score within 1e-9 for every purchase (largest difference 1.1e-16), with the same flag decision for all, and latency p50 / p95 / p99 of 7.6 / 18.0 / 25.9 ms. The v3 float-average differences are gone because both sides now sum minor units.
+
+Test month (days 153 to 182, 85,430 purchases, 3.5% fraud), model v3:
 
 | Decision | Sent to review | Fraud among them | Fraud stopped |
 |---|---|---|---|
@@ -145,7 +147,7 @@ Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. M
 | Fraud caught / precision at 1% | 14.6% / 35% | **16.7% / 38%** |
 | Policy `flag_at` on the test month: flagged, precision, fraud caught | 0.97%, 38%, 10.6% | 0.94%, **44%**, **11.8%** |
 
-The Go service keeps loading v3 until it computes the v4 features.
+The Go service computes these features and loads v4 by default.
 
 ## Evaluation
 

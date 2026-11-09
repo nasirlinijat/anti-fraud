@@ -41,6 +41,9 @@ type Purchase struct {
 	IPAddress            *netip.Addr
 	IPCountry            *string
 	AccountCreatedAt     *time.Time
+	ClientOS             *string
+	ClientBrowser        *string
+	ScreenResolution     *string
 }
 
 // Decision is the scoring result saved with a purchase.
@@ -109,6 +112,10 @@ func (p Purchase) FeatureInput() features.Input {
 		RecipientEmailDomain: p.RecipientEmailDomain,
 		DeviceType:           p.DeviceType,
 		DeviceName:           p.DeviceName,
+		AccountCreatedAt:     p.AccountCreatedAt,
+		ClientOS:             p.ClientOS,
+		ClientBrowser:        p.ClientBrowser,
+		ScreenResolution:     p.ScreenResolution,
 	}
 }
 
@@ -168,6 +175,9 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 		IpAddress:            p.IPAddress,
 		IpCountry:            text(p.IPCountry),
 		AccountCreatedAt:     timestamptz(p.AccountCreatedAt),
+		ClientOs:             text(p.ClientOS),
+		ClientBrowser:        text(p.ClientBrowser),
+		ScreenResolution:     text(p.ScreenResolution),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

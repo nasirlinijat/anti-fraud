@@ -31,15 +31,16 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 
 	at := pgtype.Timestamptz{Time: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC), Valid: true}
 	device := pgtype.Text{String: "Windows", Valid: true}
+	client := pgtype.Text{String: "Windows 10", Valid: true}
 	queries := []struct {
 		name  string
 		query string
 		args  []any
 	}{
-		{"PlayerHistory", playerHistory, []any{at, int64(1000), "gmail.com", device, "player-1", "txn-1"}},
+		{"PlayerHistory", playerHistory, []any{at, int64(1000), "gmail.com", device, client, client, client, "player-1", "txn-1"}},
 		{"CardHistory", cardHistory, []any{at, "card-1", "txn-1"}},
 		{"IssuerHistory", issuerHistory, []any{"1001", at, "txn-1"}},
-		{"FeatureCounts", featureCounts, []any{"gmail.com", device}},
+		{"FeatureCounts", featureCounts, []any{"gmail.com", device, client, client, client}},
 		{"CountOutcomes", countOutcomes, []any{at}},
 		{"TopFiredRules", topFiredRules, []any{at, int32(10)}},
 		{"CountReviewQueue", countReviewQueue, nil},

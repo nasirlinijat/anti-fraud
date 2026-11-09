@@ -59,6 +59,9 @@ const groups: Group[] = [
       { name: 'ip_address', label: 'IP address', kind: 'text' },
       { name: 'ip_country', label: 'IP country', kind: 'text' },
       { name: 'account_created_at', label: 'Account created at', kind: 'time' },
+      { name: 'client_os', label: 'Client OS', kind: 'text', options: ['Windows 10', 'Mac OS X 10_13', 'iOS 11.2.1', 'Android 8.0'] },
+      { name: 'client_browser', label: 'Client browser', kind: 'text', options: ['chrome 63.0', 'mobile safari 11.0', 'firefox 57.0', 'edge 16.0'] },
+      { name: 'screen_resolution', label: 'Screen resolution', kind: 'text', hint: 'WIDTHxHEIGHT, for example 1920x1080' },
     ],
   },
 ]
@@ -96,6 +99,9 @@ const presets: Record<string, () => Values> = {
     ip_address: '203.0.113.9',
     ip_country: 'AZ',
     account_created_at: hoursAgo(24 * 200),
+    client_os: 'Windows 10',
+    client_browser: 'chrome 63.0',
+    screen_resolution: '1920x1080',
   }),
   'New account, foreign IP, large amount': () => ({
     amount_minor: '75000',
@@ -111,6 +117,9 @@ const presets: Record<string, () => Values> = {
     ip_address: '198.51.100.7',
     ip_country: 'TR',
     account_created_at: hoursAgo(2),
+    client_os: 'Android 8.0',
+    client_browser: 'chrome 62.0',
+    screen_resolution: '720x1280',
   }),
   Empty: () => ({}),
 }
