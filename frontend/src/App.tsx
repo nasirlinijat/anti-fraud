@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
+import DashboardPage from './pages/DashboardPage'
 import TesterPage from './pages/TesterPage'
 
 type Status = 'checking' | 'ready' | 'unavailable'
 
 // Pages are chosen by the URL hash, for example #/tester. Add a page here to
 // show it in the navigation.
-const pages = [{ path: '/tester', title: 'Tester', element: <TesterPage /> }]
+const pages = [
+  { path: '/dashboard', title: 'Dashboard', element: <DashboardPage /> },
+  { path: '/tester', title: 'Tester', element: <TesterPage /> },
+]
 
 function currentPath(): string {
   return window.location.hash.replace(/^#/, '') || pages[0].path

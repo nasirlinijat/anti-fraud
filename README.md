@@ -158,10 +158,11 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards backend requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the `.env` file in the repository root, and adds the API key to `POST /score` requests itself, so the key never reaches the browser. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards backend requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the `.env` file in the repository root, and adds the API key to `POST /score` and `GET /stats` requests itself, so the key never reaches the browser. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Page | What it does |
 |---|---|
+| Dashboard (`#/dashboard`) | Decisions in the last 15 minutes, hour, day, week or all time: allowed, reviewed and blocked counts with their shares, the current review queue size, the most fired rules, and how many purchases the model sent to review or cleared. It reads `GET /stats` and refreshes every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
 
 The tester is a local development tool: it only works through the development server, which holds the API key.

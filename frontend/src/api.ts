@@ -21,6 +21,29 @@ export interface ErrorResponse {
   fields?: Record<string, string>
 }
 
+export const periods = ['15m', '1h', '24h', '7d', 'all'] as const
+export type Period = (typeof periods)[number]
+
+export interface Stats {
+  period: Period
+  since: string
+  generated_at: string
+  outcomes: { allow: number; review: number; block: number; total: number }
+  top_rules: { name: string; fired: number; points: number }[]
+  review_queue: number
+  model: { scored: number; flagged: number; cleared: number }
+}
+
+// getStats reads the dashboard statistics for a period. The development server
+// adds the API key.
+export async function getStats(period: Period): Promise<Stats> {
+  const res = await fetch(`/stats?period=${period}`)
+  if (!res.ok) {
+    throw new Error(`The backend answered with status ${res.status}.`)
+  }
+  return (await res.json()) as Stats
+}
+
 export type ScoreResult =
   | { ok: true; response: ScoreResponse }
   | { ok: false; status: number; error: ErrorResponse }
