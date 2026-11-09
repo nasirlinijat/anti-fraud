@@ -126,7 +126,7 @@ The pattern is never sent to the API. It is only used for the summary.
 
 ## API Documentation
 
-The score API is described in `openapi.yaml`, which is written by hand. It lists every field of the score request and response, the error responses, and the API key header.
+The scoring, dashboard, blocklist, and review queue APIs are described in `openapi.yaml`. It documents their requests, responses, and shared API key header.
 
 To read it in Swagger UI, run:
 
@@ -136,7 +136,7 @@ make docs
 
 Then open http://localhost:8090 and stop the server with Ctrl+C. To use another port, set `SWAGGER_PORT` in `.env`. Swagger UI only shows the API. Its "Try it out" button cannot call the backend from the browser, because the backend does not allow cross-origin requests. Use `curl` as in the setup steps instead.
 
-When the score request or response changes, change `openapi.yaml` in the same pull request.
+When a documented API request or response changes, update `openapi.yaml` in the same pull request.
 
 ## Frontend
 
@@ -158,13 +158,14 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards backend requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the `.env` file in the repository root, and adds the API key to the score, stats and blocklist requests itself, so the key never reaches the browser. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, and blocklist requests. For `GET /reviews`, it forwards the key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Page | What it does |
 |---|---|
 | Dashboard (`#/dashboard`) | Decisions in the last 15 minutes, hour, day, week or all time: allowed, reviewed and blocked counts with their shares, the current review queue size, the most fired rules, and how many purchases the model sent to review or cleared. It reads `GET /stats` and refreshes every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
+| Review queue (`#/reviews`) | Enter the local `API_KEY` to browse purchases awaiting review, oldest queued first. The current page refreshes every five seconds. |
 
 The tester is a local development tool: it only works through the development server, which holds the API key.
 

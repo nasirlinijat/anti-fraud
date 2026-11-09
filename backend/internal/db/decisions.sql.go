@@ -143,9 +143,21 @@ SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_i
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'
+  AND (
+      $1::timestamptz IS NULL
+      OR (d.decided_at, d.purchase_id) > (
+          $1::timestamptz, $2::bigint
+      )
+  )
 ORDER BY d.decided_at, d.purchase_id
-LIMIT $1
+LIMIT $3
 `
+
+type ListReviewQueueParams struct {
+	AfterDecidedAt  pgtype.Timestamptz
+	AfterPurchaseID pgtype.Int8
+	PageLimit       int32
+}
 
 type ListReviewQueueRow struct {
 	PurchaseID    int64
@@ -159,8 +171,8 @@ type ListReviewQueueRow struct {
 	DecidedAt     pgtype.Timestamptz
 }
 
-func (q *Queries) ListReviewQueue(ctx context.Context, limit int32) ([]ListReviewQueueRow, error) {
-	rows, err := q.db.Query(ctx, listReviewQueue, limit)
+func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams) ([]ListReviewQueueRow, error) {
+	rows, err := q.db.Query(ctx, listReviewQueue, arg.AfterDecidedAt, arg.AfterPurchaseID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
