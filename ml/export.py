@@ -7,23 +7,57 @@ import numpy as np
 import pandas as pd
 
 
-def choose_thresholds(y_val, score_val, review_rate, max_missed_fraud):
-    flag_at = float(np.quantile(score_val[y_val == 0], 1 - review_rate))
+def flag_by_money(y, score, amount, review_cost):
+    """Returns the flag threshold that maximizes the fraud money caught minus
+    review_cost for every flagged purchase, and that net value. When no
+    threshold gains money, the threshold is above every score."""
+    order = np.argsort(-score, kind="stable")
+    ranked = score[order]
+    caught = np.cumsum(np.where(y[order] == 1, amount[order], 0.0))
+    net = caught - review_cost * np.arange(1, len(ranked) + 1)
+    # A threshold flags every purchase with the same score, so only the last
+    # purchase of each score is a possible cut.
+    net = np.where(np.r_[ranked[1:] != ranked[:-1], True], net, -np.inf)
+    best = int(np.argmax(net))
+    if net[best] <= 0:
+        return float(np.nextafter(ranked[0], np.inf)), 0.0
+    return float(ranked[best]), float(net[best])
+
+
+def choose_thresholds(y_val, score_val, review_rate, max_missed_fraud, amount_val=None, review_cost=None):
+    """Chooses flag_at by review rate (a share of legitimate purchases), or by
+    money when review_cost is set; clear_below keeps max_missed_fraud."""
+    if review_cost is None:
+        flag_at = float(np.quantile(score_val[y_val == 0], 1 - review_rate))
+        flag_by = "review_rate"
+    else:
+        flag_at, _ = flag_by_money(y_val, score_val, amount_val, review_cost)
+        flag_by = "money"
     clear_below = float(np.quantile(score_val[y_val == 1], max_missed_fraud))
     return {
         "flag_at": round(flag_at, 6),
         "clear_below": round(min(clear_below, flag_at), 6),
+        "flag_by": flag_by,
         "review_rate": review_rate,
+        "review_cost": review_cost,
         "max_missed_fraud": max_missed_fraud,
     }
 
 
-def policy_effect(y, score, thresholds):
+def policy_effect(y, score, thresholds, amount=None):
     flagged = score >= thresholds["flag_at"]
     cleared = score < thresholds["clear_below"]
     fraud = y == 1
     legit = ~fraud
+    money = {}
+    if amount is not None:
+        total = max(float(amount[fraud].sum()), 1e-9)
+        money = {
+            "flagged_fraud_money_caught": round(float(amount[flagged & fraud].sum()) / total, 4),
+            "fraud_money_missed_by_clearing": round(float(amount[cleared & fraud].sum()) / total, 4),
+        }
     return {
+        **money,
         "flagged_share": round(float(flagged.mean()), 4),
         "flagged_precision": round(float((flagged & fraud).sum() / max(int(flagged.sum()), 1)), 4),
         "flagged_fraud_caught": round(float((flagged & fraud).sum() / max(int(fraud.sum()), 1)), 4),

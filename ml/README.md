@@ -29,6 +29,20 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
 
+`--review-cost` switches `flag_at` to money: it picks the threshold that maximizes the fraud money caught minus the cost of every review, on the validation month. The report shows fraud money caught next to fraud count for every operating point and for the policy.
+
+Effect on the test month with model v4 (85,430 purchases, 2,994 frauds worth 457,435 in total):
+
+| `flag_at` chosen by | Purchases flagged | Reviews | Precision | Fraud caught | Fraud money caught |
+|---|---|---|---|---|---|
+| **Review rate 0.5% (default)** | 0.9% | 805 | 44% | 11.8% | **22.3%** |
+| Review cost 20 | 4.1% | 3,471 | 27% | 30.9% | 36.6% |
+| Review cost 10 | 18.2% | 15,557 | 13% | 67.5% | 72.0% |
+| Review cost 5 | 25.2% | 21,508 | 10% | 75.4% | 77.7% |
+| Review cost 1 | 63.2% | 54,002 | 5% | 95.3% | 96.1% |
+
+The default stays the review rate. Fraud is worth about 150 on average, so at any realistic review cost the money rule asks analysts to check thousands of purchases a month, far more than a review team can handle; the review rate keeps the queue at a size people can work through. The money view still shows the model's value: at the default the flagged frauds are larger than average (288 against 153), so 11.8% of the frauds carry 22.3% of the fraud money. Use `--review-cost` when the team's review cost and capacity are known.
+
 The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows. Change `--version` whenever the feature list changes, so the service never loads a model with the wrong inputs.
 
 ## Compare feature groups

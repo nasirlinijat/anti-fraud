@@ -42,6 +42,43 @@ def test_fast_reader_matches_exported_golden_rows(version):
     assert np.max(np.abs(scores - golden["expected"].to_numpy())) < 1e-9
 
 
+def test_flag_by_money_picks_the_best_cut():
+    y = np.array([1, 0, 1, 0, 0, 1])
+    score = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.1])
+    amount = np.array([100.0, 50.0, 30.0, 20.0, 10.0, 5.0])
+    # Net after each cut with review cost 10: 90, 80, 100, 90, 80, 75.
+    flag_at, net = export.flag_by_money(y, score, amount, 10)
+    assert flag_at == 0.7 and net == 100
+
+
+def test_flag_by_money_flags_nothing_when_reviews_cost_more():
+    y = np.array([1, 0])
+    score = np.array([0.9, 0.2])
+    flag_at, net = export.flag_by_money(y, score, np.array([5.0, 5.0]), 10)
+    assert flag_at > 0.9 and net == 0
+
+
+def test_flag_by_money_keeps_equal_scores_together():
+    y = np.array([1, 0, 0])
+    score = np.array([0.8, 0.8, 0.3])
+    flag_at, net = export.flag_by_money(y, score, np.array([100.0, 1.0, 1.0]), 10)
+    assert flag_at == 0.8 and net == 80
+
+
+def test_choose_thresholds_by_money_or_rate():
+    rng = np.random.default_rng(1)
+    y = (rng.random(5000) < 0.05).astype(int)
+    score = np.clip(rng.normal(0.2 + 0.4 * y, 0.15), 0, 1)
+    amount = rng.uniform(1, 200, 5000)
+    by_rate = export.choose_thresholds(y, score, 0.01, 0.02)
+    by_money = export.choose_thresholds(y, score, 0.01, 0.02, amount, review_cost=5)
+    assert by_rate["flag_by"] == "review_rate" and by_money["flag_by"] == "money"
+    assert by_money["flag_at"] == round(export.flag_by_money(y, score, amount, 5)[0], 6)
+    assert by_money["clear_below"] <= by_money["flag_at"]
+    effect = export.policy_effect(y, score, by_money, amount)
+    assert 0 <= effect["flagged_fraud_money_caught"] <= 1
+
+
 def test_unsupported_split_is_rejected():
     node = {"split_feature": 0, "decision_type": "==", "left_child": {"leaf_value": 0}, "right_child": {"leaf_value": 1}}
     with pytest.raises(ValueError):
