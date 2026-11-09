@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
@@ -60,6 +61,10 @@ func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at tim
 		}
 	}
 	return n, nil
+}
+
+func (s *purchases) FeatureHistory(context.Context, features.Input) (features.History, error) {
+	return features.History{}, nil
 }
 
 func (s *purchases) Save(_ context.Context, p score.Purchase, _ score.Decision) (int64, error) {
