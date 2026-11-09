@@ -13,11 +13,14 @@ The scoring service must compute these features exactly as `ml/features.py` does
 
 ## Identities
 
-| Name | Built from | Notes |
+| Name | Live service | In training (IEEE-CIS) |
 |---|---|---|
-| Player ID | `card1 + "_" + addr1 + "_" + (day - D1)` | `day` is `floor(event_time / 86400)`. Missing parts are the text `none`. |
-| Card ID | `card1` to `card6` joined with `\|` | Missing parts are the text `none`. |
-| Email | purchaser email domain | Missing is the text `none`, which is treated as one more domain. |
+| Player ID | `player_id` from the request | `card1 + "_" + addr1 + "_" + (day - D1)`, where `day` is `floor(TransactionDT / 86400)`; missing parts are the text `none` |
+| Card ID | `card_token` from the request | `card1` to `card6` joined with `\|`; missing parts are the text `none` |
+| Email | `email_domain`; missing is the text `none`, treated as one more domain | `P_emaildomain` |
+| Device name | `device_name`; missing is the text `none` | `DeviceInfo` |
+| Card number part | `card_issuer`; missing is the text `none` | `card1` |
+| Billing region | `billing_region`; missing is the text `none` | `addr1` |
 
 ## Code tables
 
@@ -33,8 +36,8 @@ Any other or missing value is `-1`.
 
 | # | Feature | Definition |
 |---|---|---|
-| 1 | `amount` | Purchase amount |
-| 2 | `cents` | `amount - floor(amount)`, rounded to 3 decimals |
+| 1 | `amount` | `amount_minor / 100` |
+| 2 | `cents` | `(amount_minor mod 100) / 100` |
 | 3 | `product_code` | Code table above |
 | 4 | `card_network` | Code table above (`card4`) |
 | 5 | `card_type` | Code table above (`card6`) |
@@ -76,16 +79,28 @@ Features 19, 27, 30 and 31 count over all players, so the service needs running 
 
 ## Mapping to the score request
 
-| Feature input | IEEE-CIS column | Score request field |
+| Score request field | IEEE-CIS column | Notes |
 |---|---|---|
-| Event time | `TransactionDT` | event time in seconds |
-| Amount | `TransactionAmt` | amount (convert from minor units) |
-| Product | `ProductCD` | product code |
-| Card parts | `card1`-`card6` | card token parts (network, type, country, category) |
-| Billing region and country | `addr1`, `addr2` | billing address codes |
-| Emails | `P_emaildomain`, `R_emaildomain` | purchaser and recipient email domains |
-| Distance | `dist1` | distance between billing and other addresses |
-| Device | `DeviceType`, `DeviceInfo` (identity file, joined on `TransactionID`) | device type and device name |
+| `transaction_id` | `TransactionID` | Ties in time are ordered by it |
+| `event_time` | `TransactionDT` | Seconds after a fixed start time |
+| `amount_minor` | `TransactionAmt` | `round(TransactionAmt * 100)`; training uses the same rounding |
+| `player_id` | `card1`, `addr1`, `D1` | Stand-in player ID, see Identities |
+| `card_token` | `card1`-`card6` | Stand-in card ID, see Identities |
+| `card_issuer` | `card1` | Used by the `card1_*` features |
+| `card_network` | `card4` | |
+| `card_type` | `card6` | |
+| `card_country` | `card3` | Sent as text, used as a number |
+| `card_category` | `card5` | Sent as text, used as a number |
+| `product_code` | `ProductCD` | |
+| `billing_region` | `addr1` | |
+| `billing_country` | `addr2` | Sent as text, used as a number |
+| `billing_distance` | `dist1` | |
+| `email_domain` | `P_emaildomain` | |
+| `recipient_email_domain` | `R_emaildomain` | |
+| `device_type` | `DeviceType` | Identity file, joined on `TransactionID` |
+| `device_name` | `DeviceInfo` | Identity file, joined on `TransactionID` |
+
+`device_id`, `ip_address`, `ip_country` and `account_created_at` are not model inputs: IEEE-CIS has no such columns. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number becomes `-1`.
 
 `hour_of_day` depends on the clock's reference point. IEEE-CIS times are offsets from an unknown start, so for live traffic the hour will be shifted; treat this feature as approximate until the team decides how to align it.
 

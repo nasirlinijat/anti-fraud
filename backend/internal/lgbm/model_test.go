@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	modelPath   = "../../models/lgbm-ieee-v2.json"
-	goldenPath  = "../../models/lgbm-ieee-v2.golden.csv"
+	modelPath   = "../../models/lgbm-ieee-v3.json"
+	goldenPath  = "../../models/lgbm-ieee-v3.golden.csv"
 	goldenRows  = 2000
 	maxScoreGap = 1e-9
 )

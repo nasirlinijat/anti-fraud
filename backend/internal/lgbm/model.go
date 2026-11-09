@@ -150,7 +150,7 @@ func (m *Model) Predict(x []float64) (float64, error) {
 	return 1 / (1 + math.Exp(-sum)), nil
 }
 
-// Version returns the model version, such as "lgbm-ieee-v2".
+// Version returns the model version, such as "lgbm-ieee-v3".
 func (m *Model) Version() string { return m.version }
 
 // Features returns the feature names in the order Predict expects.
