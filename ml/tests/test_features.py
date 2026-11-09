@@ -123,6 +123,13 @@ def test_first_purchase_has_no_new_client_flags(raw):
     assert built.loc[1, "browser_is_new_for_player"] == 0
 
 
+def test_issuer_and_region_codes(raw):
+    built = build_for(raw)
+    assert built.loc[1, "card_issuer_code"] == 1001
+    assert built.loc[5, "billing_region_code"] == 200
+    assert built.loc[8, "billing_region_code"] == features.MISSING
+
+
 def test_hour_of_day_is_not_a_model_input():
     assert "hour_of_day" not in features.FEATURES
 

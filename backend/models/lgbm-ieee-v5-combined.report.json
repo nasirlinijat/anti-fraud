@@ -1,0 +1,191 @@
+{
+  "features": [
+    "amount",
+    "cents",
+    "product_code",
+    "card_network",
+    "card_type",
+    "player_txn_count",
+    "player_avg_amount",
+    "amount_to_avg",
+    "secs_since_last",
+    "secs_since_first",
+    "card_uses_1h",
+    "card_uses_24h",
+    "player_distinct_cards",
+    "email_is_new_for_player",
+    "card_country",
+    "card_category",
+    "billing_country",
+    "email_domain_share",
+    "has_recipient_email",
+    "recipient_email_differs",
+    "player_max_amount",
+    "player_uses_1h",
+    "player_uses_24h",
+    "player_same_amount_count",
+    "player_distinct_emails",
+    "email_players_share",
+    "has_device_info",
+    "device_type",
+    "device_info_share",
+    "device_players_share",
+    "device_is_new_for_player",
+    "player_distinct_devices",
+    "card_distinct_players",
+    "card1_distinct_players",
+    "card1_distinct_addresses",
+    "card1_distinct_emails",
+    "billing_distance",
+    "account_age_days",
+    "has_client_info",
+    "os_family",
+    "browser_family",
+    "os_share",
+    "browser_share",
+    "screen_share",
+    "screen_area",
+    "os_is_new_for_player",
+    "browser_is_new_for_player",
+    "player_distinct_browsers",
+    "card_issuer_code",
+    "billing_region_code"
+  ],
+  "combination": "highest percentile of the main and first-fraud models",
+  "comparison_at_1pct": {
+    "main": {
+      "false_positive_rate": 0.01,
+      "fraud_caught": 0.1713,
+      "precision": 0.3834,
+      "flagged": 1338,
+      "fraud_money_caught": 0.2532,
+      "first_purchase_fraud_caught": 0.2184
+    },
+    "combined": {
+      "false_positive_rate": 0.01,
+      "fraud_caught": 0.1653,
+      "precision": 0.3759,
+      "flagged": 1317,
+      "fraud_money_caught": 0.2445,
+      "first_purchase_fraud_caught": 0.2912
+    }
+  },
+  "test": {
+    "rows": 85430,
+    "fraud_rate": 0.035,
+    "roc_auc": 0.8384,
+    "pr_auc": 0.231,
+    "operating_points": [
+      {
+        "false_positive_rate": 0.001,
+        "threshold": 0.998757,
+        "fraud_caught": 0.0454,
+        "precision": 0.621,
+        "flagged": 219,
+        "fraud_money_caught": 0.0966
+      },
+      {
+        "false_positive_rate": 0.005,
+        "threshold": 0.995,
+        "fraud_caught": 0.1075,
+        "precision": 0.4387,
+        "flagged": 734,
+        "fraud_money_caught": 0.1882
+      },
+      {
+        "false_positive_rate": 0.01,
+        "threshold": 0.990401,
+        "fraud_caught": 0.1653,
+        "precision": 0.3759,
+        "flagged": 1317,
+        "fraud_money_caught": 0.2445
+      },
+      {
+        "false_positive_rate": 0.02,
+        "threshold": 0.982902,
+        "fraud_caught": 0.2458,
+        "precision": 0.3087,
+        "flagged": 2384,
+        "fraud_money_caught": 0.3246
+      }
+    ]
+  },
+  "test_first_fraud_only": {
+    "rows": 83558,
+    "fraud_rate": 0.0134,
+    "roc_auc": 0.8944,
+    "pr_auc": 0.1886,
+    "operating_points": [
+      {
+        "false_positive_rate": 0.001,
+        "threshold": 0.998757,
+        "fraud_caught": 0.0856,
+        "precision": 0.5363,
+        "flagged": 179,
+        "fraud_money_caught": 0.1483
+      },
+      {
+        "false_positive_rate": 0.005,
+        "threshold": 0.995,
+        "fraud_caught": 0.1738,
+        "precision": 0.3213,
+        "flagged": 607,
+        "fraud_money_caught": 0.2108
+      },
+      {
+        "false_positive_rate": 0.01,
+        "threshold": 0.990401,
+        "fraud_caught": 0.2406,
+        "precision": 0.2473,
+        "flagged": 1092,
+        "fraud_money_caught": 0.2496
+      },
+      {
+        "false_positive_rate": 0.02,
+        "threshold": 0.982902,
+        "fraud_caught": 0.3378,
+        "precision": 0.187,
+        "flagged": 2027,
+        "fraud_money_caught": 0.3488
+      }
+    ]
+  },
+  "policy": {
+    "flag_at": 0.994501,
+    "clear_below": 0.389361,
+    "flag_by": "review_rate",
+    "review_rate": 0.005,
+    "review_cost": null,
+    "max_missed_fraud": 0.02,
+    "validation_effect": {
+      "flagged_fraud_money_caught": 0.1895,
+      "fraud_money_missed_by_clearing": 0.0098,
+      "flagged_share": 0.0091,
+      "flagged_precision": 0.4775,
+      "flagged_fraud_caught": 0.1349,
+      "cleared_share": 0.248,
+      "cleared_fraud_rate": 0.0026,
+      "cleared_legit_share": 0.2557,
+      "fraud_missed_by_clearing": 0.02
+    },
+    "test_effect": {
+      "flagged_fraud_money_caught": 0.198,
+      "fraud_money_missed_by_clearing": 0.0083,
+      "flagged_share": 0.0093,
+      "flagged_precision": 0.4348,
+      "flagged_fraud_caught": 0.1159,
+      "cleared_share": 0.2231,
+      "cleared_fraud_rate": 0.003,
+      "cleared_legit_share": 0.2306,
+      "fraud_missed_by_clearing": 0.019
+    }
+  },
+  "export": {
+    "version": "lgbm-ieee-v5-combined",
+    "models": [
+      "lgbm-ieee-v5",
+      "lgbm-ieee-v5-first"
+    ],
+    "golden_rows": 2000
+  }
+}

@@ -2,7 +2,7 @@
 
 The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
 
-This file describes model v4 (48 features), which the service computes and loads by default.
+This file describes model v5 (50 features), which the service computes and loads by default.
 
 ## General rules
 
@@ -86,6 +86,8 @@ Any other or missing value is `-1`.
 | 46 | `os_is_new_for_player` | 1 if the OS is present, the player has earlier purchases, and none used exactly this OS, else 0 |
 | 47 | `browser_is_new_for_player` | 1 if the browser is present, the player has earlier purchases, and none used exactly this browser, else 0 |
 | 48 | `player_distinct_browsers` | Distinct known browsers the player used before (missing browsers are not counted) |
+| 49 | `card_issuer_code` | `card_issuer` (`card1`) as a number |
+| 50 | `billing_region_code` | `billing_region` (`addr1`) as a number |
 
 Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 

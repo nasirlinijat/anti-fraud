@@ -22,11 +22,11 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 | File | Content |
 |---|---|
-| `backend/models/lgbm-ieee-v4.json` | LightGBM model dump for the Go service |
-| `backend/models/lgbm-ieee-v4.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
-| `backend/models/lgbm-ieee-v4.report.json` | Metrics, thresholds and export checks |
-| `backend/models/lgbm-ieee-v4-first.*` | The first-fraud model, trained on each customer's first fraud only |
-| `backend/models/lgbm-ieee-v4-combined.*` | Both models with their percentile tables, the combined policy, golden rows and the comparison with the main model; the service loads this file |
+| `backend/models/lgbm-ieee-v5.json` | LightGBM model dump for the Go service |
+| `backend/models/lgbm-ieee-v5.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
+| `backend/models/lgbm-ieee-v5.report.json` | Metrics, thresholds and export checks |
+| `backend/models/lgbm-ieee-v5-first.*` | The first-fraud model, trained on each customer's first fraud only |
+| `backend/models/lgbm-ieee-v5-combined.*` | Both models with their percentile tables, the combined policy, golden rows and the comparison with the main model; the service loads this file |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
@@ -69,7 +69,7 @@ docker compose run --rm migrate -path=/migrations "-database=postgres://antifrau
 Then run a second backend on it from `backend` (PowerShell):
 
 ```powershell
-$env:PORT="8082"; $env:API_KEY="replay-key"; $env:MODEL_PATH="models/lgbm-ieee-v4.json"; $env:DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud_replay?sslmode=disable"; go run ./cmd/api
+$env:PORT="8082"; $env:API_KEY="replay-key"; $env:MODEL_PATH="models/lgbm-ieee-v5.json"; $env:DATABASE_URL="postgres://antifraud:antifraud@localhost:5432/antifraud_replay?sslmode=disable"; go run ./cmd/api
 ```
 
 Use the `POSTGRES_PORT` from `.env` in `DATABASE_URL`. Then, from `ml`:
@@ -176,6 +176,22 @@ All history features use only transactions that happened before the current one,
 
 Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`. Money-velocity features (amount spent per card or player in a time window) were tested and left out because they did not improve the model. `hour_of_day` was removed in v4: IEEE-CIS times start at an unknown moment, so the hour is shifted for live traffic, and the model does not lose anything without it. Lifetime counts and ages (for example a card's total purchases) were tested and left out because they keep growing over the months and drift.
 
+### Model v5: card issuer and billing region codes
+
+v5 adds `card_issuer_code` (`card1`) and `billing_region_code` (`addr1`) as numbers. The 1st-place IEEE-CIS solution relied on these columns; until v4 the model only saw counts built from them. Codes for the email domain, device, OS and browser were tested too and gave no gain.
+
+| Test month | v4 | v5 |
+|---|---|---|
+| Main model ROC-AUC | 0.838 | **0.852** |
+| Main model PR-AUC | 0.231 | **0.245** |
+| Main model first-fraud PR-AUC | 0.126 | **0.133** |
+| Precision at 0.1% of legit flagged | 58% | **60%** |
+| Precision / fraud caught at 1% | 37.7% / 16.7% | **38.3% / 17.1%** |
+| Combined policy: flags, precision, fraud caught | 0.96%, 44%, 12.0% | 0.93%, 43%, 11.6% |
+| Combined policy: reviews cleared, fraud missed by clearing | 19.5%, 1.9% | **22.3%**, 1.9% |
+
+With the combination, the gain mostly shows as more reviews cleared for the same missed fraud. Replay check: 10,000 purchases through the service scored exactly like Python, p95 14.6 ms.
+
 ### Model v4 against v3 (test month, days 153-183)
 
 | | v3 (38 features) | v4 (48 features) |
@@ -191,9 +207,9 @@ The Go service computes these features.
 
 ### First-fraud model and the combination
 
-IEEE-CIS marks a customer's later purchases as fraud after a chargeback. The main model learns to recognise those customers; that helps on later purchases, which the blocklist also stops once fraud is confirmed, but not on new fraud. `train.py` also trains `lgbm-ieee-v4-first` on clean labels, where only each customer's first fraud counts.
+IEEE-CIS marks a customer's later purchases as fraud after a chargeback. The main model learns to recognise those customers; that helps on later purchases, which the blocklist also stops once fraud is confirmed, but not on new fraud. `train.py` also trains `lgbm-ieee-v5-first` on clean labels, where only each customer's first fraud counts.
 
-The service loads `lgbm-ieee-v4-combined.json` by default: it scores every purchase with both models and keeps the higher percentile (the share of validation purchases each model scores lower, by more than 1e-12 so that a one-bit difference between Python and Go cannot change it). `flag_at` and `clear_below` are chosen on this combined score with the same review rate and missed-fraud limit. A percentile, not the raw score, is used because the two models score on different scales; counting strictly lower scores gives the first-fraud model's most common "nothing suspicious" score a percentile of 0, so it never blocks clearing.
+The service loads `lgbm-ieee-v5-combined.json` by default: it scores every purchase with both models and keeps the higher percentile (the share of validation purchases each model scores lower, by more than 1e-12 so that a one-bit difference between Python and Go cannot change it). `flag_at` and `clear_below` are chosen on this combined score with the same review rate and missed-fraud limit. A percentile, not the raw score, is used because the two models score on different scales; counting strictly lower scores gives the first-fraud model's most common "nothing suspicious" score a percentile of 0, so it never blocks clearing.
 
 Test month (days 153-183):
 

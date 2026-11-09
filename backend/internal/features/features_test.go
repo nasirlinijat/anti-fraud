@@ -22,7 +22,7 @@ import (
 const (
 	transactionsPath = "../../../ml/testdata/transactions.csv"
 	expectedPath     = "../../../ml/testdata/expected_features.csv"
-	modelPath        = "../../models/lgbm-ieee-v4.json"
+	modelPath        = "../../models/lgbm-ieee-v5.json"
 	tolerance        = 1e-9
 )
 

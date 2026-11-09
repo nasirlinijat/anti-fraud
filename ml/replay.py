@@ -206,7 +206,7 @@ def main():
     parser.add_argument("--from-day", type=int, default=TEST_FIRST_DAY - features.WARM_UP_DAYS,
                         help="first day to replay; the days before the test month build the history")
     parser.add_argument("--limit", type=int, help="replay only the first N purchases, for a quick check")
-    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v4-combined.json")
+    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v5-combined.json")
     parser.add_argument("--out", default="output/replay")
     args = parser.parse_args()
     out_dir = Path(args.out)

@@ -47,96 +47,98 @@
     "screen_area",
     "os_is_new_for_player",
     "browser_is_new_for_player",
-    "player_distinct_browsers"
+    "player_distinct_browsers",
+    "card_issuer_code",
+    "billing_region_code"
   ],
   "labels": "first fraud of each customer only",
   "lightgbm": {
-    "best_iteration": 69,
+    "best_iteration": 110,
     "test": {
       "rows": 85430,
       "fraud_rate": 0.035,
-      "roc_auc": 0.6573,
-      "pr_auc": 0.1345,
+      "roc_auc": 0.6385,
+      "pr_auc": 0.1331,
       "operating_points": [
         {
           "false_positive_rate": 0.001,
-          "threshold": 0.33562,
-          "fraud_caught": 0.0381,
-          "precision": 0.5787,
-          "flagged": 197,
-          "fraud_money_caught": 0.0645
+          "threshold": 0.381236,
+          "fraud_caught": 0.0337,
+          "precision": 0.5489,
+          "flagged": 184,
+          "fraud_money_caught": 0.0607
         },
         {
           "false_positive_rate": 0.005,
-          "threshold": 0.195837,
-          "fraud_caught": 0.0842,
-          "precision": 0.3789,
-          "flagged": 665,
-          "fraud_money_caught": 0.1
+          "threshold": 0.204539,
+          "fraud_caught": 0.0838,
+          "precision": 0.378,
+          "flagged": 664,
+          "fraud_money_caught": 0.0997
         },
         {
           "false_positive_rate": 0.01,
-          "threshold": 0.133324,
-          "fraud_caught": 0.1212,
-          "precision": 0.3056,
-          "flagged": 1188,
-          "fraud_money_caught": 0.1396
+          "threshold": 0.141222,
+          "fraud_caught": 0.1179,
+          "precision": 0.2997,
+          "flagged": 1178,
+          "fraud_money_caught": 0.1381
         },
         {
           "false_positive_rate": 0.02,
-          "threshold": 0.085652,
-          "fraud_caught": 0.171,
-          "precision": 0.2369,
-          "flagged": 2161,
-          "fraud_money_caught": 0.1731
+          "threshold": 0.090793,
+          "fraud_caught": 0.1633,
+          "precision": 0.2287,
+          "flagged": 2138,
+          "fraud_money_caught": 0.1768
         }
       ]
     },
     "test_first_fraud_only": {
       "rows": 83558,
       "fraud_rate": 0.0134,
-      "roc_auc": 0.9224,
-      "pr_auc": 0.2461,
+      "roc_auc": 0.9247,
+      "pr_auc": 0.2456,
       "operating_points": [
         {
           "false_positive_rate": 0.001,
-          "threshold": 0.33562,
-          "fraud_caught": 0.1016,
-          "precision": 0.5787,
-          "flagged": 197,
-          "fraud_money_caught": 0.1559
+          "threshold": 0.381236,
+          "fraud_caught": 0.09,
+          "precision": 0.5489,
+          "flagged": 184,
+          "fraud_money_caught": 0.1467
         },
         {
           "false_positive_rate": 0.005,
-          "threshold": 0.195837,
-          "fraud_caught": 0.2184,
-          "precision": 0.3723,
-          "flagged": 658,
-          "fraud_money_caught": 0.2352
+          "threshold": 0.204539,
+          "fraud_caught": 0.2148,
+          "precision": 0.3685,
+          "flagged": 654,
+          "fraud_money_caught": 0.2354
         },
         {
           "false_positive_rate": 0.01,
-          "threshold": 0.133324,
-          "fraud_caught": 0.3048,
-          "precision": 0.2931,
-          "flagged": 1167,
-          "fraud_money_caught": 0.3203
+          "threshold": 0.141222,
+          "fraud_caught": 0.2977,
+          "precision": 0.2882,
+          "flagged": 1159,
+          "fraud_money_caught": 0.3224
         },
         {
           "false_positive_rate": 0.02,
-          "threshold": 0.085652,
-          "fraud_caught": 0.4046,
-          "precision": 0.2159,
-          "flagged": 2103,
-          "fraud_money_caught": 0.3884
+          "threshold": 0.090793,
+          "fraud_caught": 0.4011,
+          "precision": 0.2144,
+          "flagged": 2099,
+          "fraud_money_caught": 0.4078
         }
       ]
     }
   },
   "export": {
-    "version": "lgbm-ieee-v4-first",
-    "trees": 69,
+    "version": "lgbm-ieee-v5-first",
+    "trees": 110,
     "golden_rows": 2000,
-    "tree_reader_max_difference": 1.491862189340054e-16
+    "tree_reader_max_difference": 2.7755575615628914e-16
   }
 }

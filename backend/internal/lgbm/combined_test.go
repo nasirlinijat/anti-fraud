@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const combinedPath = "../../models/lgbm-ieee-v4-combined.json"
+const combinedPath = "../../models/lgbm-ieee-v5-combined.json"
 
 func TestCombinedMatchesGoldenRows(t *testing.T) {
 	scorer, err := LoadScorer(combinedPath)
@@ -22,11 +22,11 @@ func TestCombinedMatchesGoldenRows(t *testing.T) {
 	if !ok {
 		t.Fatalf("LoadScorer returned %T, want *Combined", scorer)
 	}
-	if combined.Version() != "lgbm-ieee-v4-combined" || combined.Trees() < 2 {
+	if combined.Version() != "lgbm-ieee-v5-combined" || combined.Trees() < 2 {
 		t.Errorf("version %q, trees %d", combined.Version(), combined.Trees())
 	}
 
-	file, err := os.Open("../../models/lgbm-ieee-v4-combined.golden.csv")
+	file, err := os.Open("../../models/lgbm-ieee-v5-combined.golden.csv")
 	if err != nil {
 		t.Fatalf("open golden rows: %v", err)
 	}

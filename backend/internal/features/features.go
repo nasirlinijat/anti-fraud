@@ -62,6 +62,8 @@ var Names = []string{
 	"os_is_new_for_player",
 	"browser_is_new_for_player",
 	"player_distinct_browsers",
+	"card_issuer_code",
+	"billing_region_code",
 }
 
 var (
@@ -232,6 +234,8 @@ func Vector(in Input, h History) []float64 {
 		flag(in.ClientOS != nil && hasHistory && p.OSUses == 0),
 		flag(in.ClientBrowser != nil && hasHistory && p.BrowserUses == 0),
 		float64(p.DistinctBrowsers),
+		number(in.CardIssuer),
+		number(in.BillingRegion),
 	}
 }
 

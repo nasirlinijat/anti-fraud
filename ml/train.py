@@ -99,7 +99,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
     parser.add_argument("--out", default="output")
-    parser.add_argument("--version", default="lgbm-ieee-v4")
+    parser.add_argument("--version", default="lgbm-ieee-v5")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)

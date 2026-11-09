@@ -97,7 +97,7 @@ func (c *Combined) Predict(x []float64) (float64, error) {
 	return best, nil
 }
 
-// Version returns the combination's version, such as "lgbm-ieee-v4-combined".
+// Version returns the combination's version, such as "lgbm-ieee-v5-combined".
 func (c *Combined) Version() string { return c.version }
 
 // Features returns the feature names in the order Predict expects.
