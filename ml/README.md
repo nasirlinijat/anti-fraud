@@ -25,6 +25,8 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 | `backend/models/lgbm-ieee-v4.json` | LightGBM model dump for the Go service |
 | `backend/models/lgbm-ieee-v4.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
 | `backend/models/lgbm-ieee-v4.report.json` | Metrics, thresholds and export checks |
+| `backend/models/lgbm-ieee-v4-first.*` | The first-fraud model, trained on each customer's first fraud only |
+| `backend/models/lgbm-ieee-v4-combined.*` | Both models with their percentile tables, the combined policy, golden rows and the comparison with the main model; the service loads this file |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
@@ -161,7 +163,25 @@ Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. M
 | Fraud caught / precision at 1% | 14.6% / 35% | **16.7% / 38%** |
 | Policy `flag_at` on the test month: flagged, precision, fraud caught | 0.97%, 38%, 10.6% | 0.94%, **44%**, **11.8%** |
 
-The Go service computes these features and loads v4 by default.
+The Go service computes these features.
+
+### First-fraud model and the combination
+
+IEEE-CIS marks a customer's later purchases as fraud after a chargeback. The main model learns to recognise those customers; that helps on later purchases, which the blocklist also stops once fraud is confirmed, but not on new fraud. `train.py` also trains `lgbm-ieee-v4-first` on clean labels, where only each customer's first fraud counts.
+
+The service loads `lgbm-ieee-v4-combined.json` by default: it scores every purchase with both models and keeps the higher percentile (the share of validation purchases each model scores lower, by more than 1e-12 so that a one-bit difference between Python and Go cannot change it). `flag_at` and `clear_below` are chosen on this combined score with the same review rate and missed-fraud limit. A percentile, not the raw score, is used because the two models score on different scales; counting strictly lower scores gives the first-fraud model's most common "nothing suspicious" score a percentile of 0, so it never blocks clearing.
+
+Test month (days 153-183):
+
+| | v4 alone | v4 + first-fraud model |
+|---|---|---|
+| Fraud caught on a player's first purchase, 1% review | 21.6% | **29.6%** |
+| First-fraud-only PR-AUC | 0.126 | **0.184** |
+| Fraud caught / precision, 1% review | 16.7% / 37.7% | 16.6% / 37.6% |
+| Policy: flagged / precision / fraud caught | 0.94% / 44% / 11.8% | 0.96% / 44% / 12.0% |
+| Policy: cleared / fraud missed by clearing | 20.5% / 1.7% | 19.5% / 1.9% |
+
+The first-fraud model alone ranks overall fraud worse (ROC-AUC 0.66), so it is only used inside the combination. Replay check (2026-11-10, first 10,000 purchases from day 123): the live combined score equals Python exactly for every purchase, with the same flag decisions, and latency p50 / p95 / p99 of 8.6 / 20.3 / 34.3 ms.
 
 ## Evaluation
 

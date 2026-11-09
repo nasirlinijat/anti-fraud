@@ -142,6 +142,54 @@ def predict_fast(dump, rows):
     return 1 / (1 + np.exp(-total))
 
 
+# Points in a percentile table; a score's percentile has a step of 1/10001.
+PERCENTILE_POINTS = 10001
+# A table value counts as below a score only when it is lower by more than
+# this. Python and Go may compute the same score one bit apart, and many
+# purchases share exactly the score of a table value.
+PERCENTILE_TOLERANCE = 1e-12
+
+
+def percentile_table(scores, points=PERCENTILE_POINTS):
+    """Quantiles of a model's validation scores, used to put scores of
+    different models on the same 0-1 scale."""
+    return np.quantile(scores, np.linspace(0, 1, points))
+
+
+def percentile(table, scores):
+    """Share of the table below each score by more than PERCENTILE_TOLERANCE.
+    A score shared by many purchases at the bottom of the table (a model's
+    "nothing suspicious") gets 0, so it never hides the other model's low
+    score."""
+    return np.searchsorted(table, np.asarray(scores) - PERCENTILE_TOLERANCE, side="left") / len(table)
+
+
+def combined_score(parts, rows):
+    """Highest percentile among the models. parts holds (dump, table) pairs."""
+    return np.max([percentile(table, predict_fast(dump, rows)) for dump, table in parts], axis=0)
+
+
+def export_combined(version, out_dir, parts, golden_rows, report):
+    """Writes a combination of exported models: parts holds (model version,
+    dump, percentile table). The service scores a purchase with every model and
+    keeps the highest percentile."""
+    out_dir = Path(out_dir)
+    combination = {
+        "model_version": version,
+        "combination": "max_percentile",
+        "feature_names": parts[0][1]["feature_names"],
+        "models": [{"file": f"{name}.json", "percentiles": [float(x) for x in table]} for name, _, table in parts],
+    }
+    if any(dump["feature_names"] != combination["feature_names"] for _, dump, _ in parts):
+        raise ValueError("combined models must use the same features")
+    expected = combined_score([(dump, table) for _, dump, table in parts], golden_rows.to_numpy())
+    report["export"] = {"version": version, "models": [name for name, _, _ in parts], "golden_rows": len(golden_rows)}
+    (out_dir / f"{version}.json").write_text(json.dumps(combination))
+    golden_rows.assign(expected=expected).to_csv(out_dir / f"{version}.golden.csv", index=False)
+    (out_dir / f"{version}.report.json").write_text(json.dumps(report, indent=2))
+    return out_dir / f"{version}.json"
+
+
 def export(model, feature_names, version, out_dir, golden_rows, report):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -169,4 +217,4 @@ def export(model, feature_names, version, out_dir, golden_rows, report):
     (out_dir / f"{version}.json").write_text(json.dumps(dump))
     golden_rows.assign(expected=expected).to_csv(out_dir / f"{version}.golden.csv", index=False)
     (out_dir / f"{version}.report.json").write_text(json.dumps(report, indent=2))
-    return out_dir / f"{version}.json"
+    return out_dir / f"{version}.json", dump

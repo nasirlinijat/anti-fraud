@@ -35,7 +35,7 @@ func main() {
 	if cfg.ModelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
 	} else {
-		model, err := lgbm.Load(cfg.ModelPath)
+		model, err := lgbm.LoadScorer(cfg.ModelPath)
 		if err != nil {
 			log.Fatalf("load fraud model: %v", err)
 		}

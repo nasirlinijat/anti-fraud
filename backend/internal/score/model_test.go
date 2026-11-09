@@ -161,9 +161,15 @@ func TestUseModelRejectsMismatch(t *testing.T) {
 	}
 }
 
-func TestUseModelAcceptsV4Model(t *testing.T) {
-	const path = "../../models/lgbm-ieee-v4.json"
-	model, err := lgbm.Load(path)
+func TestUseModelAcceptsExportedModels(t *testing.T) {
+	for _, path := range []string{"../../models/lgbm-ieee-v4.json", "../../models/lgbm-ieee-v4-combined.json"} {
+		t.Run(path, func(t *testing.T) { useExportedModel(t, path) })
+	}
+}
+
+func useExportedModel(t *testing.T, path string) {
+	t.Helper()
+	model, err := lgbm.LoadScorer(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

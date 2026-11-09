@@ -206,7 +206,7 @@ def main():
     parser.add_argument("--from-day", type=int, default=TEST_FIRST_DAY - features.WARM_UP_DAYS,
                         help="first day to replay; the days before the test month build the history")
     parser.add_argument("--limit", type=int, help="replay only the first N purchases, for a quick check")
-    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v4.json")
+    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v4-combined.json")
     parser.add_argument("--out", default="output/replay")
     args = parser.parse_args()
     out_dir = Path(args.out)
@@ -223,7 +223,15 @@ def main():
     policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"]}
 
     built = features.build(data.copy())
-    python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
+    if "combination" in dump:
+        # A combination of models: the highest percentile, as the service computes it.
+        parts = [
+            (json.loads((Path(args.model).parent / part["file"]).read_text()), np.array(part["percentiles"]))
+            for part in dump["models"]
+        ]
+        python_score = export.combined_score(parts, built[dump["feature_names"]].to_numpy())
+    else:
+        python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
 
     started = time.time()
     live = send(requests_from(data), Client(args.url, args.api_key))

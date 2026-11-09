@@ -867,8 +867,11 @@ components:
           maximum: 1
           nullable: true
           description: >-
-            Fraud risk from the model, from 0 to 1. It is null when the
-            service runs without a model (MODEL_PATH is empty).
+            Fraud risk from the model, from 0 to 1. With the default combined
+            model it is the higher of two percentiles: where the purchase ranks
+            among validation purchases for the main model and for the
+            first-fraud model. It is null when the service runs without a
+            model (MODEL_PATH is empty).
           example: 0.0074
 
     FiredRule:

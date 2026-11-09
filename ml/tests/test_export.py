@@ -79,6 +79,23 @@ def test_choose_thresholds_by_money_or_rate():
     assert 0 <= effect["flagged_fraud_money_caught"] <= 1
 
 
+def test_percentile_counts_the_table_strictly_below():
+    table = np.array([0.1, 0.1, 0.2, 0.5])
+    assert export.percentile(table, np.array([0.05, 0.1, 0.2, 0.3, 0.9])).tolist() == [0, 0, 0.5, 0.75, 1]
+
+
+def test_combined_score_takes_the_higher_percentile(model_and_rows):
+    model, rows, _ = model_and_rows
+    dump = model.booster_.dump_model()
+    values = rows.to_numpy()
+    scores = export.predict_fast(dump, values)
+    low_table = export.percentile_table(scores)
+    high_table = export.percentile_table(scores / 2)
+    combined = export.combined_score([(dump, low_table), (dump, high_table)], values)
+    assert np.all(combined == np.maximum(export.percentile(low_table, scores), export.percentile(high_table, scores)))
+    assert np.all(combined >= export.percentile(low_table, scores))
+
+
 def test_unsupported_split_is_rejected():
     node = {"split_feature": 0, "decision_type": "==", "left_child": {"leaf_value": 0}, "right_child": {"leaf_value": 1}}
     with pytest.raises(ValueError):
@@ -116,7 +133,7 @@ def test_synthetic_rows_stay_in_range_and_include_missing_values():
 def test_export_writes_model_rows_and_report(model_and_rows, tmp_path):
     model, rows, _ = model_and_rows
     report = {}
-    path = export.export(model, ["a", "b", "c"], "test-v1", tmp_path, rows.head(50), report)
+    path, _ = export.export(model, ["a", "b", "c"], "test-v1", tmp_path, rows.head(50), report)
     dump = json.loads(path.read_text())
     assert dump["model_version"] == "test-v1"
     assert len(pd.read_csv(tmp_path / "test-v1.golden.csv")) == 50

@@ -82,6 +82,14 @@ def evaluate(y, score, amount=None):
     }
 
 
+def first_purchase_recall(y, score, first_purchase, rate=0.01):
+    """Fraud caught on a player's first purchase at the threshold that flags
+    rate of all legitimate purchases."""
+    threshold = np.quantile(score[y == 0], 1 - rate)
+    fraud = (y == 1) & first_purchase
+    return round(float((score[fraud] > threshold).mean()), 4) if fraud.any() else None
+
+
 def first_fraud_only(data):
     earlier_fraud = data.groupby("player_id", sort=False)["is_fraud"].cumsum() - data["is_fraud"]
     return ~((data["is_fraud"] == 1) & (earlier_fraud > 0))
@@ -159,11 +167,70 @@ def main():
 
     (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
     golden = export.synthetic_rows(x_train, 2000, SEED)
-    model_path = export.export(model, features.FEATURES, args.version, args.models_dir, golden, report)
+    model_path, model_dump = export.export(model, features.FEATURES, args.version, args.models_dir, golden, report)
+
+    # A second model learns only each customer's first fraud: IEEE marks a
+    # customer's later purchases as fraud after a chargeback, and those are
+    # easy to recognize but not new fraud.
+    keep_train = keep.loc[train.index].to_numpy()
+    keep_val = keep.loc[validation.index].to_numpy()
+    first = lightgbm_model()
+    first.fit(
+        x_train[keep_train], y_train[keep_train],
+        eval_X=x_val[keep_val],
+        eval_y=y_val[keep_val],
+        eval_metric="average_precision",
+        callbacks=[lgb.early_stopping(200, verbose=False)],
+    )
+    first_val = first.predict_proba(x_val)[:, 1]
+    first_test = first.predict_proba(x_test)[:, 1]
+    first_report = {
+        "features": features.FEATURES,
+        "labels": "first fraud of each customer only",
+        "lightgbm": {
+            "best_iteration": int(first.best_iteration_),
+            "test": evaluate(y_test, first_test, test_amount),
+            "test_first_fraud_only": evaluate(y_test[test_keep], first_test[test_keep], test_amount[test_keep]),
+        },
+    }
+    first_version = f"{args.version}-first"
+    _, first_dump = export.export(first, features.FEATURES, first_version, args.models_dir, golden, first_report)
+
+    tables = [export.percentile_table(model_val), export.percentile_table(first_val)]
+    combined_val = np.maximum(export.percentile(tables[0], model_val), export.percentile(tables[1], first_val))
+    combined_test = np.maximum(export.percentile(tables[0], model_test), export.percentile(tables[1], first_test))
+    combined_thresholds = export.choose_thresholds(
+        y_val, combined_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost
+    )
+    first_purchase = test["player_txn_count"].to_numpy() == 0
+    combined_report = {
+        "features": features.FEATURES,
+        "combination": "highest percentile of the main and first-fraud models",
+        "comparison_at_1pct": {
+            name: {
+                **{k: v for k, v in at_false_positive_rate(y_test, score, 0.01, test_amount).items() if k != "threshold"},
+                "first_purchase_fraud_caught": first_purchase_recall(y_test, score, first_purchase),
+            }
+            for name, score in [("main", model_test), ("combined", combined_test)]
+        },
+        "test": evaluate(y_test, combined_test, test_amount),
+        "test_first_fraud_only": evaluate(y_test[test_keep], combined_test[test_keep], test_amount[test_keep]),
+        "policy": {
+            **combined_thresholds,
+            "validation_effect": export.policy_effect(y_val, combined_val, combined_thresholds, val_amount),
+            "test_effect": export.policy_effect(y_test, combined_test, combined_thresholds, test_amount),
+        },
+    }
+    combined_path = export.export_combined(
+        f"{args.version}-combined", args.models_dir,
+        [(args.version, model_dump, tables[0]), (first_version, first_dump, tables[1])],
+        golden, combined_report,
+    )
 
     print(json.dumps({name: report[name]["test"] for name in ("logistic_regression", "lightgbm")}, indent=2))
     print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
-    print(f"model written to {model_path}")
+    print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "policy")}, indent=2))
+    print(f"models written to {model_path} and {combined_path}")
     print(f"done in {time.time() - started:.0f}s")
 
 
