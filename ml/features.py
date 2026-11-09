@@ -17,11 +17,19 @@ RAW_COLUMNS = [
     "dist1", "P_emaildomain", "R_emaildomain", "D1",
 ]
 DEVICE_COLUMNS = ["DeviceType", "DeviceInfo"]
+# Client details from the identity file: operating system, browser and screen.
+CLIENT_COLUMNS = ["id_30", "id_31", "id_33"]
 
 PRODUCT_CODES = {"W": 0, "H": 1, "C": 2, "S": 3, "R": 4}
 CARD_NETWORKS = {"visa": 0, "mastercard": 1, "american express": 2, "discover": 3}
 CARD_TYPES = {"debit": 0, "credit": 1, "debit or credit": 2, "charge card": 3}
 DEVICE_TYPES = {"desktop": 0, "mobile": 1}
+# Keyed by the first word of the value, in lower case.
+OS_FAMILIES = {"windows": 0, "ios": 1, "mac": 2, "android": 3, "linux": 4}
+BROWSER_FAMILIES = {
+    "chrome": 0, "mobile": 1, "safari": 2, "ie": 3, "edge": 4,
+    "firefox": 5, "samsung": 6, "android": 7, "opera": 8,
+}
 
 BASE_FEATURES = [
     "amount",
@@ -38,7 +46,6 @@ BASE_FEATURES = [
     "card_uses_24h",
     "player_distinct_cards",
     "email_is_new_for_player",
-    "hour_of_day",
     "card_country",
     "card_category",
     "billing_country",
@@ -76,10 +83,25 @@ FEATURE_GROUPS = {
     "distance": [
         "billing_distance",
     ],
+    "account": [
+        "account_age_days",
+    ],
+    "client": [
+        "has_client_info",
+        "os_family",
+        "browser_family",
+        "os_share",
+        "browser_share",
+        "screen_share",
+        "screen_area",
+        "os_is_new_for_player",
+        "browser_is_new_for_player",
+        "player_distinct_browsers",
+    ],
 }
 
 ALL_FEATURES = BASE_FEATURES + [name for group in FEATURE_GROUPS.values() for name in group]
-SELECTED_GROUPS = ["device", "shared", "distance"]
+SELECTED_GROUPS = ["device", "shared", "distance", "account", "client"]
 FEATURES = BASE_FEATURES + [name for group in SELECTED_GROUPS for name in FEATURE_GROUPS[group]]
 
 WARM_UP_DAYS = 30
@@ -87,13 +109,13 @@ WARM_UP_DAYS = 30
 
 def load(path, identity_path=None):
     path = Path(path)
-    wanted = set(RAW_COLUMNS + DEVICE_COLUMNS)
+    wanted = set(RAW_COLUMNS + DEVICE_COLUMNS + CLIENT_COLUMNS)
     df = pd.read_csv(path, usecols=lambda column: column in wanted)
     identity_path = Path(identity_path) if identity_path else path.with_name("train_identity.csv")
     if identity_path.exists() and "DeviceInfo" not in df.columns:
-        identity = pd.read_csv(identity_path, usecols=["TransactionID", *DEVICE_COLUMNS])
+        identity = pd.read_csv(identity_path, usecols=["TransactionID", *DEVICE_COLUMNS, *CLIENT_COLUMNS])
         df = df.merge(identity, on="TransactionID", how="left")
-    for column in [*RAW_COLUMNS, *DEVICE_COLUMNS]:
+    for column in [*RAW_COLUMNS, *DEVICE_COLUMNS, *CLIENT_COLUMNS]:
         if column not in df.columns:
             df[column] = np.nan
     df["amount_minor"] = np.round(df["TransactionAmt"] * 100).astype("int64")
@@ -145,6 +167,10 @@ def distinct_before(df, entity, other):
     return first_pair.groupby(df[entity], sort=False).cumsum() - first_pair
 
 
+def first_word(column):
+    return column.str.lower().str.split(" ").str[0]
+
+
 def build(df):
     df = add_keys(df)
     out = pd.DataFrame(index=df.index)
@@ -158,8 +184,9 @@ def build(df):
 
     by_player = df.groupby("player_id", sort=False)
     out["player_txn_count"] = by_player.cumcount()
-    previous_total = by_player["TransactionAmt"].cumsum() - amount
-    out["player_avg_amount"] = (previous_total / out["player_txn_count"]).where(out["player_txn_count"] > 0)
+    # Summed in minor units, so the average equals the service's integer sum divided once.
+    previous_total = by_player["amount_minor"].cumsum() - df["amount_minor"]
+    out["player_avg_amount"] = (previous_total / 100 / out["player_txn_count"]).where(out["player_txn_count"] > 0)
     out["amount_to_avg"] = (amount / out["player_avg_amount"]).where(out["player_avg_amount"] > 0)
 
     times = df["TransactionDT"]
@@ -176,7 +203,6 @@ def build(df):
     first_email_use = ~df.duplicated(["player_id", "email"])
     out["email_is_new_for_player"] = (first_email_use & (out["player_txn_count"] > 0)).astype(int)
 
-    out["hour_of_day"] = (times // 3600) % 24
     out["card_country"] = df["card3"]
     out["card_category"] = df["card5"]
     out["billing_country"] = df["addr2"]
@@ -221,6 +247,25 @@ def build(df):
     out["player_amount_24h"] = window_sums(time_values, df["player_id"], amounts, SECONDS_PER_DAY)
 
     out["billing_distance"] = df["dist1"]
+
+    out["account_age_days"] = df["D1"]
+
+    os_name, browser, screen = df["id_30"], df["id_31"], df["id_33"]
+    out["has_client_info"] = (os_name.notna() | browser.notna() | screen.notna()).astype(int)
+    out["os_family"] = first_word(os_name).map(OS_FAMILIES)
+    out["browser_family"] = first_word(browser).map(BROWSER_FAMILIES)
+    for name, column in [("os", os_name), ("browser", browser), ("screen", screen)]:
+        key = column.fillna("")
+        out[f"{name}_share"] = (key.groupby(key, sort=False).cumcount() / earlier_rows).where(column.notna() & (earlier_rows > 0))
+    size = screen.str.extract(r"^(\d+)x(\d+)$").astype(float)
+    out["screen_area"] = size[0] * size[1]
+    for name, column in [("os", os_name), ("browser", browser)]:
+        first_use = ~pd.DataFrame({"player": df["player_id"], "value": column.fillna("")}).duplicated()
+        known = column.notna()
+        out[f"{name}_is_new_for_player"] = (first_use & known & (out["player_txn_count"] > 0)).astype(int)
+        if name == "browser":
+            first_known = first_use & known
+            out["player_distinct_browsers"] = first_known.groupby(df["player_id"], sort=False).cumsum() - first_known
 
     out = out[ALL_FEATURES].astype(float).fillna(MISSING)
     out["is_fraud"] = df["isFraud"].to_numpy()

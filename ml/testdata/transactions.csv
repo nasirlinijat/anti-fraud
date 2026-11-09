@@ -1,9 +1,9 @@
-TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,dist1,P_emaildomain,R_emaildomain,D1,DeviceType,DeviceInfo
-1,0,3456000,50.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows
-2,0,3456600,20.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows
-3,0,3459600,50.00,W,1001,111,150,visa,226,debit,100,87,,gmail.com,,30,desktop,Windows
-4,1,3460000,250.00,W,1001,222,150,visa,226,debit,100,87,350,yahoo.com,hotmail.com,30,mobile,iOS Device
-5,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,,20,,
-6,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,gmail.com,20,,
-7,0,3633000,30.00,W,1001,111,150,visa,226,debit,100,87,12,gmail.com,,32,desktop,Windows
-8,0,3640000,15.50,S,3003,,,discover,,charge card,,,,,,,,
+TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,dist1,P_emaildomain,R_emaildomain,D1,DeviceType,DeviceInfo,id_30,id_31,id_33
+1,0,3456000,50.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080
+2,0,3456600,20.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080
+3,0,3459600,50.00,W,1001,111,150,visa,226,debit,100,87,,gmail.com,,30,desktop,Windows,Windows 10,firefox 57.0,1920x1080
+4,1,3460000,250.00,W,1001,222,150,visa,226,debit,100,87,350,yahoo.com,hotmail.com,30,mobile,iOS Device,iOS 11.2.1,mobile safari 11.0,1334x750
+5,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,,20,,,,,
+6,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,gmail.com,20,,,,chrome 62.0,
+7,0,3633000,30.00,W,1001,111,150,visa,226,debit,100,87,12,gmail.com,,32,desktop,Windows,Windows 10,chrome 63.0,1366x768
+8,0,3640000,15.50,S,3003,,,discover,,charge card,,,,,,,,,,,

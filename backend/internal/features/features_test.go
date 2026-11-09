@@ -21,9 +21,10 @@ import (
 
 const (
 	transactionsPath = "../../../ml/testdata/transactions.csv"
-	expectedPath     = "../../../ml/testdata/expected_features.csv"
-	modelPath        = "../../models/lgbm-ieee-v3.json"
-	tolerance        = 1e-9
+	// The service computes the v3 features until it moves to model v4.
+	expectedPath = "../../../ml/testdata/expected_features_v3.csv"
+	modelPath    = "../../models/lgbm-ieee-v3.json"
+	tolerance    = 1e-9
 )
 
 func ptr[T any](v T) *T { return &v }

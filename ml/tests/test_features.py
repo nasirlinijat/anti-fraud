@@ -86,6 +86,52 @@ def test_shared_entity_features(raw):
     assert built.loc[7, "card1_distinct_emails"] == 2
 
 
+def test_account_age_comes_from_d1(raw):
+    built = build_for(raw)
+    assert built.loc[1, "account_age_days"] == 30
+    assert built.loc[7, "account_age_days"] == 32
+    assert built.loc[8, "account_age_days"] == features.MISSING
+
+
+def test_client_features(raw):
+    built = build_for(raw)
+    assert built.loc[1, "os_family"] == 0 and built.loc[1, "browser_family"] == 0
+    assert built.loc[4, "os_family"] == 1 and built.loc[4, "browser_family"] == 1
+    assert built.loc[7, "os_share"] == pytest.approx(3 / 6)
+    assert built.loc[7, "browser_share"] == pytest.approx(2 / 6)
+    assert built.loc[7, "screen_area"] == 1366 * 768
+    assert built.loc[3, "browser_is_new_for_player"] == 1
+    assert built.loc[4, "os_is_new_for_player"] == 1
+    assert built.loc[7, "browser_is_new_for_player"] == 0
+    assert built.loc[7, "player_distinct_browsers"] == 3
+
+
+def test_missing_client_details(raw):
+    built = build_for(raw)
+    assert built.loc[5, "has_client_info"] == 0
+    for name in ("os_family", "browser_family", "os_share", "browser_share", "screen_share", "screen_area"):
+        assert built.loc[5, name] == features.MISSING
+    # A browser without an operating system or screen still counts as client details.
+    assert built.loc[6, "has_client_info"] == 1
+    assert built.loc[6, "os_share"] == features.MISSING
+    assert built.loc[6, "browser_is_new_for_player"] == 1
+
+
+def test_first_purchase_has_no_new_client_flags(raw):
+    built = build_for(raw)
+    assert built.loc[1, "os_is_new_for_player"] == 0
+    assert built.loc[1, "browser_is_new_for_player"] == 0
+
+
+def test_hour_of_day_is_not_a_model_input():
+    assert "hour_of_day" not in features.FEATURES
+
+
+def test_player_average_uses_minor_units(raw):
+    built = build_for(raw)
+    assert built.loc[7, "player_avg_amount"] == (5000 + 2000 + 5000 + 25000) / 100 / 4
+
+
 def test_split_follows_days_and_skips_warm_up():
     data = pd.DataFrame({"day": np.arange(0, 184)})
     train, validation, test = features.split(data)
