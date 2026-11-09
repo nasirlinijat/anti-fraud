@@ -9,6 +9,15 @@ import (
 	"context"
 )
 
+const deactivateRuleset = `-- name: DeactivateRuleset :exec
+UPDATE rulesets SET is_active = false WHERE is_active
+`
+
+func (q *Queries) DeactivateRuleset(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deactivateRuleset)
+	return err
+}
+
 const getActiveRuleset = `-- name: GetActiveRuleset :one
 SELECT version, review_threshold, block_threshold
 FROM rulesets
@@ -26,6 +35,49 @@ func (q *Queries) GetActiveRuleset(ctx context.Context) (GetActiveRulesetRow, er
 	var i GetActiveRulesetRow
 	err := row.Scan(&i.Version, &i.ReviewThreshold, &i.BlockThreshold)
 	return i, err
+}
+
+const insertRuleset = `-- name: InsertRuleset :one
+INSERT INTO rulesets (version, review_threshold, block_threshold, is_active)
+SELECT COALESCE(MAX(version), 0) + 1, $1, $2, true
+FROM rulesets
+RETURNING version
+`
+
+type InsertRulesetParams struct {
+	ReviewThreshold int32
+	BlockThreshold  int32
+}
+
+func (q *Queries) InsertRuleset(ctx context.Context, arg InsertRulesetParams) (int32, error) {
+	row := q.db.QueryRow(ctx, insertRuleset, arg.ReviewThreshold, arg.BlockThreshold)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
+}
+
+const insertRulesetRule = `-- name: InsertRulesetRule :exec
+INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertRulesetRuleParams struct {
+	RulesetVersion int32
+	RuleName       string
+	Enabled        bool
+	Weight         int32
+	RuleLimit      int64
+}
+
+func (q *Queries) InsertRulesetRule(ctx context.Context, arg InsertRulesetRuleParams) error {
+	_, err := q.db.Exec(ctx, insertRulesetRule,
+		arg.RulesetVersion,
+		arg.RuleName,
+		arg.Enabled,
+		arg.Weight,
+		arg.RuleLimit,
+	)
+	return err
 }
 
 const listRulesetRules = `-- name: ListRulesetRules :many
@@ -64,4 +116,14 @@ func (q *Queries) ListRulesetRules(ctx context.Context, rulesetVersion int32) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRulesetsForPublish = `-- name: LockRulesetsForPublish :exec
+LOCK TABLE rulesets IN SHARE ROW EXCLUSIVE MODE
+`
+
+// Serialize publishers without blocking readers of the current ruleset.
+func (q *Queries) LockRulesetsForPublish(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockRulesetsForPublish)
+	return err
 }

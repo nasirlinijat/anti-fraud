@@ -124,9 +124,13 @@ With the default ruleset the patterns give these outcomes:
 
 The pattern is never sent to the API. It is only used for the summary.
 
+## Ruleset API
+
+Use `GET /rulesets/active` to read the current version. To change settings, send the full configuration without its `version` field to `POST /rulesets`. Both endpoints require the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
+
 ## API Documentation
 
-The score API is described in `openapi.yaml`, which is written by hand. It lists every field of the score request and response, the error responses, and the API key header.
+The scoring and ruleset APIs are described in `openapi.yaml`, which is written by hand. It lists the request and response fields, error responses, and the API key header.
 
 To read it in Swagger UI, run:
 
@@ -136,7 +140,7 @@ make docs
 
 Then open http://localhost:8090 and stop the server with Ctrl+C. To use another port, set `SWAGGER_PORT` in `.env`. Swagger UI only shows the API. Its "Try it out" button cannot call the backend from the browser, because the backend does not allow cross-origin requests. Use `curl` as in the setup steps instead.
 
-When the score request or response changes, change `openapi.yaml` in the same pull request.
+When an API request or response changes, change `openapi.yaml` in the same pull request.
 
 ## Frontend
 
