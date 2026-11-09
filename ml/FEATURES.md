@@ -108,7 +108,15 @@ Features 19, 27, 30 and 31 count over all players, so the service needs running 
 
 The thresholds are in `backend/models/<version>.report.json` under `policy`: `flag_at` (an allowed purchase at or above it goes to review) and `clear_below` (a reviewed purchase below it is cleared). The model never blocks.
 
+## Go implementation
+
+`backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
+
+- Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text.
+- Features 19, 27, 30 and 31 read running totals from the `feature_counts` table: all purchases, purchases per email domain and per device name, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.
+
 ## Checking the Go implementation
 
-1. Feature values: compute features for `ml/testdata/transactions.csv` in order and compare with `ml/testdata/expected_features.csv` (tolerance 1e-9).
-2. Model scores: score every row of `backend/models/<version>.golden.csv` and compare with its `expected` column (tolerance 1e-9).
+1. Feature values: `TestHistoryMatchesExpectedFeatures` scores `ml/testdata/transactions.csv` row by row against PostgreSQL and compares with `ml/testdata/expected_features.csv` (tolerance 1e-9).
+2. Model scores: `TestPredictMatchesGoldenRows` scores every row of `backend/models/<version>.golden.csv` and compares with its `expected` column (tolerance 1e-9).
+3. Indexes: `TestFeatureQueriesUseIndexes` checks that every history query is served by an index.

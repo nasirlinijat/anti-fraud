@@ -70,6 +70,7 @@ backend/
     ├── stats/          Dashboard queries
     ├── simulator/      Demo traffic generator
     ├── lgbm/           Model loader and prediction
+    ├── features/       Model inputs from the request and purchase history
     ├── db/             sqlc-generated queries
     └── platform/       Config, database pool, error helper
 ```

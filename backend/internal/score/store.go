@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -51,6 +52,9 @@ type Decision struct {
 	ModelInputs map[string]float64
 	// ModelScore is nil when no model is loaded.
 	ModelScore *float64
+	// FeatureHistory is the history the model inputs were computed from. Save
+	// uses it to add the purchase to the feature running totals.
+	FeatureHistory features.History
 }
 
 // ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.
@@ -82,6 +86,35 @@ func (s *Store) CardPurchasesLastHour(ctx context.Context, cardToken string, at 
 		return 0, fmt.Errorf("count card purchases: %w", err)
 	}
 	return int(n), nil
+}
+
+// FeatureInput returns the request fields the model features use.
+func (p Purchase) FeatureInput() features.Input {
+	return features.Input{
+		TransactionID:        p.TransactionID,
+		EventTime:            p.EventTime,
+		AmountMinor:          p.AmountMinor,
+		PlayerID:             p.PlayerID,
+		CardToken:            p.CardToken,
+		CardIssuer:           p.CardIssuer,
+		CardNetwork:          p.CardNetwork,
+		CardType:             p.CardType,
+		CardCountry:          p.CardCountry,
+		CardCategory:         p.CardCategory,
+		ProductCode:          p.ProductCode,
+		BillingRegion:        p.BillingRegion,
+		BillingCountry:       p.BillingCountry,
+		BillingDistance:      p.BillingDistance,
+		EmailDomain:          p.EmailDomain,
+		RecipientEmailDomain: p.RecipientEmailDomain,
+		DeviceType:           p.DeviceType,
+		DeviceName:           p.DeviceName,
+	}
+}
+
+// FeatureHistory reads the purchase history the model features need.
+func (s *Store) FeatureHistory(ctx context.Context, in features.Input) (features.History, error) {
+	return features.NewStore(s.conn).History(ctx, in)
 }
 
 // Save stores a purchase and its decision in one transaction and returns the
@@ -155,6 +188,9 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)
+	}
+	if err := features.AddToCounts(ctx, tx, p.FeatureInput(), d.FeatureHistory); err != nil {
+		return 0, fmt.Errorf("purchase %s: %w", p.TransactionID, err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
