@@ -190,6 +190,19 @@ v5 adds `card_issuer_code` (`card1`) and `billing_region_code` (`addr1`) as numb
 | Combined policy: flags, precision, fraud caught | 0.96%, 44%, 12.0% | 0.93%, 43%, 11.6% |
 | Combined policy: reviews cleared, fraud missed by clearing | 19.5%, 1.9% | **22.3%**, 1.9% |
 
+### Averaging 5 models
+
+The main model is the average of 5 LightGBM models trained with different random seeds (`--models`, default 5). They are exported as one file: every tree of every model with its leaf values divided by 5, so the score is the sigmoid of the average raw score and the Go reader needs no change (4,700 trees, about 5 µs per purchase). The report keeps the first model alone as `single_model_test`.
+
+| Test month, main model | One model | Average of 5 |
+|---|---|---|
+| PR-AUC | 0.245 | **0.247** |
+| First-fraud PR-AUC | 0.133 | **0.138** |
+| Precision at 0.5% of legit flagged | 45.7% | **46.1%** |
+| Fraud caught / precision at 1% | 17.1% / 38.3% | **18.4% / 40.0%** |
+
+Replay check: 10,000 purchases scored exactly like Python, p95 17.6 ms.
+
 With the combination, the gain mostly shows as more reviews cleared for the same missed fraud. Replay check: 10,000 purchases through the service scored exactly like Python, p95 14.6 ms.
 
 ### Model v4 against v3 (test month, days 153-183)

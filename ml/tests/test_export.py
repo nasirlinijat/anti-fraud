@@ -96,6 +96,18 @@ def test_combined_score_takes_the_higher_percentile(model_and_rows):
     assert np.all(combined >= export.percentile(low_table, scores))
 
 
+def test_averaged_export_matches_the_models(model_and_rows, tmp_path):
+    model, rows, labels = model_and_rows
+    other = lgb.LGBMClassifier(n_estimators=30, num_leaves=5, use_missing=False, random_state=3, verbose=-1)
+    other.fit(rows, labels, eval_X=rows, eval_y=labels)
+    report = {}
+    path, dump = export.export([model, other], ["a", "b", "c"], "avg-v1", tmp_path, rows.head(50), report)
+    raw = (model.predict(rows, raw_score=True) + other.predict(rows, raw_score=True)) / 2
+    assert np.max(np.abs(export.predict_fast(dump, rows.to_numpy()) - 1 / (1 + np.exp(-raw)))) < 1e-9
+    assert report["export"]["trees"] == len(model.booster_.dump_model()["tree_info"]) + 30
+    assert report["export"]["tree_reader_max_difference"] < 1e-9
+
+
 def test_unsupported_split_is_rejected():
     node = {"split_feature": 0, "decision_type": "==", "left_child": {"leaf_value": 0}, "right_child": {"leaf_value": 1}}
     with pytest.raises(ValueError):

@@ -190,18 +190,54 @@ def export_combined(version, out_dir, parts, golden_rows, report):
     return out_dir / f"{version}.json"
 
 
+def scale_leaves(node, factor):
+    if "split_feature" in node:
+        scale_leaves(node["left_child"], factor)
+        scale_leaves(node["right_child"], factor)
+    else:
+        node["leaf_value"] *= factor
+
+
+def average_dump(models):
+    """One model dump whose score is the sigmoid of the average raw score of
+    the models: every tree of every model, with leaf values divided by the
+    number of models. The Go reader needs no change."""
+    dumps = [m.booster_.dump_model(num_iteration=m.best_iteration_) for m in models]
+    trees = []
+    for dump in dumps:
+        for info in dump["tree_info"]:
+            scale_leaves(info["tree_structure"], 1 / len(models))
+            trees.append(info)
+    merged = dumps[0]
+    merged["tree_info"] = trees
+    for index, info in enumerate(merged["tree_info"]):
+        info["tree_index"] = index
+    return merged
+
+
+def average_proba(models, rows):
+    """Sigmoid of the average raw score, the score of average_dump."""
+    raw = np.mean([m.predict(rows, raw_score=True, num_iteration=m.best_iteration_) for m in models], axis=0)
+    return 1 / (1 + np.exp(-raw))
+
+
 def export(model, feature_names, version, out_dir, golden_rows, report):
+    """Exports one LightGBM model, or a list of models averaged into one file."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    dump = model.booster_.dump_model(num_iteration=model.best_iteration_)
+    if isinstance(model, list):
+        dump = average_dump(model)
+        expected = average_proba(model, golden_rows)
+    else:
+        dump = model.booster_.dump_model(num_iteration=model.best_iteration_)
+        expected = model.predict_proba(golden_rows)[:, 1]
     if dump["feature_names"] != feature_names:
         raise ValueError("model features do not match the feature list")
     for info in dump["tree_info"]:
         check_supported(info["tree_structure"])
     dump["model_version"] = version
 
-    expected = model.predict_proba(golden_rows)[:, 1]
     reproduced = predict_from_dump(dump, golden_rows.to_numpy())
     max_difference = float(np.max(np.abs(expected - reproduced)))
     if max_difference > 1e-9:

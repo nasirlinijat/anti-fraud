@@ -20,6 +20,7 @@ import export
 import features
 
 SEED = 1234
+AVERAGE_SEEDS = [SEED, 7, 99, 2024, 31337]
 FALSE_POSITIVE_RATES = [0.001, 0.005, 0.01, 0.02]
 
 
@@ -103,6 +104,7 @@ def main():
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)
+    parser.add_argument("--models", type=int, default=5, help="number of models averaged into the main model (1 to 5)")
     parser.add_argument("--inputs", help="train from model inputs exported by the service instead of the IEEE-CIS CSV")
     parser.add_argument("--labels", help="CSV with transaction_id and is_fraud, needed with --inputs")
     parser.add_argument("--day-zero", default="2017-12-01T00:00:00Z",
@@ -157,19 +159,29 @@ def main():
         "test_first_fraud_only": evaluate(y_test[test_keep], baseline_test[test_keep], test_amount[test_keep]),
     }
 
-    model = lightgbm_model()
-    model.fit(
-        x_train, y_train,
-        eval_X=x_val,
-        eval_y=y_val,
-        eval_metric="average_precision",
-        callbacks=[lgb.early_stopping(200, verbose=False)],
-    )
-    model_test = model.predict_proba(x_test)[:, 1]
-    importance = model.booster_.feature_importance(importance_type="gain")
+    # The main model is the average of several models trained with different
+    # random seeds; averaging smooths out each model's chance splits.
+    models = []
+    for seed in AVERAGE_SEEDS[: args.models]:
+        m = lightgbm_model()
+        m.set_params(random_state=seed)
+        m.fit(
+            x_train, y_train,
+            eval_X=x_val,
+            eval_y=y_val,
+            eval_metric="average_precision",
+            callbacks=[lgb.early_stopping(200, verbose=False)],
+        )
+        models.append(m)
+    single_test = models[0].predict_proba(x_test)[:, 1]
+    model_val = export.average_proba(models, x_val)
+    model_test = export.average_proba(models, x_test)
+    importance = np.mean([m.booster_.feature_importance(importance_type="gain") for m in models], axis=0)
     report["lightgbm"] = {
-        "best_iteration": int(model.best_iteration_),
-        "validation": evaluate(y_val, model.predict_proba(x_val)[:, 1], val_amount),
+        "models": len(models),
+        "best_iterations": [int(m.best_iteration_) for m in models],
+        "single_model_test": evaluate(y_test, single_test, test_amount),
+        "validation": evaluate(y_val, model_val, val_amount),
         "test": evaluate(y_test, model_test, test_amount),
         "test_first_fraud_only": evaluate(y_test[test_keep], model_test[test_keep], test_amount[test_keep]),
         "feature_importance_gain": {
@@ -178,7 +190,6 @@ def main():
         },
     }
 
-    model_val = model.predict_proba(x_val)[:, 1]
     thresholds = export.choose_thresholds(
         y_val, model_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost
     )
@@ -190,7 +201,7 @@ def main():
 
     (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
     golden = export.synthetic_rows(x_train, 2000, SEED)
-    model_path, model_dump = export.export(model, features.FEATURES, args.version, args.models_dir, golden, report)
+    model_path, model_dump = export.export(models, features.FEATURES, args.version, args.models_dir, golden, report)
 
     # A second model learns only each customer's first fraud: IEEE marks a
     # customer's later purchases as fraud after a chargeback, and those are
