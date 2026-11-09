@@ -162,7 +162,7 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, and blocklist requests. For `GET /reviews`, it forwards the key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For `GET /reviews`, it forwards the key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Page | What it does |
 |---|---|
@@ -170,6 +170,7 @@ The development server forwards API requests to the backend, so the browser need
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
 | Review queue (`#/reviews`) | Enter the local `API_KEY` to browse purchases awaiting review, oldest queued first. The current page refreshes every five seconds. |
+| Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version and shows its version number. |
 
 The tester is a local development tool: it only works through the development server, which holds the API key.
 

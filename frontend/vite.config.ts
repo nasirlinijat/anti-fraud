@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
         '/score': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
         '/stats': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
         '/blocklist': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        '/rulesets': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
         // Forward the key entered in the review queue.
         '/reviews': backendUrl,
       },

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import BlocklistPage from './pages/BlocklistPage'
 import DashboardPage from './pages/DashboardPage'
 import ReviewQueue from './ReviewQueue'
+import RulesetPage from './pages/RulesetPage'
 import TesterPage from './pages/TesterPage'
 
 type Status = 'checking' | 'ready' | 'unavailable'
@@ -13,6 +14,7 @@ const pages = [
   { path: '/blocklist', title: 'Blocklist', element: <BlocklistPage /> },
   { path: '/tester', title: 'Tester', element: <TesterPage /> },
   { path: '/reviews', title: 'Review queue', element: <ReviewQueue /> },
+  { path: '/rulesets', title: 'Rulesets', element: <RulesetPage /> },
 ]
 
 function currentPath(): string {
