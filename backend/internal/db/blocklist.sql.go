@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteBlocklistEntry = `-- name: DeleteBlocklistEntry :execrows
+DELETE FROM blocklist_entries WHERE id = $1
+`
+
+func (q *Queries) DeleteBlocklistEntry(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteBlocklistEntry, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findBlocklistEntry = `-- name: FindBlocklistEntry :one
 SELECT entry_type, value, reason
 FROM blocklist_entries
@@ -47,4 +59,61 @@ func (q *Queries) FindBlocklistEntry(ctx context.Context, arg FindBlocklistEntry
 	var i FindBlocklistEntryRow
 	err := row.Scan(&i.EntryType, &i.Value, &i.Reason)
 	return i, err
+}
+
+const insertBlocklistEntry = `-- name: InsertBlocklistEntry :one
+INSERT INTO blocklist_entries (entry_type, value, reason)
+VALUES ($1, $2, $3)
+RETURNING id, created_at
+`
+
+type InsertBlocklistEntryParams struct {
+	EntryType string
+	Value     string
+	Reason    string
+}
+
+type InsertBlocklistEntryRow struct {
+	ID        int64
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertBlocklistEntry(ctx context.Context, arg InsertBlocklistEntryParams) (InsertBlocklistEntryRow, error) {
+	row := q.db.QueryRow(ctx, insertBlocklistEntry, arg.EntryType, arg.Value, arg.Reason)
+	var i InsertBlocklistEntryRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
+const listBlocklistEntries = `-- name: ListBlocklistEntries :many
+SELECT id, entry_type, value, reason, created_at
+FROM blocklist_entries
+ORDER BY created_at DESC, id DESC
+`
+
+// Lists all entries, the newest first.
+func (q *Queries) ListBlocklistEntries(ctx context.Context) ([]BlocklistEntry, error) {
+	rows, err := q.db.Query(ctx, listBlocklistEntries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BlocklistEntry
+	for rows.Next() {
+		var i BlocklistEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntryType,
+			&i.Value,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

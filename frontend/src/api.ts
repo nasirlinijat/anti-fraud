@@ -44,6 +44,63 @@ export async function getStats(period: Period): Promise<Stats> {
   return (await res.json()) as Stats
 }
 
+export const entryTypes = ['card', 'device', 'player', 'ip'] as const
+export type EntryType = (typeof entryTypes)[number]
+
+export interface BlocklistEntry {
+  id: number
+  type: EntryType
+  value: string
+  reason: string
+  created_at: string
+}
+
+export type Saved<T> = { ok: true; value: T } | { ok: false; error: ErrorResponse }
+
+async function errorFrom(res: Response): Promise<ErrorResponse> {
+  const body: unknown = await res.json().catch(() => null)
+  return body && typeof body === 'object' && 'error' in body
+    ? (body as ErrorResponse)
+    : { error: `The backend answered with status ${res.status}.` }
+}
+
+// The development server adds the API key to the blocklist requests.
+export async function listBlocklist(): Promise<BlocklistEntry[]> {
+  const res = await fetch('/blocklist')
+  if (!res.ok) {
+    throw new Error((await errorFrom(res)).error)
+  }
+  return ((await res.json()) as { entries: BlocklistEntry[] }).entries
+}
+
+export async function addBlocklistEntry(entry: { type: string; value: string; reason: string }): Promise<Saved<BlocklistEntry>> {
+  try {
+    const res = await fetch('/blocklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+    if (!res.ok) {
+      return { ok: false, error: await errorFrom(res) }
+    }
+    return { ok: true, value: (await res.json()) as BlocklistEntry }
+  } catch {
+    return { ok: false, error: { error: 'The backend cannot be reached. Is it running?' } }
+  }
+}
+
+export async function removeBlocklistEntry(id: number): Promise<Saved<null>> {
+  try {
+    const res = await fetch(`/blocklist/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      return { ok: false, error: await errorFrom(res) }
+    }
+    return { ok: true, value: null }
+  } catch {
+    return { ok: false, error: { error: 'The backend cannot be reached. Is it running?' } }
+  }
+}
+
 export type ScoreResult =
   | { ok: true; response: ScoreResponse }
   | { ok: false; status: number; error: ErrorResponse }
