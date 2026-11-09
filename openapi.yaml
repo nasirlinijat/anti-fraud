@@ -26,6 +26,8 @@ servers:
 tags:
   - name: Score
     description: Score a purchase.
+  - name: Reviews
+    description: Browse purchases awaiting review.
 
 paths:
   /score:
@@ -216,6 +218,55 @@ paths:
               example:
                 error: internal error
 
+  /reviews:
+    get:
+      tags: [Reviews]
+      operationId: listReviews
+      summary: List purchases awaiting review
+      description: >-
+        Returns up to 100 purchases, ordered by when they entered the review
+        queue, oldest first. Follow next_cursor to reach the next page.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: cursor
+          description: Opaque next_cursor from a previous response. Omit for the first page.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: A page of purchases awaiting review.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewPage"
+        "400":
+          description: The cursor is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The X-API-Key header is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The review queue could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -227,6 +278,56 @@ components:
         value outside local development.
 
   schemas:
+    ReviewPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ReviewItem"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page, or null if this is the last page.
+
+    ReviewItem:
+      type: object
+      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, rule_score, model_score, fired_rules]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        transaction_id:
+          type: string
+        event_time:
+          type: string
+          format: date-time
+          description: The purchase time in UTC.
+        queued_at:
+          type: string
+          format: date-time
+          description: When the purchase entered the queue, in UTC.
+        amount_minor:
+          type: string
+          description: The integer amount in minor units as a decimal string.
+        player_id:
+          type: string
+        rule_score:
+          type: integer
+          minimum: 0
+        model_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+        fired_rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/FiredRule"
+
     ScoreRequest:
       type: object
       description: >-

@@ -27,8 +27,14 @@ SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_i
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'
+  AND (
+      sqlc.narg(after_decided_at)::timestamptz IS NULL
+      OR (d.decided_at, d.purchase_id) > (
+          sqlc.narg(after_decided_at)::timestamptz, sqlc.narg(after_purchase_id)::bigint
+      )
+  )
 ORDER BY d.decided_at, d.purchase_id
-LIMIT $1;
+LIMIT sqlc.arg(page_limit);
 
 -- name: CountCardPurchasesLastHour :one
 -- Counts purchases with the card in the hour before the given time. Purchases

@@ -19,8 +19,10 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/health': backendUrl,
         '/ready': backendUrl,
-        // The proxy adds the API key, so it never reaches the browser.
+        // The tester uses the API key from the dev server.
         '/score': { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        // Forward the key entered in the review queue.
+        '/reviews': backendUrl,
       },
     },
   }

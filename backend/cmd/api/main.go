@@ -8,6 +8,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 )
@@ -26,6 +27,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
+	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.APIKey)
 	handler := score.NewHandler(rulesets.NewStore(pool), blocklist.NewStore(pool), score.NewStore(pool))
 	if cfg.ModelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
