@@ -58,6 +58,7 @@ code {
 
 .topbar nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   flex: 1;
 }
@@ -195,6 +196,17 @@ legend {
 .error-text {
   color: var(--block);
   font-size: 0.8rem;
+}
+
+.ruleset-editor {
+  max-width: 48rem;
+}
+
+.ruleset-enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
 }
 
 .result {

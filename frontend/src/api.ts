@@ -1,4 +1,4 @@
-// Types and calls for the score API described in openapi.yaml.
+// Types and calls for the APIs described in openapi.yaml.
 
 export type Outcome = 'allow' | 'review' | 'block'
 
@@ -62,6 +62,66 @@ async function errorFrom(res: Response): Promise<ErrorResponse> {
   return body && typeof body === 'object' && 'error' in body
     ? (body as ErrorResponse)
     : { error: `The backend answered with status ${res.status}.` }
+}
+
+export interface RuleSettings {
+  enabled: boolean
+  weight: number
+  limit?: bigint
+}
+
+export interface RulesetConfig {
+  review_threshold: number
+  block_threshold: number
+  rules: Record<string, RuleSettings>
+}
+
+export interface Ruleset extends RulesetConfig {
+  version: number
+}
+
+// The API sends 64-bit limits as JSON integers. Keep their exact value in the editor.
+const rulesetJSON = JSON as JSON & {
+  parse(text: string, reviver: (key: string, value: unknown, context?: { source: string }) => unknown): unknown
+  rawJSON?(text: string): unknown
+}
+
+async function readRuleset(res: Response): Promise<Ruleset> {
+  return rulesetJSON.parse(await res.text(), (key: string, value: unknown, context?: { source: string }) => {
+    if (key !== 'limit' || typeof value !== 'number') return value
+    if (Number.isSafeInteger(value)) return BigInt(value)
+    if (context) return BigInt(context.source)
+    throw new Error('This browser cannot read the rule limit exactly.')
+  }) as Ruleset
+}
+
+export async function getActiveRuleset(): Promise<Ruleset> {
+  const res = await fetch('/rulesets/active')
+  if (!res.ok) throw new Error((await errorFrom(res)).error)
+  return readRuleset(res)
+}
+
+export async function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
+  try {
+    const res = await fetch('/rulesets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config, (_key, value: unknown) => {
+        if (typeof value !== 'bigint') return value
+        const number = Number(value)
+        if (Number.isSafeInteger(number)) return number
+        if (rulesetJSON.rawJSON) return rulesetJSON.rawJSON(value.toString())
+        throw new Error('This browser cannot save the rule limit exactly.')
+      }),
+    })
+    if (!res.ok) return { ok: false, error: await errorFrom(res) }
+    return { ok: true, value: await readRuleset(res) }
+  } catch (error) {
+    return {
+      ok: false,
+      error: { error: error instanceof TypeError ? 'The backend cannot be reached. Is it running?' : String(error) },
+    }
+  }
 }
 
 // The development server adds the API key to the blocklist requests.
