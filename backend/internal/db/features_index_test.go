@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TestFeatureQueriesUseIndexes checks that every feature history query can be
-// served by an index. Sequential scans are disabled, so a query without a
+// TestFeatureQueriesUseIndexes checks that every feature history and dashboard
+// statistics query can be served by an index. Sequential scans are disabled, so a query without a
 // usable index still shows a sequential scan in its plan.
 func TestFeatureQueriesUseIndexes(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -40,6 +40,10 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CardHistory", cardHistory, []any{at, "card-1", "txn-1"}},
 		{"IssuerHistory", issuerHistory, []any{"1001", at, "txn-1"}},
 		{"FeatureCounts", featureCounts, []any{"gmail.com", device}},
+		{"CountOutcomes", countOutcomes, []any{at}},
+		{"TopFiredRules", topFiredRules, []any{at, int32(10)}},
+		{"CountReviewQueue", countReviewQueue, nil},
+		{"CountModelEffects", countModelEffects, []any{at}},
 	}
 	for _, q := range queries {
 		t.Run(q.name, func(t *testing.T) {

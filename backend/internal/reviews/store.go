@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -35,7 +36,21 @@ func NewStore(conn db.DBTX) *Store {
 
 // Queue returns up to limit purchases marked for review, the earliest decided first.
 func (s *Store) Queue(ctx context.Context, limit int) ([]QueueItem, error) {
-	rows, err := s.q.ListReviewQueue(ctx, int32(limit))
+	return s.queue(ctx, limit, nil)
+}
+
+type queueCursor struct {
+	decidedAt  time.Time
+	purchaseID int64
+}
+
+func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
+	params := db.ListReviewQueueParams{PageLimit: int32(limit)}
+	if after != nil {
+		params.AfterDecidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
+		params.AfterPurchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
+	}
+	rows, err := s.q.ListReviewQueue(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}

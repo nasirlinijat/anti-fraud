@@ -8,8 +8,10 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
 func main() {
@@ -26,6 +28,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
+	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.APIKey)
 	rulesetStore := rulesets.NewStore(pool)
 	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey)
 	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
@@ -47,6 +50,8 @@ func main() {
 			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 	}
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
+	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
+	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
 	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
