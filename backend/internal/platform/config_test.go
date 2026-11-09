@@ -52,12 +52,12 @@ func TestLoadConfigModelPathIsOptional(t *testing.T) {
 		t.Errorf("ModelPath = %q, want empty", cfg.ModelPath)
 	}
 
-	t.Setenv("MODEL_PATH", "models/lgbm-ieee-v2.json")
+	t.Setenv("MODEL_PATH", "models/lgbm-ieee-v3.json")
 	cfg, err = LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.ModelPath != "models/lgbm-ieee-v2.json" {
+	if cfg.ModelPath != "models/lgbm-ieee-v3.json" {
 		t.Errorf("ModelPath = %q", cfg.ModelPath)
 	}
 }

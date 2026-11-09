@@ -86,7 +86,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv")
     parser.add_argument("--out", default="output")
-    parser.add_argument("--version", default="lgbm-ieee-v2")
+    parser.add_argument("--version", default="lgbm-ieee-v3")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)
@@ -105,7 +105,7 @@ def main():
     x_test, y_test = test[features.FEATURES], test["is_fraud"].to_numpy()
     test_keep = keep.loc[test.index].to_numpy()
 
-    report = {"features": features.FEATURES, "split_days": {"train": "1-120", "validation": "136-152", "test": "153-183"}}
+    report = {"features": features.FEATURES, "split_days": {"history_only": f"1-{features.WARM_UP_DAYS}", "train": f"{features.WARM_UP_DAYS + 1}-120", "validation": "136-152", "test": "153-183"}}
 
     baseline = baseline_model().fit(x_train, y_train)
     baseline_test = baseline.predict_proba(x_test)[:, 1]

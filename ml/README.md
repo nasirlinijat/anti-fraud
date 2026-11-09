@@ -22,9 +22,9 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 | File | Content |
 |---|---|
-| `backend/models/lgbm-ieee-v2.json` | LightGBM model dump that the Go service loads |
-| `backend/models/lgbm-ieee-v2.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
-| `backend/models/lgbm-ieee-v2.report.json` | Metrics, thresholds and export checks |
+| `backend/models/lgbm-ieee-v3.json` | LightGBM model dump that the Go service loads |
+| `backend/models/lgbm-ieee-v3.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
+| `backend/models/lgbm-ieee-v3.report.json` | Metrics, thresholds and export checks |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).

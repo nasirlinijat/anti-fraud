@@ -96,6 +96,8 @@ def load(path, identity_path=None):
     for column in [*RAW_COLUMNS, *DEVICE_COLUMNS]:
         if column not in df.columns:
             df[column] = np.nan
+    df["amount_minor"] = np.round(df["TransactionAmt"] * 100).astype("int64")
+    df["TransactionAmt"] = df["amount_minor"] / 100
     df = df.sort_values(["TransactionDT", "TransactionID"], kind="stable").reset_index(drop=True)
     df["day"] = df["TransactionDT"] // SECONDS_PER_DAY
     return df
@@ -149,7 +151,7 @@ def build(df):
     amount = df["TransactionAmt"]
 
     out["amount"] = amount
-    out["cents"] = (amount - np.floor(amount)).round(3)
+    out["cents"] = (df["amount_minor"] % 100) / 100
     out["product_code"] = df["ProductCD"].map(PRODUCT_CODES)
     out["card_network"] = df["card4"].map(CARD_NETWORKS)
     out["card_type"] = df["card6"].map(CARD_TYPES)
