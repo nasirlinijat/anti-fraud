@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,15 +39,37 @@ type Purchases interface {
 	Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 }
 
+// Model scores a feature vector from 0 (legitimate) to 1 (fraud).
+type Model interface {
+	Predict(x []float64) (float64, error)
+	Features() []string
+}
+
 // Handler serves the score endpoint.
 type Handler struct {
 	rulesets  Rulesets
 	blocklist Blocklist
 	purchases Purchases
+	model     Model
+	policy    scoring.ModelPolicy
 }
 
 func NewHandler(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Handler {
 	return &Handler{rulesets: rulesets, blocklist: blocklist, purchases: purchases}
+}
+
+// UseModel makes the handler score purchases with the model and apply its
+// policy to the rule outcome. Without a model the handler uses rules only. The
+// model must take the features in the order of features.Names.
+func (h *Handler) UseModel(m Model, p scoring.ModelPolicy) error {
+	if got := m.Features(); !slices.Equal(got, features.Names) {
+		return fmt.Errorf("model features %v do not match the service features %v", got, features.Names)
+	}
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	h.model, h.policy = m, p
+	return nil
 }
 
 // RegisterRoutes registers POST /score behind API key authentication.
@@ -87,6 +110,7 @@ type scoreResponse struct {
 	Score          int                 `json:"score"`
 	FiredRules     []scoring.FiredRule `json:"fired_rules"`
 	RulesetVersion int                 `json:"ruleset_version"`
+	ModelScore     *float64            `json:"model_score"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +152,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, p, err)
 		return
 	}
-	modelInputs := features.Map(features.Vector(in, history))
+	vector := features.Vector(in, history)
+	modelInputs := features.Map(vector)
+
+	var modelScore *float64
+	if h.model != nil {
+		s, err := h.model.Predict(vector)
+		if err != nil {
+			h.internalError(w, p, err)
+			return
+		}
+		modelScore = &s
+	}
 
 	var result scoring.Result
 	if blocked {
@@ -151,6 +186,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			in.CardCountry = *p.CardCountry
 		}
 		result = scoring.Evaluate(in, rs)
+		if modelScore != nil {
+			result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, h.policy)
+		}
 	}
 	if result.FiredRules == nil {
 		result.FiredRules = []scoring.FiredRule{}
@@ -160,6 +198,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RulesetVersion: rs.Version,
 		Result:         result,
 		ModelInputs:    modelInputs,
+		ModelScore:     modelScore,
 		FeatureHistory: history,
 	})
 	if errors.Is(err, ErrDuplicateTransaction) {
@@ -180,6 +219,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Score:          result.Score,
 		FiredRules:     result.FiredRules,
 		RulesetVersion: rs.Version,
+		ModelScore:     modelScore,
 	})
 }
 

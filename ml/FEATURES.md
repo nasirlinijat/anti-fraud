@@ -108,6 +108,8 @@ Features 19, 27, 30 and 31 count over all players, so the service needs running 
 
 The thresholds are in `backend/models/<version>.report.json` under `policy`: `flag_at` (an allowed purchase at or above it goes to review) and `clear_below` (a reviewed purchase below it is cleared). The model never blocks.
 
+The service reads the thresholds at startup from the report next to `MODEL_PATH` and refuses to start if the report is missing, the thresholds are not `0 <= clear_below < flag_at <= 1`, or the model's `feature_names` differ from the service's features. `scoring.ApplyModel` applies them after the rules. A block, from the rules or the blocklist, never changes. The score is saved in `decisions.model_score` and returned as `model_score`; without a model it is null and only the rules decide.
+
 ## Go implementation
 
 `backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
