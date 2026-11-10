@@ -1,5 +1,6 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { getActiveRuleset, publishRuleset, type ErrorResponse, type Ruleset, type RulesetConfig } from '../api'
+import { usePolling } from '../usePolling'
 
 const ruleDetails = [
   { name: 'high_amount', label: 'High amount', limit: 'Minimum amount (minor units)' },
@@ -206,13 +207,13 @@ function RulesetPage() {
   const [active, setActive] = useState<Ruleset | null>(null)
   const [loadError, setLoadError] = useState('')
 
-  const load = useCallback(() => {
-    getActiveRuleset()
-      .then(setActive)
-      .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Could not load the ruleset.'))
-  }, [])
-
-  useEffect(load, [load])
+  const { refresh } = usePolling(getActiveRuleset, {
+    onSuccess: (ruleset) => {
+      setActive(ruleset)
+      setLoadError('')
+    },
+    onError: (error) => setLoadError(error instanceof Error ? error.message : 'Could not load the ruleset.'),
+  })
 
   return (
     <section className="ruleset-editor">
@@ -223,7 +224,7 @@ function RulesetPage() {
       {loadError && (
         <>
           <p className="alert" role="alert">{loadError}</p>
-          <button type="button" className="secondary" onClick={() => { setLoadError(''); load() }}>Retry</button>
+          <button type="button" className="secondary" onClick={() => { setLoadError(''); refresh() }}>Retry</button>
         </>
       )}
     </section>

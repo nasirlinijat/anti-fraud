@@ -1,31 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase } from './api'
+import { ApiError } from './request'
+import { usePolling } from './usePolling'
 
-type Review = {
-  purchase_id: string
-  transaction_id: string
-  player_id: string
-  device_id: string | null
-  amount_minor: string
-  event_time: string
-  queued_at: string
-  rule_score: number
-  model_score: number | null
-  model_version: string | null
-  fired_rules: { name: string; points: number; message: string }[]
-}
-
-type ReviewCase = Review & {
-  device_id: string | null
-  ruleset_version: number
-}
-
-type QueuePage = {
-  items: Review[]
-  next_cursor: string | null
-}
-
-type Decision = 'approve' | 'reject'
 type ReviewAction = { item: Review; decision: Decision }
+const REFRESH_MS = 5_000
 
 const timestamp = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -129,45 +108,15 @@ function CaseView({ apiKey, purchaseId, onBack, onKeyRejected }: {
   onKeyRejected: () => void
 }) {
   const [state, setState] = useState<CaseState>({ status: 'loading' })
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const deadline = window.setTimeout(() => controller.abort(), 10_000)
-    let stopped = false
-
-    async function load() {
-      try {
-        const response = await fetch(`/reviews/${encodeURIComponent(purchaseId)}`, {
-          headers: { 'X-API-Key': apiKey },
-          signal: controller.signal,
-        })
-        if (stopped) return
-        if (response.status === 401) {
-          onKeyRejected()
-          return
-        }
-        if (response.status === 404) {
-          setState({ status: 'not-found' })
-          return
-        }
-        if (!response.ok) throw new Error('Could not load the review case')
-        const review: ReviewCase = await response.json()
-        if (!stopped) setState({ status: 'loaded', review })
-      } catch {
-        if (!stopped) setState({ status: 'failed' })
-      } finally {
-        window.clearTimeout(deadline)
-      }
-    }
-
-    void load()
-    return () => {
-      stopped = true
-      window.clearTimeout(deadline)
-      controller.abort()
-    }
-  }, [apiKey, purchaseId, attempt, onKeyRejected])
+  const load = useCallback((signal: AbortSignal) => getReviewCase(apiKey, purchaseId, signal), [apiKey, purchaseId])
+  const { refresh } = usePolling(load, {
+    onSuccess: (review) => setState({ status: 'loaded', review }),
+    onError: (error) => {
+      const status = error instanceof ApiError ? error.status : undefined
+      if (status === 401) onKeyRejected()
+      else setState({ status: status === 404 ? 'not-found' : 'failed' })
+    },
+  })
 
   return (
     <article className="review-case" aria-labelledby="case-heading">
@@ -182,7 +131,7 @@ function CaseView({ apiKey, purchaseId, onBack, onKeyRejected }: {
           Could not load this review case.{' '}
           <button type="button" onClick={() => {
             setState({ status: 'loading' })
-            setAttempt(attempt + 1)
+            refresh()
           }}>
             Try again
           </button>
@@ -255,8 +204,6 @@ function ReviewQueue() {
   const [feedback, setFeedback] = useState('')
   const [blockDevice, setBlockDevice] = useState(false)
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
-  const [refreshVersion, setRefreshVersion] = useState(0)
-  const pollVersion = useRef(0)
   // A null controller keeps the action disabled until a successful poll verifies queue state.
   const requests = useRef(new Map<string, AbortController | null>())
   const dialog = useRef<HTMLDialogElement>(null)
@@ -274,8 +221,39 @@ function ReviewQueue() {
     if (confirmation && !dialog.current?.open) dialog.current?.showModal()
   }, [confirmation])
 
+  const loadQueue = useMemo(() => {
+    if (apiKey === null) return null
+    return (signal: AbortSignal) => listReviews(apiKey, cursor, signal)
+  }, [apiKey, cursor])
+  const { stop, refresh } = usePolling(loadQueue, {
+    intervalMs: REFRESH_MS,
+    waitAfterCompletion: true,
+    onSuccess: (result) => {
+      // Only a successful read listing the purchase confirms it is still pending.
+      let reconciled = false
+      for (const [id, inFlight] of requests.current) {
+        if (inFlight !== null || !result.items.some(row => row.purchase_id === id)) continue
+        requests.current.delete(id)
+        reconciled = true
+      }
+      if (reconciled) setPending(new Set(requests.current.keys()))
+      setPage(result)
+      setLoadFailed(false)
+      setAccessUnavailable(false)
+    },
+    onError: (error) => {
+      const status = error instanceof ApiError ? error.status : undefined
+      if (status === 401) {
+        rejectKey()
+        return
+      }
+      if (status === 503) setAccessUnavailable(true)
+      setLoadFailed(true)
+    },
+  })
+
   const rejectKey = useCallback(() => {
-    pollVersion.current++
+    stop()
     cancelDecisions()
     setPending(new Set())
     setApiKey(null)
@@ -285,70 +263,7 @@ function ReviewQueue() {
     setOpenCase(null)
     setConfirmation(null)
     setFeedback('')
-  }, [cancelDecisions])
-
-  useEffect(() => {
-    if (apiKey === null) return
-
-    const headers = { 'X-API-Key': apiKey }
-    const url = cursor === null ? '/reviews' : '/reviews?' + new URLSearchParams({ cursor })
-    let stopped = false
-    const version = pollVersion.current
-    const isCurrent = () => !stopped && pollVersion.current === version
-    let retryTimer: number | undefined
-    let request: AbortController | undefined
-
-    async function refresh() {
-      const controller = new AbortController()
-      request = controller
-      const deadline = window.setTimeout(() => controller.abort(), 10_000)
-
-      try {
-        const response = await fetch(url, {
-          headers,
-          signal: controller.signal,
-        })
-        if (!isCurrent()) return
-        if (response.status === 401) {
-          rejectKey()
-          return
-        }
-        if (response.status === 503) {
-          setAccessUnavailable(true)
-          throw new Error('Review access unavailable')
-        }
-        if (!response.ok) throw new Error('Could not load the review queue')
-
-        const result: QueuePage = await response.json()
-        if (!isCurrent()) return
-        // An unconfirmed save is cleared only when this page still lists the
-        // purchase, so it is known to be pending. A poll of another page says
-        // nothing about it, and the save may still commit.
-        let reconciled = false
-        for (const [id, inFlight] of requests.current) {
-          if (inFlight !== null || !result.items.some(row => row.purchase_id === id)) continue
-          requests.current.delete(id)
-          reconciled = true
-        }
-        if (reconciled) setPending(new Set(requests.current.keys()))
-        setPage(result)
-        setLoadFailed(false)
-        setAccessUnavailable(false)
-      } catch {
-        if (isCurrent()) setLoadFailed(true)
-      } finally {
-        window.clearTimeout(deadline)
-        if (isCurrent()) retryTimer = window.setTimeout(refresh, 5_000)
-      }
-    }
-
-    void refresh()
-    return () => {
-      stopped = true
-      window.clearTimeout(retryTimer)
-      request?.abort()
-    }
-  }, [apiKey, cursor, refreshVersion, rejectKey])
+  }, [cancelDecisions, stop])
 
   function openQueue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -361,7 +276,7 @@ function ReviewQueue() {
   }
 
   function goTo(next: (string | null)[]) {
-    pollVersion.current++
+    stop()
     setPage(null)
     setLoadFailed(false)
     setCursors(next)
@@ -381,61 +296,47 @@ function ReviewQueue() {
     requests.current.set(id, controller)
     setPending(new Set(requests.current.keys()))
     setFeedback('')
-    const deadline = window.setTimeout(() => controller.abort(), 10_000)
     const isCurrent = () => requests.current.get(id) === controller
     let needsReconciliation = false
     try {
-      const response = await fetch(`/reviews/${encodeURIComponent(id)}/decision`, {
-        method: 'POST',
-        headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify(decision === 'reject' && blockDevice ? { decision, block_device: true } : { decision }),
-        signal: controller.signal,
-      })
+      const deviceBlocked = await submitReviewDecision(apiKey, id, decision, blockDevice, controller.signal)
       if (!isCurrent()) return
-      if (response.status === 401) {
+      removeDecidedPurchase(id)
+      setFeedback(`${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.`)
+    } catch (error) {
+      if (!isCurrent()) return
+      const status = error instanceof ApiError ? error.status : undefined
+      if (status === 401) {
         rejectKey()
-        return
-      }
-      if (response.status === 503) {
+      } else if (status === 503) {
         setFeedback('Review access is unavailable. Check the backend configuration.')
-        return
-      }
-      if (response.status === 404) {
+      } else if (status === 404) {
         setFeedback(`${item.transaction_id} was not found. The queue is refreshing.`)
-        return
-      }
-      if (response.status !== 201 && response.status !== 409) {
-        if (response.status >= 500) throw new Error('Review save could not be confirmed')
+      } else if (status === 409) {
+        removeDecidedPurchase(id)
+        setFeedback(`${item.transaction_id} is no longer pending review.`)
+      } else if (status !== undefined && status < 500 && error instanceof ApiError && error.kind === 'http') {
         setFeedback(`Could not save a decision for ${item.transaction_id}.`)
-        return
+      } else {
+        needsReconciliation = true
+        setFeedback(`Could not confirm the decision for ${item.transaction_id}. You can retry if it is still listed after the queue refreshes.`)
       }
-
-      if (document.activeElement?.closest('tr')?.dataset.purchaseId === id) heading.current?.focus()
-      setPage(current => current && {
-        ...current,
-        items: current.items.filter(row => row.purchase_id !== id),
-      })
-      let deviceBlocked = false
-      if (response.status === 201) {
-        deviceBlocked = ((await response.json().catch(() => null)) as { device_blocked?: boolean } | null)?.device_blocked === true
-      }
-      setFeedback(response.status === 201
-        ? `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.`
-        : `${item.transaction_id} is no longer pending review.`)
-    } catch {
-      if (!isCurrent()) return
-      needsReconciliation = true
-      setFeedback(`Could not confirm the decision for ${item.transaction_id}. You can retry if it is still listed after the queue refreshes.`)
     } finally {
-      window.clearTimeout(deadline)
       if (isCurrent()) {
         if (needsReconciliation) requests.current.set(id, null)
         else requests.current.delete(id)
         setPending(new Set(requests.current.keys()))
-        pollVersion.current++
-        setRefreshVersion(pollVersion.current)
+        refresh()
       }
     }
+  }
+
+  function removeDecidedPurchase(id: string) {
+    if (document.activeElement?.closest('tr')?.dataset.purchaseId === id) heading.current?.focus()
+    setPage(current => current && {
+      ...current,
+      items: current.items.filter(row => row.purchase_id !== id),
+    })
   }
 
   const nextCursor = page?.next_cursor ?? null

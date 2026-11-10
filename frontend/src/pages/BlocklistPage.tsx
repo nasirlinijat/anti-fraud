@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import {
   addBlocklistEntry,
   entryTypes,
@@ -8,6 +8,7 @@ import {
   type EntryType,
   type ErrorResponse,
 } from '../api'
+import { usePolling } from '../usePolling'
 
 const typeNames: Record<EntryType, string> = {
   card: 'Card token',
@@ -34,16 +35,13 @@ function BlocklistPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
 
-  const load = useCallback(() => {
-    listBlocklist()
-      .then((list) => {
-        setEntries(list)
-        setLoadError(null)
-      })
-      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : 'The blocklist cannot be loaded.'))
-  }, [])
-
-  useEffect(load, [load])
+  const { refresh } = usePolling(listBlocklist, {
+    onSuccess: (list) => {
+      setEntries(list)
+      setLoadError(null)
+    },
+    onError: (error) => setLoadError(error instanceof Error ? error.message : 'The blocklist cannot be loaded.'),
+  })
 
   const add = async (e: FormEvent) => {
     e.preventDefault()
@@ -59,7 +57,7 @@ function BlocklistPage() {
     setValue('')
     setReason('')
     setNotice(`${typeNames[res.value.type]} ${res.value.value} is blocked from the next purchase on.`)
-    load()
+    refresh()
   }
 
   const remove = async (entry: BlocklistEntry) => {
@@ -70,7 +68,7 @@ function BlocklistPage() {
     const res = await removeBlocklistEntry(entry.id)
     setRemoving(null)
     setNotice(res.ok ? `${typeNames[entry.type]} ${entry.value} is no longer blocked.` : res.error.error)
-    load()
+    refresh()
   }
 
   const fields = formError?.fields ?? {}
