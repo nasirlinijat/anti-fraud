@@ -93,7 +93,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
 
-Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Reusing a run prefix with the same seed and settings can return 409 for transaction IDs that were already scored.
+Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
 Each special scenario is equally likely when an event starts one. Some scenarios generate several purchases, so the share of special purchases can differ from the share of special events.
 

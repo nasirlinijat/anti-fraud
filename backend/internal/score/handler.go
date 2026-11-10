@@ -37,8 +37,9 @@ type Blocklist interface {
 	Match(ctx context.Context, s blocklist.Subject) (blocklist.Entry, bool, error)
 }
 
-// Purchases reads purchase history and saves scored purchases.
+// Purchases saves decisions and looks up saved decisions and purchase history.
 type Purchases interface {
+	FindSavedDecision(ctx context.Context, p Purchase) (*Decision, error)
 	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
 	FeatureHistory(ctx context.Context, in features.Input) (features.History, error)
 	PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error)
@@ -146,6 +147,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	if h.respondWithSavedDecision(w, ctx, p) {
+		return
+	}
+
 	rs, err := h.rulesets.Active(ctx)
 	if err != nil {
 		h.internalError(w, p, err)
@@ -212,11 +217,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, h.policy)
 		}
 	}
-	if result.FiredRules == nil {
-		result.FiredRules = []scoring.FiredRule{}
-	}
-
-	_, err = h.purchases.Save(ctx, p, Decision{
+	decision := Decision{
 		RulesetVersion:      rs.Version,
 		Result:              result,
 		ModelInputs:         modelInputs,
@@ -225,12 +226,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelVersion:        modelVersion,
 		Latency:             time.Since(started),
 		FeatureHistory:      history,
-	})
+	}
+	_, err = h.purchases.Save(ctx, p, decision)
 	if errors.Is(err, ErrDuplicateTransaction) {
-		platform.WriteJSON(w, http.StatusConflict, platform.ErrorResponse{
-			Error:  "a purchase with this transaction ID was already scored",
-			Fields: map[string]string{"transaction_id": "is already scored"},
-		})
+		// Save has rolled back, so the lookup can see the committed winner.
+		if !h.respondWithSavedDecision(w, ctx, p) {
+			h.internalError(w, p, errors.New("saved decision missing after duplicate transaction"))
+		}
 		return
 	}
 	if err != nil {
@@ -238,14 +240,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeScoreResponse(w, p.TransactionID, decision)
+}
+
+// respondWithSavedDecision writes the response for a saved transaction or a
+// lookup error. It returns false when there is no saved decision.
+func (h *Handler) respondWithSavedDecision(w http.ResponseWriter, ctx context.Context, p Purchase) bool {
+	decision, err := h.purchases.FindSavedDecision(ctx, p)
+	switch {
+	case errors.Is(err, ErrDuplicateTransaction):
+		platform.WriteJSON(w, http.StatusConflict, platform.ErrorResponse{
+			Error:  "a purchase with this transaction ID was already scored",
+			Fields: map[string]string{"transaction_id": "is already scored"},
+		})
+	case err != nil:
+		h.internalError(w, p, err)
+	case decision == nil:
+		return false
+	default:
+		writeScoreResponse(w, p.TransactionID, *decision)
+	}
+	return true
+}
+
+func writeScoreResponse(w http.ResponseWriter, transactionID string, d Decision) {
+	firedRules := d.Result.FiredRules
+	if firedRules == nil {
+		firedRules = []scoring.FiredRule{}
+	}
 	platform.WriteJSON(w, http.StatusOK, scoreResponse{
-		TransactionID:  p.TransactionID,
-		Outcome:        result.Outcome,
-		Score:          result.Score,
-		FiredRules:     result.FiredRules,
-		RulesetVersion: rs.Version,
-		ModelScore:     modelScore,
-		ModelVersion:   modelVersion,
+		TransactionID:  transactionID,
+		Outcome:        d.Result.Outcome,
+		Score:          d.Result.Score,
+		FiredRules:     firedRules,
+		RulesetVersion: d.RulesetVersion,
+		ModelScore:     d.ModelScore,
+		ModelVersion:   d.ModelVersion,
 	})
 }
 

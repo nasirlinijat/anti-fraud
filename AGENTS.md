@@ -134,7 +134,7 @@ The server listens on the port given by the `PORT` environment variable (default
 |---|---|
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
-| `POST /score` | Scores a purchase, saves the decision, and returns the outcome, rule score, and fired rules. Requires the `X-API-Key` header. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a transaction ID that was already scored |
+| `POST /score` | Scores a purchase and returns its saved decision. Requires the `X-API-Key` header. A matching retry returns the saved decision with 200. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a saved transaction ID with different purchase fields |
 | `GET /reviews` | Lists purchases awaiting review, oldest first, with a `next_cursor` for the next page. Requires an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong key and 503 when no analyst keys are configured |
 | `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, and model score and version. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
 | `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |

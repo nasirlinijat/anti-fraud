@@ -25,6 +25,31 @@ INSERT INTO decisions (
     $8, $9, $10
 );
 
+-- name: GetSavedScore :one
+SELECT
+    ROW(
+        p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.card_token,
+        p.card_issuer, p.card_network, p.card_type, p.card_country, p.card_category,
+        p.product_code, p.billing_region, p.billing_country, p.billing_distance,
+        p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
+        p.ip_address, p.ip_country, p.account_created_at,
+        p.client_os, p.client_browser, p.screen_resolution
+    ) IS NOT DISTINCT FROM ROW(
+        sqlc.arg(transaction_id)::text, sqlc.arg(event_time)::timestamptz, sqlc.arg(amount_minor)::bigint,
+        sqlc.arg(player_id)::text, sqlc.arg(card_token)::text,
+        sqlc.narg(card_issuer)::text, sqlc.narg(card_network)::text, sqlc.narg(card_type)::text,
+        sqlc.narg(card_country)::text, sqlc.narg(card_category)::text, sqlc.narg(product_code)::text,
+        sqlc.narg(billing_region)::text, sqlc.narg(billing_country)::text, sqlc.narg(billing_distance)::float8,
+        sqlc.narg(email_domain)::text, sqlc.narg(recipient_email_domain)::text,
+        sqlc.narg(device_type)::text, sqlc.narg(device_name)::text, sqlc.narg(device_id)::text,
+        sqlc.narg(ip_address)::inet, sqlc.narg(ip_country)::text, sqlc.narg(account_created_at)::timestamptz,
+        sqlc.narg(client_os)::text, sqlc.narg(client_browser)::text, sqlc.narg(screen_resolution)::text
+    ) AS request_matches,
+    d.outcome, d.rule_score, d.fired_rules, d.ruleset_version, d.model_score, d.model_version
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.transaction_id = sqlc.arg(transaction_id);
+
 -- name: ListReviewQueue :many
 SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
