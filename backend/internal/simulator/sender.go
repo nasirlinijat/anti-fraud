@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -89,21 +93,40 @@ const MaxFailuresInRow = 20
 // run continues, unless MaxFailuresInRow purchases in a row fail. Run stops
 // early when ctx is cancelled.
 func Run(ctx context.Context, s Scorer, purchases []Purchase, rate float64, onError func(error)) (Summary, error) {
+	return send(ctx, s, slices.Values(purchases), rate, onError, false)
+}
+
+// RunLive sends seeded purchases until ctx is cancelled or the failure limit
+// is reached. It uses cfg.Start as the run's start time and timestamps each
+// purchase immediately before scoring it.
+func RunLive(ctx context.Context, s Scorer, cfg Config, rate float64, onError func(error)) (Summary, error) {
+	g, err := newGenerator(ctx, cfg, true)
+	if err != nil {
+		return Summary{}, err
+	}
+	return send(ctx, s, g.purchases(ctx), rate, onError, true)
+}
+
+func send(ctx context.Context, s Scorer, purchases iter.Seq[Purchase], rate float64, onError func(error), live bool) (Summary, error) {
 	sum := Summary{Outcomes: map[Pattern]map[string]int{}}
 	if rate < 0 {
 		return sum, fmt.Errorf("rate must not be negative, got %v", rate)
 	}
 
 	var tick <-chan time.Time
-	if rate > 0 {
-		ticker := time.NewTicker(time.Duration(float64(time.Second) / rate))
+	if rate != 0 {
+		interval := float64(time.Second) / rate
+		if !(interval >= 1 && interval < float64(math.MaxInt64)) {
+			return sum, fmt.Errorf("rate must be finite and give a representable positive interval, got %v", rate)
+		}
+		ticker := time.NewTicker(time.Duration(interval))
 		defer ticker.Stop()
 		tick = ticker.C
 	}
 
 	failuresInRow := 0
-	for i, p := range purchases {
-		if i > 0 && tick != nil {
+	for p := range purchases {
+		if sum.Sent+sum.Failed > 0 && tick != nil {
 			select {
 			case <-ctx.Done():
 				return sum, ctx.Err()
@@ -114,8 +137,14 @@ func Run(ctx context.Context, s Scorer, purchases []Purchase, rate float64, onEr
 			return sum, err
 		}
 
+		if live {
+			p.Request.EventTime = time.Now().UTC()
+		}
 		res, err := s.Score(ctx, p.Request)
 		if err != nil {
+			if live && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return sum, ctx.Err()
+			}
 			sum.Failed++
 			if onError != nil {
 				onError(err)
@@ -132,6 +161,9 @@ func Run(ctx context.Context, s Scorer, purchases []Purchase, rate float64, onEr
 			sum.Outcomes[p.Pattern] = map[string]int{}
 		}
 		sum.Outcomes[p.Pattern][res.Outcome]++
+	}
+	if live {
+		return sum, ctx.Err()
 	}
 	return sum, nil
 }

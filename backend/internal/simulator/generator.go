@@ -1,7 +1,9 @@
 package simulator
 
 import (
+	"context"
 	"fmt"
+	"iter"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -151,38 +153,77 @@ type generator struct {
 	players []player
 	recent  map[string][]time.Time
 	next    int
-	out     []Purchase
+	clock   time.Time
+	pending []Purchase
+	live    bool
 }
 
-// Generate returns count purchases ordered by event time, then transaction ID.
-func Generate(cfg Config, count int) ([]Purchase, error) {
+func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if count < 0 {
-		return nil, fmt.Errorf("count must not be negative, got %d", count)
-	}
-
 	g := &generator{
 		cfg:    cfg,
 		rng:    rand.New(rand.NewPCG(cfg.Seed, 0x5eed)),
 		recent: map[string][]time.Time{},
+		clock:  cfg.Start,
+		live:   live,
 	}
 	for range cfg.Players {
-		g.players = append(g.players, g.newPlayer(cfg.Start.Add(-g.days(30, 900))))
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p := g.newPlayer(cfg.Start.Add(-g.days(30, 900)))
+		g.players = append(g.players, p)
+		g.recent[p.card.token] = nil
 	}
+	return g, nil
+}
 
-	// Every event is generated at or after the clock, and later events start
-	// later, so the first count purchases by time are final once the clock
-	// passes the last of them.
-	clock := cfg.Start
-	for len(g.out) < count || g.sortedPrefixEndsBefore(count, clock) {
-		g.event(clock)
-		clock = clock.Add(g.gap())
+func (g *generator) purchases(ctx context.Context) iter.Seq[Purchase] {
+	return func(yield func(Purchase) bool) {
+		for ctx.Err() == nil {
+			// A later event can still add a purchase at or after the clock.
+			if len(g.pending) > 0 && g.pending[0].Request.EventTime.Before(g.clock) {
+				p := g.pending[0]
+				g.pending[0] = Purchase{}
+				g.pending = g.pending[1:]
+				if !yield(p) {
+					return
+				}
+				continue
+			}
+			before := len(g.pending)
+			g.event(g.clock)
+			g.clock = g.clock.Add(g.gap())
+			if len(g.pending) > before {
+				slices.SortStableFunc(g.pending, comparePurchases)
+			}
+		}
 	}
+}
 
-	g.sort()
-	return g.out[:count], nil
+// Generate returns count purchases ordered by event time, then transaction ID.
+func Generate(cfg Config, count int) ([]Purchase, error) {
+	if count < 0 {
+		return nil, fmt.Errorf("count must not be negative, got %d", count)
+	}
+	ctx := context.Background()
+	g, err := newGenerator(ctx, cfg, false)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	var purchases []Purchase
+	for p := range g.purchases(ctx) {
+		purchases = append(purchases, p)
+		if len(purchases) == count {
+			break
+		}
+	}
+	return purchases, nil
 }
 
 // StartEndingAt returns the start that makes the last of count purchases
@@ -197,18 +238,11 @@ func StartEndingAt(cfg Config, count int, end time.Time) (time.Time, error) {
 	return end.Add(-purchases[len(purchases)-1].Request.EventTime.Sub(end)), nil
 }
 
-func (g *generator) sortedPrefixEndsBefore(count int, clock time.Time) bool {
-	g.sort()
-	return count > 0 && !g.out[count-1].Request.EventTime.Before(clock)
-}
-
-func (g *generator) sort() {
-	slices.SortStableFunc(g.out, func(a, b Purchase) int {
-		if c := a.Request.EventTime.Compare(b.Request.EventTime); c != 0 {
-			return c
-		}
-		return compareIDs(a.Request.TransactionID, b.Request.TransactionID)
-	})
+func comparePurchases(a, b Purchase) int {
+	if c := a.Request.EventTime.Compare(b.Request.EventTime); c != 0 {
+		return c
+	}
+	return compareIDs(a.Request.TransactionID, b.Request.TransactionID)
 }
 
 func compareIDs(a, b string) int {
@@ -261,7 +295,7 @@ func (g *generator) normal(at time.Time) {
 // cardTesting sends 7 to 9 small purchases on one new card a minute or two
 // apart. The first five pass the velocity rule; the rest exceed it.
 func (g *generator) cardTesting(at time.Time) {
-	p := g.newPlayer(at.Add(-g.minutes(30, 360)))
+	p := g.newScenarioPlayer(at, g.minutes(30, 360))
 	ipCountry := g.otherCountry(p.card.country)
 	p.ipAddress = g.ipAddress()
 	burst := 7 + g.rng.IntN(3)
@@ -289,23 +323,35 @@ func (g *generator) accountTakeover(at time.Time) {
 // newAccountSpend makes a large purchase from an account created a few hours
 // earlier, from the card's own country.
 func (g *generator) newAccountSpend(at time.Time) {
-	p := g.newPlayer(at.Add(-g.minutes(10, 720)))
+	p := g.newScenarioPlayer(at, g.minutes(10, 720))
 	g.add(PatternNewAccountSpend, g.request(p, at, g.amount(50000, 120000)))
 }
 
 func (g *generator) add(pattern Pattern, req Request) {
-	g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
-	g.out = append(g.out, Purchase{Pattern: pattern, Request: req})
+	// Only regular players can use their card again in a later event.
+	if _, tracked := g.recent[req.CardToken]; tracked {
+		g.usesLastHour(req.CardToken, req.EventTime)
+		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
+	}
+	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: req})
 }
 
 func (g *generator) usesLastHour(cardToken string, at time.Time) int {
-	n := 0
-	for _, t := range g.recent[cardToken] {
-		if !t.After(at) && at.Sub(t) < time.Hour {
-			n++
-		}
+	// Regular-card timestamps are appended in simulated event order.
+	times := g.recent[cardToken]
+	cutoff := at.Add(-time.Hour)
+	for len(times) > 0 && !times[0].After(cutoff) {
+		times = times[1:]
 	}
-	return n
+	g.recent[cardToken] = times
+	return len(times)
+}
+
+func (g *generator) newScenarioPlayer(at time.Time, age time.Duration) player {
+	if g.live {
+		at = time.Now()
+	}
+	return g.newPlayer(at.Add(-age))
 }
 
 func (g *generator) newPlayer(createdAt time.Time) player {
@@ -400,7 +446,9 @@ func (g *generator) amount(low, high int64) int64 {
 // gap draws the time to the next traffic event, rounded to whole seconds.
 func (g *generator) gap() time.Duration {
 	seconds := math.Round(g.rng.ExpFloat64() * g.cfg.MeanGap.Seconds())
-	return time.Duration(max(seconds, 1)) * time.Second
+	// Keep the simulated clock moving forward even for very large gaps.
+	const maxGapSeconds = float64(math.MaxInt64 / int64(time.Second))
+	return time.Duration(min(max(seconds, 1), maxGapSeconds)) * time.Second
 }
 
 func (g *generator) seconds(low, high int) time.Duration {
