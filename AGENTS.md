@@ -151,7 +151,7 @@ make migrate
 
 ### 5.2 Continuous Integration
 
-GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, then runs `go test` with the race detector against PostgreSQL, `go mod verify`, and `go build`. The job times out after 15 minutes, and a new push to a pull request cancels the run still in progress for it.
+GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, then runs `go test` with the race detector against PostgreSQL, `go mod verify`, and `go build`. The job times out after 15 minutes. The `frontend` job runs `npm ci`, `npm run check` (oxlint and the TypeScript check) and `npm run build` on Node.js 24. The `ml` job installs `ml/requirements.txt` on Python 3.14 and runs `pytest`; the tests use synthetic purchases and the exported golden rows, never the IEEE-CIS dataset. Both time out after 10 minutes. A new push to a pull request cancels the run still in progress for it.
 
 ### 5.3 Database Queries
 
