@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { getActiveRuleset, publishRuleset, type ErrorResponse, type Ruleset, type RulesetConfig } from '../api'
+import { getActiveRuleset, publishRuleset, type ErrorResponse, type RuleSettings, type Ruleset, type RulesetConfig } from '../api'
 import { usePolling } from '../usePolling'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
 
@@ -14,12 +14,28 @@ const ruleDetails = [
     limit: 'Distinct cards in 60 minutes (including the current card)',
     preset: { enabled: false, weight: '20', limit: '5' },
   },
+  {
+    name: 'new_device_spike',
+    label: 'New device spike',
+    limit: 'Minimum trusted purchases',
+    preset: {
+      enabled: false, weight: '50', limit: '3',
+      window_days: '90', min_amount_minor: '1000', amount_multiplier: '3',
+    },
+  },
 ] as const
 
 const maxInt32 = 2_147_483_647n
 const maxInt64 = 9_223_372_036_854_775_807n
 
-type RuleDraft = { enabled: boolean; weight: string; limit?: string }
+type RuleDraft = {
+  enabled: boolean
+  weight: string
+  limit?: string
+  window_days?: string
+  min_amount_minor?: string
+  amount_multiplier?: string
+}
 type RulesetDraft = {
   review_threshold: string
   block_threshold: string
@@ -33,7 +49,11 @@ function toDraft(ruleset: Ruleset): RulesetDraft {
     block_threshold: String(ruleset.block_threshold),
     rules: Object.fromEntries(Object.entries(ruleset.rules).map(([name, rule]) => [
       name,
-      { enabled: rule.enabled, weight: String(rule.weight), limit: rule.limit?.toString() },
+      {
+        enabled: rule.enabled, weight: String(rule.weight), limit: rule.limit?.toString(),
+        window_days: rule.window_days?.toString(), min_amount_minor: rule.min_amount_minor?.toString(),
+        amount_multiplier: rule.amount_multiplier?.toString(),
+      },
     ])),
   }
 }
@@ -56,11 +76,18 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
   }
   for (const [name, rule] of Object.entries(draft.rules)) {
     const field = `rules.${name}`
-    config.rules[name] = {
+    const minLimit = name === 'device_card_count' || name === 'new_device_spike' ? 1n : 0n
+    const settings: RuleSettings = {
       enabled: rule.enabled,
       weight: Number(integer(rule.weight, `${field}.weight`, 0n, maxInt32, errors)),
-      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, name === 'device_card_count' ? 1n : 0n, maxInt64, errors),
+      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, minLimit, maxInt64, errors),
     }
+    if (name === 'new_device_spike') {
+      settings.window_days = Number(integer(rule.window_days ?? '', `${field}.window_days`, 1n, 3650n, errors))
+      settings.min_amount_minor = integer(rule.min_amount_minor ?? '', `${field}.min_amount_minor`, 1n, maxInt64, errors)
+      settings.amount_multiplier = Number(integer(rule.amount_multiplier ?? '', `${field}.amount_multiplier`, 2n, maxInt32, errors))
+    }
+    config.rules[name] = settings
   }
   return config
 }
@@ -173,7 +200,7 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
           const limitLabel = 'limit' in detail ? detail.limit : undefined
           const savedRule = draft.rules[name]
           const preset = 'preset' in detail ? detail.preset : undefined
-          const rule = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
+          const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
           const field = `rules.${name}`
           return (
             <fieldset key={name} disabled={saving}>
@@ -210,6 +237,31 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
                     onChange={(limit) => updateRule(name, { ...rule, limit })}
                     disabled={!savedRule && !preset}
                   />
+                )}
+                {name === 'new_device_spike' && (
+                  <>
+                    <IntegerField
+                      name={`${field}.window_days`}
+                      label="Trusted history window (days)"
+                      value={rule.window_days ?? ''}
+                      error={fields[`${field}.window_days`]}
+                      onChange={(window_days) => updateRule(name, { ...rule, window_days })}
+                    />
+                    <IntegerField
+                      name={`${field}.min_amount_minor`}
+                      label="Minimum purchase amount (minor units)"
+                      value={rule.min_amount_minor ?? ''}
+                      error={fields[`${field}.min_amount_minor`]}
+                      onChange={(min_amount_minor) => updateRule(name, { ...rule, min_amount_minor })}
+                    />
+                    <IntegerField
+                      name={`${field}.amount_multiplier`}
+                      label="Minimum multiple of the trusted average"
+                      value={rule.amount_multiplier ?? ''}
+                      error={fields[`${field}.amount_multiplier`]}
+                      onChange={(amount_multiplier) => updateRule(name, { ...rule, amount_multiplier })}
+                    />
+                  </>
                 )}
               </div>
               {fields[field] && <p className="error-text">{fields[field]}</p>}

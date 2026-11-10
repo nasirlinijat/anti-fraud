@@ -85,9 +85,12 @@ type Ruleset struct {
 }
 
 type RulesetRule struct {
-	RulesetVersion int32
-	RuleName       string
-	Enabled        bool
-	Weight         int32
-	RuleLimit      int64
+	RulesetVersion   int32
+	RuleName         string
+	Enabled          bool
+	Weight           int32
+	RuleLimit        int64
+	WindowDays       pgtype.Int4
+	MinAmountMinor   pgtype.Int8
+	AmountMultiplier pgtype.Int4
 }

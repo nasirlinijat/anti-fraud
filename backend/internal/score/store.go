@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/netip"
 	"time"
 
@@ -112,6 +113,23 @@ func (s *Store) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken str
 		return 0, fmt.Errorf("count distinct device cards: %w", err)
 	}
 	return n, nil
+}
+
+// TrustedHistory reads earlier allowed or approved purchases for a request with a device ID.
+func (s *Store) TrustedHistory(ctx context.Context, p Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error) {
+	since := p.EventTime.Add(-time.Duration(windowDays) * 24 * time.Hour)
+	row, err := db.New(s.conn).GetTrustedPurchaseHistory(ctx, db.GetTrustedPurchaseHistoryParams{
+		DeviceID: *p.DeviceID, PlayerID: p.PlayerID, Since: timestamptz(&since),
+		EventTime: timestamptz(&p.EventTime), TransactionID: p.TransactionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read trusted purchase history: %w", err)
+	}
+	total, ok := new(big.Int).SetString(row.TotalMinor, 10)
+	if !ok {
+		return nil, errors.New("invalid trusted purchase total")
+	}
+	return &scoring.TrustedPurchaseHistory{Count: row.TrustedCount, TotalMinor: total, DeviceSeen: row.DeviceSeen}, nil
 }
 
 // FeatureInput returns the request fields the model features use.

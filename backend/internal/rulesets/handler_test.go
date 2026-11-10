@@ -83,12 +83,17 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(isolated.Close)
-	migration, err := os.ReadFile("../../migrations/000002_create_rulesets.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := isolated.Exec(ctx, string(migration)); err != nil {
-		t.Fatal(err)
+	for _, path := range []string{
+		"../../migrations/000002_create_rulesets.up.sql",
+		"../../migrations/000015_add_new_device_spike_settings.up.sql",
+	} {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := isolated.Exec(ctx, string(migration)); err != nil {
+			t.Fatalf("apply %s: %v", path, err)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -161,6 +166,36 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 			var got platform.ErrorResponse
 			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Fields[tc.field] == "" {
 				t.Errorf("status = %d, body = %s, want 400 with %s", rec.Code, rec.Body, tc.field)
+			}
+		})
+	}
+}
+
+func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, "test-key")
+	for _, tc := range []struct {
+		name, rule string
+		fields     []string
+	}{
+		{"missing settings on disabled rule", `{"enabled":false,"weight":50}`,
+			[]string{"limit", "window_days", "min_amount_minor", "amount_multiplier"}},
+		{"zero and negative values", `{"enabled":true,"weight":-1,"limit":0,"window_days":0,"min_amount_minor":-1,"amount_multiplier":1}`,
+			[]string{"weight", "limit", "window_days", "min_amount_minor", "amount_multiplier"}},
+		{"window too large", `{"enabled":true,"weight":50,"limit":3,"window_days":3651,"min_amount_minor":1000,"amount_multiplier":3}`,
+			[]string{"window_days"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{"new_device_spike":%s}}`, tc.rule)
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
+			var got platform.ErrorResponse
+			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+				t.Fatalf("status = %d, body = %s, want 400", rec.Code, rec.Body)
+			}
+			for _, field := range tc.fields {
+				if got.Fields["rules.new_device_spike."+field] == "" {
+					t.Errorf("missing error for %s in %s", field, rec.Body)
+				}
 			}
 		})
 	}

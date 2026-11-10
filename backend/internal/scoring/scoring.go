@@ -1,6 +1,9 @@
 package scoring
 
-import "time"
+import (
+	"math/big"
+	"time"
+)
 
 // Outcome is the decision for a scored purchase.
 type Outcome string
@@ -20,6 +23,14 @@ type Input struct {
 	EventTime             time.Time
 	CardPurchasesLastHour int   // earlier purchases in the hour before EventTime
 	DeviceCardsLastHour   int64 // distinct cards including the current card, or zero without device history
+	TrustedHistory        *TrustedPurchaseHistory
+}
+
+// TrustedPurchaseHistory summarizes earlier allowed or approved purchases.
+type TrustedPurchaseHistory struct {
+	Count      int64
+	TotalMinor *big.Int
+	DeviceSeen bool
 }
 
 // RuleConfig is the setting for one rule.
@@ -27,6 +38,10 @@ type RuleConfig struct {
 	Enabled bool
 	Weight  int   // points added when the rule fires
 	Limit   int64 // rule threshold; its unit depends on the rule
+	// These settings apply to the new-device spike rule.
+	WindowDays       int32
+	MinAmountMinor   int64
+	AmountMultiplier int32
 }
 
 // Ruleset holds the rules and decision thresholds. A rule missing from Rules is disabled.
@@ -61,9 +76,9 @@ func Evaluate(in Input, rs Ruleset) Result {
 		if !ok || !cfg.Enabled {
 			continue
 		}
-		if r.check(in, cfg.Limit) {
+		if r.check(in, cfg) {
 			res.Score += cfg.Weight
-			res.FiredRules = append(res.FiredRules, FiredRule{Name: r.name, Points: cfg.Weight, Message: r.message(in, cfg.Limit)})
+			res.FiredRules = append(res.FiredRules, FiredRule{Name: r.name, Points: cfg.Weight, Message: r.message(in, cfg)})
 		}
 	}
 	res.Outcome = decide(res.Score, rs)

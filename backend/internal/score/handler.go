@@ -42,6 +42,7 @@ type Purchases interface {
 	FindSavedDecision(ctx context.Context, p Purchase) (*Decision, error)
 	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
 	DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error)
+	TrustedHistory(ctx context.Context, p Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error)
 	FeatureHistory(ctx context.Context, in features.Input) (features.History, error)
 	PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error)
 	Save(ctx context.Context, p Purchase, d Decision) (int64, error)
@@ -215,6 +216,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.DeviceID != nil && rs.Rules[scoring.RuleDeviceCardCount].Enabled {
 			in.DeviceCardsLastHour, err = h.purchases.DeviceCardsLastHour(ctx, *p.DeviceID, p.CardToken, p.EventTime)
+			if err != nil {
+				h.internalError(w, p, err)
+				return
+			}
+		}
+		spike := rs.Rules[scoring.RuleNewDeviceSpike]
+		if p.DeviceID != nil && spike.Enabled && p.AmountMinor >= spike.MinAmountMinor {
+			in.TrustedHistory, err = h.purchases.TrustedHistory(ctx, p, spike.WindowDays)
 			if err != nil {
 				h.internalError(w, p, err)
 				return

@@ -87,6 +87,10 @@ func (s *purchases) DeviceCardsLastHour(context.Context, string, string, time.Ti
 	return 0, errors.New("unexpected device history lookup")
 }
 
+func (s *purchases) TrustedHistory(context.Context, score.Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
+	return nil, errors.New("unexpected trusted history lookup")
+}
+
 func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time, string) (float64, int64, error) {
 	return 0, 0, nil
 }

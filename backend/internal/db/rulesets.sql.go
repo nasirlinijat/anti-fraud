@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const deactivateRuleset = `-- name: DeactivateRuleset :exec
@@ -57,16 +59,21 @@ func (q *Queries) InsertRuleset(ctx context.Context, arg InsertRulesetParams) (i
 }
 
 const insertRulesetRule = `-- name: InsertRulesetRule :exec
-INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO ruleset_rules (
+    ruleset_version, rule_name, enabled, weight, rule_limit, window_days, min_amount_minor, amount_multiplier
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertRulesetRuleParams struct {
-	RulesetVersion int32
-	RuleName       string
-	Enabled        bool
-	Weight         int32
-	RuleLimit      int64
+	RulesetVersion   int32
+	RuleName         string
+	Enabled          bool
+	Weight           int32
+	RuleLimit        int64
+	WindowDays       pgtype.Int4
+	MinAmountMinor   pgtype.Int8
+	AmountMultiplier pgtype.Int4
 }
 
 func (q *Queries) InsertRulesetRule(ctx context.Context, arg InsertRulesetRuleParams) error {
@@ -76,21 +83,27 @@ func (q *Queries) InsertRulesetRule(ctx context.Context, arg InsertRulesetRulePa
 		arg.Enabled,
 		arg.Weight,
 		arg.RuleLimit,
+		arg.WindowDays,
+		arg.MinAmountMinor,
+		arg.AmountMultiplier,
 	)
 	return err
 }
 
 const listRulesetRules = `-- name: ListRulesetRules :many
-SELECT rule_name, enabled, weight, rule_limit
+SELECT rule_name, enabled, weight, rule_limit, window_days, min_amount_minor, amount_multiplier
 FROM ruleset_rules
 WHERE ruleset_version = $1
 `
 
 type ListRulesetRulesRow struct {
-	RuleName  string
-	Enabled   bool
-	Weight    int32
-	RuleLimit int64
+	RuleName         string
+	Enabled          bool
+	Weight           int32
+	RuleLimit        int64
+	WindowDays       pgtype.Int4
+	MinAmountMinor   pgtype.Int8
+	AmountMultiplier pgtype.Int4
 }
 
 func (q *Queries) ListRulesetRules(ctx context.Context, rulesetVersion int32) ([]ListRulesetRulesRow, error) {
@@ -107,6 +120,9 @@ func (q *Queries) ListRulesetRules(ctx context.Context, rulesetVersion int32) ([
 			&i.Enabled,
 			&i.Weight,
 			&i.RuleLimit,
+			&i.WindowDays,
+			&i.MinAmountMinor,
+			&i.AmountMultiplier,
 		); err != nil {
 			return nil, err
 		}

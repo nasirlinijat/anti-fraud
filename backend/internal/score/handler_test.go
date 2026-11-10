@@ -60,6 +60,9 @@ type fakePurchases struct {
 	countAt          time.Time
 	saved            []Purchase
 	decisions        []Decision
+
+	trustedHistoryErr   error
+	trustedHistoryCalls int
 }
 
 func (f *fakePurchases) FindSavedDecision(_ context.Context, p Purchase) (*Decision, error) {
@@ -78,6 +81,11 @@ func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at
 func (f *fakePurchases) DeviceCardsLastHour(context.Context, string, string, time.Time) (int64, error) {
 	f.deviceCardsCalls++
 	return 0, f.deviceCardsErr
+}
+
+func (f *fakePurchases) TrustedHistory(context.Context, Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
+	f.trustedHistoryCalls++
+	return nil, f.trustedHistoryErr
 }
 
 func (f *fakePurchases) FeatureHistory(context.Context, features.Input) (features.History, error) {
