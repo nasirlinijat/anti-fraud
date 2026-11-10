@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase } from './api'
+import { ModelRiskBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
+import { formatUsdMinor } from './displayFormat'
 import { ApiError } from './request'
 import { usePolling } from './usePolling'
+import { useTimeDisplay, type TimeDisplay } from './useTimeDisplay'
+import { EmptyState, ErrorState, LoadingSkeleton } from './ViewState'
 
 type ReviewAction = { item: Review; decision: Decision }
 const REFRESH_MS = 5_000
 
-const timestamp = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'medium',
-  timeZone: 'UTC',
-})
-const amount = new Intl.NumberFormat()
-
-function ReviewTable({ items, pending, onOpen, onDecision }: {
+function ReviewTable({ items, pending, time, onOpen, onDecision }: {
   items: Review[]
   pending: ReadonlySet<string>
+  time: TimeDisplay
   onOpen: (purchaseId: string) => void
   onDecision: (item: Review, decision: Decision) => void
 }) {
@@ -43,11 +41,11 @@ function ReviewTable({ items, pending, onOpen, onDecision }: {
           <tr>
             <th scope="col">Transaction</th>
             <th scope="col">Player</th>
-            <th scope="col">Amount (minor units)</th>
-            <th scope="col">Purchase time (UTC)</th>
-            <th scope="col">Queued time (UTC)</th>
+            <th scope="col">Amount (USD)</th>
+            <th scope="col">Purchase time</th>
+            <th scope="col">Queued time</th>
             <th scope="col">Rule score</th>
-            <th scope="col">Model score</th>
+            <th scope="col">Model risk</th>
             <th scope="col">Model version</th>
             <th scope="col">Fired rules</th>
             <th scope="col">Actions</th>
@@ -62,11 +60,11 @@ function ReviewTable({ items, pending, onOpen, onDecision }: {
                 </button>
               </th>
               <td>{item.player_id}</td>
-              <td>{amount.format(BigInt(item.amount_minor))}</td>
-              <td><time dateTime={item.event_time}>{timestamp.format(new Date(item.event_time))}</time></td>
-              <td><time dateTime={item.queued_at}>{timestamp.format(new Date(item.queued_at))}</time></td>
-              <td>{item.rule_score}</td>
-              <td>{item.model_score ?? 'Unavailable'}</td>
+              <td>{formatUsdMinor(item.amount_minor)}</td>
+              <td><Timestamp value={item.event_time} display={time} /></td>
+              <td><Timestamp value={item.queued_at} display={time} /></td>
+              <td><RuleScoreBadge value={item.rule_score} /></td>
+              <td><ModelRiskBadge value={item.model_score} /></td>
               <td>{item.model_version ?? 'None'}</td>
               <td>
                 {item.fired_rules.length === 0 ? 'None' : (
@@ -101,9 +99,10 @@ type CaseState =
   | { status: 'failed' }
   | { status: 'loaded'; review: ReviewCase }
 
-function CaseView({ apiKey, purchaseId, onBack, onKeyRejected }: {
+function CaseView({ apiKey, purchaseId, time, onBack, onKeyRejected }: {
   apiKey: string
   purchaseId: string
+  time: TimeDisplay
   onBack: () => void
   onKeyRejected: () => void
 }) {
@@ -122,27 +121,24 @@ function CaseView({ apiKey, purchaseId, onBack, onKeyRejected }: {
     <article className="review-case" aria-labelledby="case-heading">
       <button type="button" className="review-back" onClick={onBack}>Back to the queue</button>
       <h3 id="case-heading">Review case</h3>
-      {state.status === 'loading' && <p>Loading review case…</p>}
+      {state.status === 'loading' && <LoadingSkeleton label="Loading review case…" />}
       {state.status === 'not-found' && (
-        <p role="status">This purchase is not under review. It may have been decided, or the ID is wrong.</p>
+        <EmptyState announce>This purchase is not under review. It may have been decided, or the ID is wrong.</EmptyState>
       )}
       {state.status === 'failed' && (
-        <p role="alert">
-          Could not load this review case.{' '}
-          <button type="button" onClick={() => {
-            setState({ status: 'loading' })
-            refresh()
-          }}>
-            Try again
-          </button>
-        </p>
+        <ErrorState retryLabel="Try again" onRetry={() => {
+          setState({ status: 'loading' })
+          refresh()
+        }}>
+          Could not load this review case.
+        </ErrorState>
       )}
-      {state.status === 'loaded' && <CaseDetails review={state.review} />}
+      {state.status === 'loaded' && <CaseDetails review={state.review} time={time} />}
     </article>
   )
 }
 
-function CaseDetails({ review }: { review: ReviewCase }) {
+function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }) {
   return (
     <>
       <dl className="review-facts">
@@ -152,23 +148,23 @@ function CaseDetails({ review }: { review: ReviewCase }) {
         <dd>{review.player_id}</dd>
         <dt>Device</dt>
         <dd>{review.device_id ?? 'None'}</dd>
-        <dt>Amount (minor units)</dt>
-        <dd>{amount.format(BigInt(review.amount_minor))}</dd>
-        <dt>Purchase time (UTC)</dt>
-        <dd><time dateTime={review.event_time}>{timestamp.format(new Date(review.event_time))}</time></dd>
-        <dt>Queued time (UTC)</dt>
-        <dd><time dateTime={review.queued_at}>{timestamp.format(new Date(review.queued_at))}</time></dd>
+        <dt>Amount (USD)</dt>
+        <dd>{formatUsdMinor(review.amount_minor)}</dd>
+        <dt>Purchase time</dt>
+        <dd><Timestamp value={review.event_time} display={time} /></dd>
+        <dt>Queued time</dt>
+        <dd><Timestamp value={review.queued_at} display={time} /></dd>
         <dt>Ruleset version</dt>
         <dd>{review.ruleset_version}</dd>
         <dt>Rule score</dt>
-        <dd>{review.rule_score}</dd>
-        <dt>Model score</dt>
-        <dd>{review.model_score ?? 'Unavailable'}</dd>
+        <dd><RuleScoreBadge value={review.rule_score} /></dd>
+        <dt>Model risk</dt>
+        <dd><ModelRiskBadge value={review.model_score} /></dd>
         <dt>Model version</dt>
         <dd>{review.model_version ?? 'None'}</dd>
       </dl>
       <h4>Fired rules</h4>
-      {review.fired_rules.length === 0 ? <p>No rules fired.</p> : (
+      {review.fired_rules.length === 0 ? <EmptyState>No rules fired.</EmptyState> : (
         <table className="review-table review-rules">
           <thead>
             <tr>
@@ -204,6 +200,7 @@ function ReviewQueue() {
   const [feedback, setFeedback] = useState('')
   const [blockDevice, setBlockDevice] = useState(false)
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
+  const time = useTimeDisplay()
   // A null controller keeps the action disabled until a successful poll verifies queue state.
   const requests = useRef(new Map<string, AbortController | null>())
   const dialog = useRef<HTMLDialogElement>(null)
@@ -345,6 +342,7 @@ function ReviewQueue() {
   return (
     <section aria-labelledby="reviews-heading">
       <h2 id="reviews-heading" ref={heading} tabIndex={-1}>Review queue</h2>
+      {apiKey !== null && (openCase !== null || (page && page.items.length > 0)) && <TimeDisplayToggle display={time} />}
       {apiKey === null ? (
         <form className="review-key-form" method="post" onSubmit={openQueue}>
           <label htmlFor="review-api-key">Analyst key</label>
@@ -363,22 +361,22 @@ function ReviewQueue() {
           <button type="submit">Open queue</button>
         </form>
       ) : openCase !== null ? (
-        <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
+        <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} time={time} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
       ) : (
         <>
           <p role="status">{feedback}</p>
           {loadFailed && (
-            <p role="status">
+            <ErrorState polite>
               {accessUnavailable ? 'Review access is unavailable. Check the backend configuration.' :
                 page ? 'Refresh failed. The queue shown may be out of date.' : 'Could not load this page.'}
               {' Retrying automatically.'}
-            </p>
+            </ErrorState>
           )}
-          {page === null && !loadFailed && <p>Loading review queue…</p>}
+          {page === null && !loadFailed && <LoadingSkeleton label="Loading review queue…" />}
           {page && (page.items.length > 0 ? (
-            <ReviewTable items={page.items} pending={pending} onOpen={setOpenCase} onDecision={chooseDecision} />
+            <ReviewTable items={page.items} pending={pending} time={time} onOpen={setOpenCase} onDecision={chooseDecision} />
           ) : (
-            <p>{cursor === null ? 'No purchases are waiting for review.' : 'No purchases on this page.'}</p>
+            <EmptyState>{cursor === null ? 'No purchases are waiting for review.' : 'No purchases on this page.'}</EmptyState>
           ))}
           <nav className="review-pages" aria-label="Review queue pages">
             <button type="button" aria-disabled={!hasPrevious} onClick={() => {
