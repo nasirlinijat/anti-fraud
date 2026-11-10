@@ -23,10 +23,14 @@ import export
 import features
 import train
 
-# Days of the first simulated world: days 0-13 only build history, and the
-# days between the ranges keep training, validation and test apart.
-SPLIT_DAYS = {"train": (14, 84), "validation": (90, 104), "test": (105, 124)}
-WARM_UP_DAYS = 14
+# Days of the first simulated world; the days between the ranges keep
+# training, validation and test apart. Training starts at day 0, when no
+# player has history yet, because the service starts the same way on an empty
+# database: a model trained only on later days flags players for having no
+# history.
+SPLIT_DAYS = {"train": (0, 84), "validation": (90, 104), "test": (105, 124)}
+# The first days of a world, scored separately as the empty-database case.
+FIRST_DAYS = 14
 
 
 def load(path):
@@ -97,13 +101,13 @@ def main():
     parser.add_argument("--compare", default="../backend/models/lgbm-ieee-v5-combined.json",
                         help="exported model scored on the same test days for comparison; empty to skip")
     parser.add_argument("--out", default="output")
-    parser.add_argument("--version", default="lgbm-game-v1")
+    parser.add_argument("--version", default="lgbm-game-v2")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--models", type=int, default=5, help="number of models averaged into the model (1 to 5)")
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)
     parser.add_argument("--target-precision", type=float)
-    parser.add_argument("--train-days", help="first-last day used for training, default 14-84")
+    parser.add_argument("--train-days", help="first-last day used for training, default 0-84")
     parser.add_argument("--validation-days", help="first-last validation day, default 90-104")
     parser.add_argument("--test-days", help="first-last test day, default 105-124")
     args = parser.parse_args()
@@ -182,12 +186,13 @@ def main():
 
     if args.second_world:
         world = load(args.second_world)
-        world = world[world["day"] >= WARM_UP_DAYS]
-        report["second_world"] = {
-            "file": Path(args.second_world).name,
-            "days": f"{int(world['day'].min())}-{int(world['day'].max())}",
-            **policy_report(world, export.average_proba(models, world[features.FEATURES]), thresholds),
-        }
+        report["second_world"] = {"file": Path(args.second_world).name}
+        # The first days are what the service sees on an empty database.
+        for name, part in [("first_days", world[world["day"] < FIRST_DAYS]), ("later_days", world[world["day"] >= FIRST_DAYS])]:
+            report["second_world"][name] = {
+                "days": f"{int(part['day'].min())}-{int(part['day'].max())}",
+                **policy_report(part, export.average_proba(models, part[features.FEATURES]), thresholds),
+            }
 
     if args.compare:
         version, policy, score = exported_model(args.compare)
@@ -207,9 +212,10 @@ def main():
     model_path, _ = export.export(models, features.FEATURES, args.version, args.models_dir, golden, report)
 
     summary = {"policy": report["policy"], "test_scenarios": report["test_scenarios"]}
-    for name in ("second_world", "compared_model"):
-        if name in report:
-            summary[name] = {k: report[name][k] for k in ("effect", "scenarios")}
+    if "second_world" in report:
+        summary["second_world"] = {name: report["second_world"][name]["effect"] for name in ("first_days", "later_days")}
+    if "compared_model" in report:
+        summary["compared_model"] = report["compared_model"]["effect"]
     print(json.dumps(summary, indent=2))
     print(f"model written to {model_path}")
     print(f"done in {time.time() - started:.0f}s")
