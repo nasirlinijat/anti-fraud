@@ -2,7 +2,9 @@ package features
 
 import (
 	"math"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,7 +28,6 @@ var Names = []string{
 	"card_uses_24h",
 	"player_distinct_cards",
 	"email_is_new_for_player",
-	"hour_of_day",
 	"card_country",
 	"card_category",
 	"billing_country",
@@ -50,6 +51,19 @@ var Names = []string{
 	"card1_distinct_addresses",
 	"card1_distinct_emails",
 	"billing_distance",
+	"account_age_days",
+	"has_client_info",
+	"os_family",
+	"browser_family",
+	"os_share",
+	"browser_share",
+	"screen_share",
+	"screen_area",
+	"os_is_new_for_player",
+	"browser_is_new_for_player",
+	"player_distinct_browsers",
+	"card_issuer_code",
+	"billing_region_code",
 }
 
 var (
@@ -57,6 +71,13 @@ var (
 	cardNetworks = map[string]float64{"visa": 0, "mastercard": 1, "american express": 2, "discover": 3}
 	cardTypes    = map[string]float64{"debit": 0, "credit": 1, "debit or credit": 2, "charge card": 3}
 	deviceTypes  = map[string]float64{"desktop": 0, "mobile": 1}
+	// Keyed by the first word of the value, in lower case.
+	osFamilies      = map[string]float64{"windows": 0, "ios": 1, "mac": 2, "android": 3, "linux": 4}
+	browserFamilies = map[string]float64{
+		"chrome": 0, "mobile": 1, "safari": 2, "ie": 3, "edge": 4,
+		"firefox": 5, "samsung": 6, "android": 7, "opera": 8,
+	}
+	screenSize = regexp.MustCompile(`^(\d+)x(\d+)$`)
 )
 
 // NoEmail is the email domain key of a purchase without one.
@@ -82,6 +103,10 @@ type Input struct {
 	RecipientEmailDomain *string
 	DeviceType           *string
 	DeviceName           *string
+	AccountCreatedAt     *time.Time
+	ClientOS             *string
+	ClientBrowser        *string
+	ScreenResolution     *string
 }
 
 // EmailKey returns the purchaser email domain, or NoEmail when it is missing.
@@ -105,6 +130,10 @@ type PlayerHistory struct {
 	EmailUses        int64 // earlier purchases with this email domain
 	DistinctDevices  int64 // known device names only
 	DeviceUses       int64 // earlier purchases with this device name
+	OSUses           int64 // earlier purchases with this client OS
+	BrowserUses      int64 // earlier purchases with this client browser
+	ScreenUses       int64 // earlier purchases with this screen resolution
+	DistinctBrowsers int64 // known client browsers only
 }
 
 // CardHistory summarizes the card's earlier purchases.
@@ -128,12 +157,15 @@ type Count struct {
 
 // History is everything the features need from earlier purchases.
 type History struct {
-	Player PlayerHistory
-	Card   CardHistory
-	Issuer IssuerHistory
-	All    Count // all purchases
-	Email  Count // purchases with this email domain
-	Device Count // purchases with this device name; zero when it is missing
+	Player  PlayerHistory
+	Card    CardHistory
+	Issuer  IssuerHistory
+	All     Count // all purchases
+	Email   Count // purchases with this email domain
+	Device  Count // purchases with this device name; zero when it is missing
+	OS      Count // purchases with this client OS; zero when it is missing
+	Browser Count // purchases with this client browser; zero when it is missing
+	Screen  Count // purchases with this screen resolution; zero when it is missing
 }
 
 // Vector returns the feature values in the order of Names.
@@ -168,7 +200,6 @@ func Vector(in Input, h History) []float64 {
 		float64(h.Card.Uses24h),
 		float64(p.DistinctCards),
 		flag(hasHistory && p.EmailUses == 0),
-		float64(t.UTC().Hour()),
 		number(in.CardCountry),
 		number(in.CardCategory),
 		number(in.BillingCountry),
@@ -192,6 +223,19 @@ func Vector(in Input, h History) []float64 {
 		float64(h.Issuer.BillingRegions),
 		float64(h.Issuer.EmailDomains),
 		distance(in.BillingDistance),
+		accountAge(in.AccountCreatedAt, t),
+		flag(in.ClientOS != nil || in.ClientBrowser != nil || in.ScreenResolution != nil),
+		family(osFamilies, in.ClientOS),
+		family(browserFamilies, in.ClientBrowser),
+		when(in.ClientOS != nil, func() float64 { return share(h.OS.Purchases, h.All.Purchases) }),
+		when(in.ClientBrowser != nil, func() float64 { return share(h.Browser.Purchases, h.All.Purchases) }),
+		when(in.ScreenResolution != nil, func() float64 { return share(h.Screen.Purchases, h.All.Purchases) }),
+		screenArea(in.ScreenResolution),
+		flag(in.ClientOS != nil && hasHistory && p.OSUses == 0),
+		flag(in.ClientBrowser != nil && hasHistory && p.BrowserUses == 0),
+		float64(p.DistinctBrowsers),
+		number(in.CardIssuer),
+		number(in.BillingRegion),
 	}
 }
 
@@ -202,6 +246,40 @@ func Map(values []float64) map[string]float64 {
 		m[Names[i]] = v
 	}
 	return m
+}
+
+// accountAge returns the whole days between account creation and the purchase.
+func accountAge(created *time.Time, at time.Time) float64 {
+	if created == nil {
+		return Missing
+	}
+	return math.Floor(at.Sub(*created).Seconds() / 86400)
+}
+
+// family looks up the first word of value, in lower case.
+func family(table map[string]float64, value *string) float64 {
+	if value == nil {
+		return Missing
+	}
+	word, _, _ := strings.Cut(strings.ToLower(*value), " ")
+	return code(table, &word)
+}
+
+// screenArea reads a resolution written as WIDTHxHEIGHT.
+func screenArea(value *string) float64 {
+	if value == nil {
+		return Missing
+	}
+	m := screenSize.FindStringSubmatch(*value)
+	if m == nil {
+		return Missing
+	}
+	width, err1 := strconv.ParseFloat(m[1], 64)
+	height, err2 := strconv.ParseFloat(m[2], 64)
+	if err1 != nil || err2 != nil {
+		return Missing
+	}
+	return width * height
 }
 
 func code(table map[string]float64, value *string) float64 {

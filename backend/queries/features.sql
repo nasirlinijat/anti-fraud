@@ -14,7 +14,11 @@ SELECT
     count(DISTINCT coalesce(email_domain, 'none')) AS distinct_emails,
     count(*) FILTER (WHERE coalesce(email_domain, 'none') = sqlc.arg(email_domain)::text) AS email_uses,
     count(DISTINCT device_name) AS distinct_devices,
-    count(*) FILTER (WHERE device_name = sqlc.narg(device_name)::text) AS device_uses
+    count(*) FILTER (WHERE device_name = sqlc.narg(device_name)::text) AS device_uses,
+    count(*) FILTER (WHERE client_os = sqlc.narg(client_os)::text) AS os_uses,
+    count(*) FILTER (WHERE client_browser = sqlc.narg(client_browser)::text) AS browser_uses,
+    count(*) FILTER (WHERE screen_resolution = sqlc.narg(screen_resolution)::text) AS screen_uses,
+    count(DISTINCT client_browser) AS distinct_browsers
 FROM purchases
 WHERE player_id = sqlc.arg(player_id)
   AND (event_time, transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text);
@@ -41,12 +45,16 @@ WHERE coalesce(card_issuer, '') = sqlc.arg(card_issuer)::text
   AND (event_time, transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text);
 
 -- name: FeatureCounts :many
--- Reads the running totals for all purchases, the email domain and the device name.
+-- Reads the running totals for all purchases, the email domain, the device name
+-- and the client OS, browser and screen.
 SELECT kind, key, purchases, players
 FROM feature_counts
 WHERE (kind = 'all' AND key = '')
    OR (kind = 'email' AND key = sqlc.arg(email_domain)::text)
-   OR (kind = 'device' AND key = sqlc.narg(device_name)::text);
+   OR (kind = 'device' AND key = sqlc.narg(device_name)::text)
+   OR (kind = 'os' AND key = sqlc.narg(client_os)::text)
+   OR (kind = 'browser' AND key = sqlc.narg(client_browser)::text)
+   OR (kind = 'screen' AND key = sqlc.narg(screen_resolution)::text);
 
 -- name: AddFeatureCount :exec
 -- Adds one purchase to a running total. new_player is 1 when the player had no

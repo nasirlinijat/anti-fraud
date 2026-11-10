@@ -1,0 +1,144 @@
+{
+  "features": [
+    "amount",
+    "cents",
+    "product_code",
+    "card_network",
+    "card_type",
+    "player_txn_count",
+    "player_avg_amount",
+    "amount_to_avg",
+    "secs_since_last",
+    "secs_since_first",
+    "card_uses_1h",
+    "card_uses_24h",
+    "player_distinct_cards",
+    "email_is_new_for_player",
+    "card_country",
+    "card_category",
+    "billing_country",
+    "email_domain_share",
+    "has_recipient_email",
+    "recipient_email_differs",
+    "player_max_amount",
+    "player_uses_1h",
+    "player_uses_24h",
+    "player_same_amount_count",
+    "player_distinct_emails",
+    "email_players_share",
+    "has_device_info",
+    "device_type",
+    "device_info_share",
+    "device_players_share",
+    "device_is_new_for_player",
+    "player_distinct_devices",
+    "card_distinct_players",
+    "card1_distinct_players",
+    "card1_distinct_addresses",
+    "card1_distinct_emails",
+    "billing_distance",
+    "account_age_days",
+    "has_client_info",
+    "os_family",
+    "browser_family",
+    "os_share",
+    "browser_share",
+    "screen_share",
+    "screen_area",
+    "os_is_new_for_player",
+    "browser_is_new_for_player",
+    "player_distinct_browsers",
+    "card_issuer_code",
+    "billing_region_code"
+  ],
+  "labels": "first fraud of each customer only",
+  "lightgbm": {
+    "best_iteration": 110,
+    "test": {
+      "rows": 85430,
+      "fraud_rate": 0.035,
+      "roc_auc": 0.6385,
+      "pr_auc": 0.1331,
+      "operating_points": [
+        {
+          "false_positive_rate": 0.001,
+          "threshold": 0.381236,
+          "fraud_caught": 0.0337,
+          "precision": 0.5489,
+          "flagged": 184,
+          "fraud_money_caught": 0.0607
+        },
+        {
+          "false_positive_rate": 0.005,
+          "threshold": 0.204539,
+          "fraud_caught": 0.0838,
+          "precision": 0.378,
+          "flagged": 664,
+          "fraud_money_caught": 0.0997
+        },
+        {
+          "false_positive_rate": 0.01,
+          "threshold": 0.141222,
+          "fraud_caught": 0.1179,
+          "precision": 0.2997,
+          "flagged": 1178,
+          "fraud_money_caught": 0.1381
+        },
+        {
+          "false_positive_rate": 0.02,
+          "threshold": 0.090793,
+          "fraud_caught": 0.1633,
+          "precision": 0.2287,
+          "flagged": 2138,
+          "fraud_money_caught": 0.1768
+        }
+      ]
+    },
+    "test_first_fraud_only": {
+      "rows": 83558,
+      "fraud_rate": 0.0134,
+      "roc_auc": 0.9247,
+      "pr_auc": 0.2456,
+      "operating_points": [
+        {
+          "false_positive_rate": 0.001,
+          "threshold": 0.381236,
+          "fraud_caught": 0.09,
+          "precision": 0.5489,
+          "flagged": 184,
+          "fraud_money_caught": 0.1467
+        },
+        {
+          "false_positive_rate": 0.005,
+          "threshold": 0.204539,
+          "fraud_caught": 0.2148,
+          "precision": 0.3685,
+          "flagged": 654,
+          "fraud_money_caught": 0.2354
+        },
+        {
+          "false_positive_rate": 0.01,
+          "threshold": 0.141222,
+          "fraud_caught": 0.2977,
+          "precision": 0.2882,
+          "flagged": 1159,
+          "fraud_money_caught": 0.3224
+        },
+        {
+          "false_positive_rate": 0.02,
+          "threshold": 0.090793,
+          "fraud_caught": 0.4011,
+          "precision": 0.2144,
+          "flagged": 2099,
+          "fraud_money_caught": 0.4078
+        }
+      ]
+    }
+  },
+  "export": {
+    "version": "lgbm-ieee-v5-first",
+    "trees": 110,
+    "golden_rows": 2000,
+    "tree_reader_max_difference": 2.7755575615628914e-16
+  }
+}

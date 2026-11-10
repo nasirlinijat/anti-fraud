@@ -21,10 +21,9 @@ import (
 
 const (
 	transactionsPath = "../../../ml/testdata/transactions.csv"
-	// The service computes the v3 features until it moves to model v4.
-	expectedPath = "../../../ml/testdata/expected_features_v3.csv"
-	modelPath    = "../../models/lgbm-ieee-v3.json"
-	tolerance    = 1e-9
+	expectedPath     = "../../../ml/testdata/expected_features.csv"
+	modelPath        = "../../models/lgbm-ieee-v5.json"
+	tolerance        = 1e-9
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -52,6 +51,11 @@ func TestVectorWithoutHistory(t *testing.T) {
 		CardCategory:  ptr("226"),
 		ProductCode:   ptr("C"),
 		DeviceType:    ptr("mobile"),
+		// Created 3 days and 20 hours before the purchase: 3 whole days.
+		AccountCreatedAt: ptr(time.Date(2026, 11, 5, 13, 45, 0, 0, time.UTC)),
+		ClientOS:         ptr("Mac OS X 10_13"),
+		ClientBrowser:    ptr("Mobile Safari 11.0"),
+		ScreenResolution: ptr("1334x750"),
 	}
 	got := features.Map(features.Vector(in, features.History{}))
 	want := map[string]float64{
@@ -66,7 +70,6 @@ func TestVectorWithoutHistory(t *testing.T) {
 		"secs_since_last":          features.Missing,
 		"secs_since_first":         features.Missing,
 		"email_is_new_for_player":  0,
-		"hour_of_day":              9,
 		"card_country":             features.Missing,
 		"card_category":            226,
 		"billing_country":          features.Missing,
@@ -81,6 +84,14 @@ func TestVectorWithoutHistory(t *testing.T) {
 		"device_players_share":     features.Missing,
 		"device_is_new_for_player": 0,
 		"billing_distance":         features.Missing,
+		"account_age_days":         3,
+		"has_client_info":          1,
+		"os_family":                2,
+		"browser_family":           1,
+		"os_share":                 features.Missing,
+		"screen_area":              1334 * 750,
+		"os_is_new_for_player":     0,
+		"player_distinct_browsers": 0,
 	}
 	if len(got) != len(features.Names) {
 		t.Fatalf("got %d features, want %d", len(got), len(features.Names))
@@ -223,6 +234,18 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) score.Purchase {
 		RecipientEmailDomain: optional("R_emaildomain"),
 		DeviceType:           optional("DeviceType"),
 		DeviceName:           optional("DeviceInfo"),
+		ClientOS:             optional("id_30"),
+		ClientBrowser:        optional("id_31"),
+		ScreenResolution:     optional("id_33"),
+	}
+	// D1 counts the days since the client began, the IEEE stand-in for account age.
+	if row["D1"] != "" {
+		d1, err := strconv.ParseInt(row["D1"], 10, 64)
+		if err != nil {
+			t.Fatalf("D1 %q: %v", row["D1"], err)
+		}
+		created := p.EventTime.Add(-time.Duration(d1) * 24 * time.Hour)
+		p.AccountCreatedAt = &created
 	}
 	if row["dist1"] != "" {
 		d, err := strconv.ParseFloat(row["dist1"], 64)

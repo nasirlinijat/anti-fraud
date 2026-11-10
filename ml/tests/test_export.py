@@ -33,13 +33,88 @@ def test_fast_reader_matches_tree_reader(model_and_rows):
     assert np.max(np.abs(export.predict_fast(dump, values) - export.predict_from_dump(dump, values))) < 1e-12
 
 
-@pytest.mark.parametrize("version", ["lgbm-ieee-v3", "lgbm-ieee-v4"])
+@pytest.mark.parametrize("version", ["lgbm-ieee-v3", "lgbm-ieee-v5"])
 def test_fast_reader_matches_exported_golden_rows(version):
     models = Path(__file__).resolve().parents[2] / "backend" / "models"
     dump = json.loads((models / f"{version}.json").read_text())
     golden = pd.read_csv(models / f"{version}.golden.csv")
     scores = export.predict_fast(dump, golden[dump["feature_names"]].to_numpy())
     assert np.max(np.abs(scores - golden["expected"].to_numpy())) < 1e-9
+
+
+def test_flag_by_money_picks_the_best_cut():
+    y = np.array([1, 0, 1, 0, 0, 1])
+    score = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.1])
+    amount = np.array([100.0, 50.0, 30.0, 20.0, 10.0, 5.0])
+    # Net after each cut with review cost 10: 90, 80, 100, 90, 80, 75.
+    flag_at, net = export.flag_by_money(y, score, amount, 10)
+    assert flag_at == 0.7 and net == 100
+
+
+def test_flag_by_money_flags_nothing_when_reviews_cost_more():
+    y = np.array([1, 0])
+    score = np.array([0.9, 0.2])
+    flag_at, net = export.flag_by_money(y, score, np.array([5.0, 5.0]), 10)
+    assert flag_at > 0.9 and net == 0
+
+
+def test_flag_by_money_keeps_equal_scores_together():
+    y = np.array([1, 0, 0])
+    score = np.array([0.8, 0.8, 0.3])
+    flag_at, net = export.flag_by_money(y, score, np.array([100.0, 1.0, 1.0]), 10)
+    assert flag_at == 0.8 and net == 80
+
+
+def test_choose_thresholds_by_money_or_rate():
+    rng = np.random.default_rng(1)
+    y = (rng.random(5000) < 0.05).astype(int)
+    score = np.clip(rng.normal(0.2 + 0.4 * y, 0.15), 0, 1)
+    amount = rng.uniform(1, 200, 5000)
+    by_rate = export.choose_thresholds(y, score, 0.01, 0.02)
+    by_money = export.choose_thresholds(y, score, 0.01, 0.02, amount, review_cost=5)
+    assert by_rate["flag_by"] == "review_rate" and by_money["flag_by"] == "money"
+    assert by_money["flag_at"] == round(export.flag_by_money(y, score, amount, 5)[0], 6)
+    assert by_money["clear_below"] <= by_money["flag_at"]
+    effect = export.policy_effect(y, score, by_money, amount)
+    assert 0 <= effect["flagged_fraud_money_caught"] <= 1
+
+
+def test_percentile_counts_the_table_strictly_below():
+    table = np.array([0.1, 0.1, 0.2, 0.5])
+    assert export.percentile(table, np.array([0.05, 0.1, 0.2, 0.3, 0.9])).tolist() == [0, 0, 0.5, 0.75, 1]
+
+
+def test_combined_score_takes_the_higher_percentile(model_and_rows):
+    model, rows, _ = model_and_rows
+    dump = model.booster_.dump_model()
+    values = rows.to_numpy()
+    scores = export.predict_fast(dump, values)
+    low_table = export.percentile_table(scores)
+    high_table = export.percentile_table(scores / 2)
+    combined = export.combined_score([(dump, low_table), (dump, high_table)], values)
+    assert np.all(combined == np.maximum(export.percentile(low_table, scores), export.percentile(high_table, scores)))
+    assert np.all(combined >= export.percentile(low_table, scores))
+
+
+def test_averaged_export_matches_the_models(model_and_rows, tmp_path):
+    model, rows, labels = model_and_rows
+    other = lgb.LGBMClassifier(n_estimators=30, num_leaves=5, use_missing=False, random_state=3, verbose=-1)
+    other.fit(rows, labels, eval_X=rows, eval_y=labels)
+    report = {}
+    path, dump = export.export([model, other], ["a", "b", "c"], "avg-v1", tmp_path, rows.head(50), report)
+    raw = (model.predict(rows, raw_score=True) + other.predict(rows, raw_score=True)) / 2
+    assert np.max(np.abs(export.predict_fast(dump, rows.to_numpy()) - 1 / (1 + np.exp(-raw)))) < 1e-9
+    assert report["export"]["trees"] == len(model.booster_.dump_model()["tree_info"]) + 30
+    assert report["export"]["tree_reader_max_difference"] < 1e-9
+
+
+def test_blend_with_history_uses_only_earlier_scores():
+    scores = [0.2, 0.8, 0.4, 0.6, 1.0]
+    players = ["a", "b", "a", "a", "b"]
+    got = export.blend_with_history(scores, players, 0.5)
+    want = [0.2, 0.8, 0.5 * 0.4 + 0.5 * 0.2, 0.5 * 0.6 + 0.5 * (0.2 + 0.4) / 2, 0.5 * 1.0 + 0.5 * 0.8]
+    assert np.allclose(got, want, atol=1e-15)
+    assert np.array_equal(export.blend_with_history(scores, players, 0), scores)
 
 
 def test_unsupported_split_is_rejected():
@@ -79,7 +154,7 @@ def test_synthetic_rows_stay_in_range_and_include_missing_values():
 def test_export_writes_model_rows_and_report(model_and_rows, tmp_path):
     model, rows, _ = model_and_rows
     report = {}
-    path = export.export(model, ["a", "b", "c"], "test-v1", tmp_path, rows.head(50), report)
+    path, _ = export.export(model, ["a", "b", "c"], "test-v1", tmp_path, rows.head(50), report)
     dump = json.loads(path.read_text())
     assert dump["model_version"] == "test-v1"
     assert len(pd.read_csv(tmp_path / "test-v1.golden.csv")) == 50

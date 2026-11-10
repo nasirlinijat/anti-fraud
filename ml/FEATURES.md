@@ -2,7 +2,7 @@
 
 The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
 
-This file describes model v4 (48 features). Until the service is moved to v4, it still computes the v3 features (the v3 table without features 38-48, with `hour_of_day` and the float player average) and its Go test uses `ml/testdata/expected_features_v3.csv`.
+This file describes model v5 (50 features), which the service computes and loads by default.
 
 ## General rules
 
@@ -86,6 +86,8 @@ Any other or missing value is `-1`.
 | 46 | `os_is_new_for_player` | 1 if the OS is present, the player has earlier purchases, and none used exactly this OS, else 0 |
 | 47 | `browser_is_new_for_player` | 1 if the browser is present, the player has earlier purchases, and none used exactly this browser, else 0 |
 | 48 | `player_distinct_browsers` | Distinct known browsers the player used before (missing browsers are not counted) |
+| 49 | `card_issuer_code` | `card_issuer` (`card1`) as a number |
+| 50 | `billing_region_code` | `billing_region` (`addr1`) as a number |
 
 Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 
@@ -127,7 +129,7 @@ The service reads the thresholds at startup from the report next to `MODEL_PATH`
 `backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
 
 - Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text.
-- Features 19, 27, 30 and 31 read running totals from the `feature_counts` table: all purchases, purchases per email domain and per device name, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.
+- Features 18, 26, 29, 30, 42, 43 and 44 read running totals from the `feature_counts` table: all purchases, and purchases per email domain, device name, client OS, browser and screen, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.
 
 ## Checking the Go implementation
 

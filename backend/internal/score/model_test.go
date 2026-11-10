@@ -161,9 +161,15 @@ func TestUseModelRejectsMismatch(t *testing.T) {
 	}
 }
 
-func TestUseModelAcceptsV3Model(t *testing.T) {
-	const path = "../../models/lgbm-ieee-v3.json"
-	model, err := lgbm.Load(path)
+func TestUseModelAcceptsExportedModels(t *testing.T) {
+	for _, path := range []string{"../../models/lgbm-ieee-v5.json", "../../models/lgbm-ieee-v5-combined.json"} {
+		t.Run(path, func(t *testing.T) { useExportedModel(t, path) })
+	}
+}
+
+func useExportedModel(t *testing.T, path string) {
+	t.Helper()
+	model, err := lgbm.LoadScorer(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -174,5 +180,95 @@ func TestUseModelAcceptsV3Model(t *testing.T) {
 	h := NewHandler(fakeRulesets{}, &fakeBlocklist{}, &fakePurchases{})
 	if err := h.UseModel(model, policy); err != nil {
 		t.Fatalf("UseModel: %v", err)
+	}
+}
+
+func TestModelScoreIsBlendedWithEarlierScores(t *testing.T) {
+	purchases := &fakePurchases{earlierSum: 1.6, earlierCount: 2}
+	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	policy := scoring.ModelPolicy{FlagAt: 0.4, ClearBelow: 0.01, PlayerBlendWeight: 0.5}
+	if err := h.UseModel(&fakeModel{score: 0.2}, policy); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, h, testKey)
+	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
+	req.Header.Set("X-API-Key", testKey)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	got := decodeJSON[scoreResponse](t, rec)
+	want := 0.5*0.2 + 0.5*0.8
+	if got.ModelScore == nil || *got.ModelScore != want {
+		t.Fatalf("model_score = %v, want %v", got.ModelScore, want)
+	}
+	if got.Outcome != scoring.OutcomeReview {
+		t.Errorf("outcome = %s, want review: the blended score %v is above flag_at", got.Outcome, want)
+	}
+	d := purchases.decisions[0]
+	if d.ModelScoreUnblended == nil || *d.ModelScoreUnblended != 0.2 || *d.ModelScore != want {
+		t.Errorf("saved scores %v / %v, want blended %v and unblended 0.2", d.ModelScore, d.ModelScoreUnblended, want)
+	}
+}
+
+func TestBlendNeedsEarlierScores(t *testing.T) {
+	boom := errors.New("database is down")
+	purchases := &fakePurchases{earlierErr: boom}
+	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	if err := h.UseModel(&fakeModel{score: 0.2}, scoring.ModelPolicy{FlagAt: 0.6, ClearBelow: 0.01, PlayerBlendWeight: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, h, testKey)
+	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
+	req.Header.Set("X-API-Key", testKey)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError || len(purchases.saved) != 0 {
+		t.Fatalf("status %d, saved %d; want 500 and nothing saved", rec.Code, len(purchases.saved))
+	}
+}
+
+// fakeCombination has two models; Combine returns the higher of the two scores.
+type fakeCombination struct {
+	fakeModel
+	scores   []float64
+	combined []float64
+}
+
+func (c *fakeCombination) Scores([]float64) ([]float64, error) {
+	return append([]float64(nil), c.scores...), nil
+}
+
+func (c *fakeCombination) Combine(scores []float64) float64 {
+	c.combined = scores
+	return max(scores[0], scores[1])
+}
+
+func TestBlendAppliesToTheMainModelOfACombination(t *testing.T) {
+	purchases := &fakePurchases{earlierSum: 1.6, earlierCount: 2}
+	model := &fakeCombination{scores: []float64{0.2, 0.3}}
+	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	if err := h.UseModel(model, scoring.ModelPolicy{FlagAt: 0.9, ClearBelow: 0.01, PlayerBlendWeight: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, h, testKey)
+	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
+	req.Header.Set("X-API-Key", testKey)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	blendedMain := 0.5*0.2 + 0.5*0.8
+	if model.combined[0] != blendedMain || model.combined[1] != 0.3 {
+		t.Errorf("combined scores %v, want the main model blended to %v and the other unchanged", model.combined, blendedMain)
+	}
+	got := decodeJSON[scoreResponse](t, rec)
+	if got.ModelScore == nil || *got.ModelScore != blendedMain {
+		t.Errorf("model_score = %v, want %v", got.ModelScore, blendedMain)
+	}
+	d := purchases.decisions[0]
+	if d.ModelScoreUnblended == nil || *d.ModelScoreUnblended != 0.2 {
+		t.Errorf("saved unblended score %v, want the main model's own 0.2", d.ModelScoreUnblended)
 	}
 }

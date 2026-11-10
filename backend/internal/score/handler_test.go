@@ -42,15 +42,18 @@ type fakeRulesets struct {
 func (f fakeRulesets) Active(context.Context) (scoring.Ruleset, error) { return f.rs, f.err }
 
 type fakePurchases struct {
-	cardUses   int
-	countErr   error
-	historyErr error
-	history    features.History
-	saveErr    error
-	countCard  string
-	countAt    time.Time
-	saved      []Purchase
-	decisions  []Decision
+	cardUses     int
+	countErr     error
+	historyErr   error
+	earlierSum   float64
+	earlierCount int64
+	earlierErr   error
+	history      features.History
+	saveErr      error
+	countCard    string
+	countAt      time.Time
+	saved        []Purchase
+	decisions    []Decision
 }
 
 func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
@@ -60,6 +63,10 @@ func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at
 
 func (f *fakePurchases) FeatureHistory(context.Context, features.Input) (features.History, error) {
 	return f.history, f.historyErr
+}
+
+func (f *fakePurchases) PlayerEarlierModelScores(context.Context, string, time.Time, string) (float64, int64, error) {
+	return f.earlierSum, f.earlierCount, f.earlierErr
 }
 
 func (f *fakePurchases) Save(_ context.Context, p Purchase, d Decision) (int64, error) {

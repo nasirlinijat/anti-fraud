@@ -52,9 +52,12 @@ def requests_from(df):
     df = features.add_keys(df.copy())
     requests = []
     for row in df.itertuples(index=False):
+        event_time = START + timedelta(seconds=int(row.TransactionDT))
+        # D1 counts the days since the client began, the IEEE stand-in for account age.
+        created = None if pd.isna(row.D1) else (event_time - timedelta(days=int(row.D1))).strftime("%Y-%m-%dT%H:%M:%SZ")
         request = {
             "transaction_id": str(row.TransactionID),
-            "event_time": (START + timedelta(seconds=int(row.TransactionDT))).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "event_time": event_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "amount_minor": int(row.amount_minor),
             "player_id": row.player_id,
             "card_token": row.card_id,
@@ -71,6 +74,10 @@ def requests_from(df):
             "recipient_email_domain": code(row.R_emaildomain),
             "device_type": code(row.DeviceType),
             "device_name": code(row.DeviceInfo),
+            "client_os": code(row.id_30),
+            "client_browser": code(row.id_31),
+            "screen_resolution": code(row.id_33),
+            "account_created_at": created,
         }
         requests.append({name: value for name, value in request.items() if value is not None})
     return requests
@@ -82,17 +89,32 @@ class Client:
         self.connection = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=30)
         self.headers = {"Content-Type": "application/json", "X-API-Key": api_key}
 
-    def score(self, request):
-        self.connection.request("POST", "/score", json.dumps(request), self.headers)
-        response = self.connection.getresponse()
-        body = response.read()
-        if response.status == 409:
+    def score(self, request, attempts=5):
+        # A 500 or a lost connection saves nothing, so the purchase can be sent
+        # again; this survives a database restart in the middle of a long replay.
+        for attempt in range(1, attempts + 1):
+            try:
+                self.connection.request("POST", "/score", json.dumps(request), self.headers)
+                response = self.connection.getresponse()
+                body = response.read()
+            except (OSError, http.client.HTTPException) as error:
+                status, body = None, str(error).encode()
+                self.connection.close()
+            else:
+                status = response.status
+            if status is not None and status < 500:
+                break
+            if attempt == attempts:
+                raise SystemExit(f"transaction {request['transaction_id']}: status {status}: {body.decode()}")
+            print(f"transaction {request['transaction_id']}: status {status}, retrying in {2 * attempt}s")
+            time.sleep(2 * attempt)
+        if status == 409:
             raise SystemExit(
                 f"transaction {request['transaction_id']} is already scored: start from an empty database "
                 "(docker compose down -v, then up and migrate)"
             )
-        if response.status != 200:
-            raise SystemExit(f"transaction {request['transaction_id']}: status {response.status}: {body.decode()}")
+        if status != 200:
+            raise SystemExit(f"transaction {request['transaction_id']}: status {status}: {body.decode()}")
         return json.loads(body)
 
 
@@ -184,7 +206,7 @@ def main():
     parser.add_argument("--from-day", type=int, default=TEST_FIRST_DAY - features.WARM_UP_DAYS,
                         help="first day to replay; the days before the test month build the history")
     parser.add_argument("--limit", type=int, help="replay only the first N purchases, for a quick check")
-    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v3.json")
+    parser.add_argument("--model", default="../backend/models/lgbm-ieee-v5-combined.json")
     parser.add_argument("--out", default="output/replay")
     args = parser.parse_args()
     out_dir = Path(args.out)
@@ -198,10 +220,23 @@ def main():
 
     dump = json.loads(Path(args.model).read_text())
     policy = json.loads(Path(args.model).with_suffix(".report.json").read_text())["policy"]
-    policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"]}
+    blend = policy.get("player_blend_weight", 0)
+    policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"], "player_blend_weight": blend}
 
     built = features.build(data.copy())
-    python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
+    if "combination" in dump:
+        # A combination of models: the highest percentile, as the service computes it.
+        parts = [
+            (json.loads((Path(args.model).parent / part["file"]).read_text()), np.array(part["percentiles"]))
+            for part in dump["models"]
+        ]
+        # The service blends the main model's score with the player's earlier
+        # main-model scores saved in this replay.
+        python_score = export.combined_score(
+            parts, built[dump["feature_names"]].to_numpy(), built["player_id"].to_numpy(), blend
+        )
+    else:
+        python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
 
     started = time.time()
     live = send(requests_from(data), Client(args.url, args.api_key))
@@ -216,6 +251,8 @@ def main():
     })
     rows = pd.concat([rows, live], axis=1)
     rows.to_csv(out_dir / "replay_rows.csv", index=False)
+    # Labels stay outside the service; train.py --inputs joins them with the export.
+    rows[["transaction_id", "is_fraud"]].to_csv(out_dir / "labels.csv", index=False)
 
     report = build_report(rows, args, policy)
     (out_dir / "replay_report.json").write_text(json.dumps(report, indent=2))

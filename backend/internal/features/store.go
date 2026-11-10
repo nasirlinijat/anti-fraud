@@ -29,12 +29,15 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 	var h History
 
 	player, err := q.PlayerHistory(ctx, db.PlayerHistoryParams{
-		PlayerID:      in.PlayerID,
-		EventTime:     at,
-		TransactionID: in.TransactionID,
-		AmountMinor:   in.AmountMinor,
-		EmailDomain:   in.EmailKey(),
-		DeviceName:    device,
+		PlayerID:         in.PlayerID,
+		EventTime:        at,
+		TransactionID:    in.TransactionID,
+		AmountMinor:      in.AmountMinor,
+		EmailDomain:      in.EmailKey(),
+		DeviceName:       device,
+		ClientOs:         text(in.ClientOS),
+		ClientBrowser:    text(in.ClientBrowser),
+		ScreenResolution: text(in.ScreenResolution),
 	})
 	if err != nil {
 		return History{}, fmt.Errorf("read player history: %w", err)
@@ -53,6 +56,10 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 		EmailUses:        player.EmailUses,
 		DistinctDevices:  player.DistinctDevices,
 		DeviceUses:       player.DeviceUses,
+		OSUses:           player.OsUses,
+		BrowserUses:      player.BrowserUses,
+		ScreenUses:       player.ScreenUses,
+		DistinctBrowsers: player.DistinctBrowsers,
 	}
 
 	card, err := q.CardHistory(ctx, db.CardHistoryParams{
@@ -75,7 +82,13 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 	}
 	h.Issuer = IssuerHistory{Players: issuer.Players, BillingRegions: issuer.BillingRegions, EmailDomains: issuer.EmailDomains}
 
-	counts, err := q.FeatureCounts(ctx, db.FeatureCountsParams{EmailDomain: in.EmailKey(), DeviceName: device})
+	counts, err := q.FeatureCounts(ctx, db.FeatureCountsParams{
+		EmailDomain:      in.EmailKey(),
+		DeviceName:       device,
+		ClientOs:         text(in.ClientOS),
+		ClientBrowser:    text(in.ClientBrowser),
+		ScreenResolution: text(in.ScreenResolution),
+	})
 	if err != nil {
 		return History{}, fmt.Errorf("read feature counts: %w", err)
 	}
@@ -88,6 +101,12 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 			h.Email = count
 		case "device":
 			h.Device = count
+		case "os":
+			h.OS = count
+		case "browser":
+			h.Browser = count
+		case "screen":
+			h.Screen = count
 		}
 	}
 	return h, nil
@@ -115,8 +134,23 @@ func AddToCounts(ctx context.Context, conn db.DBTX, in Input, h History) error {
 	if err := add("email", in.EmailKey(), h.Player.EmailUses == 0); err != nil {
 		return err
 	}
-	if in.DeviceName != nil {
-		return add("device", *in.DeviceName, h.Player.DeviceUses == 0)
+	optional := []struct {
+		kind      string
+		key       *string
+		newPlayer bool
+	}{
+		{"device", in.DeviceName, h.Player.DeviceUses == 0},
+		{"os", in.ClientOS, h.Player.OSUses == 0},
+		{"browser", in.ClientBrowser, h.Player.BrowserUses == 0},
+		{"screen", in.ScreenResolution, h.Player.ScreenUses == 0},
+	}
+	for _, o := range optional {
+		if o.key == nil {
+			continue
+		}
+		if err := add(o.kind, *o.key, o.newPlayer); err != nil {
+			return err
+		}
 	}
 	return nil
 }

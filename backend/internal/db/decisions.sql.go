@@ -36,20 +36,23 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
-    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score
+    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
+    model_score_unblended
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7,
+    $8
 )
 `
 
 type InsertDecisionParams struct {
-	PurchaseID     int64
-	RulesetVersion int32
-	Outcome        string
-	RuleScore      int32
-	FiredRules     []byte
-	ModelInputs    []byte
-	ModelScore     pgtype.Float8
+	PurchaseID          int64
+	RulesetVersion      int32
+	Outcome             string
+	RuleScore           int32
+	FiredRules          []byte
+	ModelInputs         []byte
+	ModelScore          pgtype.Float8
+	ModelScoreUnblended pgtype.Float8
 }
 
 func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) error {
@@ -61,6 +64,7 @@ func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) 
 		arg.FiredRules,
 		arg.ModelInputs,
 		arg.ModelScore,
+		arg.ModelScoreUnblended,
 	)
 	return err
 }
@@ -71,13 +75,15 @@ INSERT INTO purchases (
     card_issuer, card_network, card_type, card_country, card_category,
     product_code, billing_region, billing_country, billing_distance,
     email_domain, recipient_email_domain, device_type, device_name, device_id,
-    ip_address, ip_country, account_created_at
+    ip_address, ip_country, account_created_at,
+    client_os, client_browser, screen_resolution
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18, $19,
-    $20, $21, $22
+    $20, $21, $22,
+    $23, $24, $25
 )
 RETURNING id
 `
@@ -105,6 +111,9 @@ type InsertPurchaseParams struct {
 	IpAddress            *netip.Addr
 	IpCountry            pgtype.Text
 	AccountCreatedAt     pgtype.Timestamptz
+	ClientOs             pgtype.Text
+	ClientBrowser        pgtype.Text
+	ScreenResolution     pgtype.Text
 }
 
 func (q *Queries) InsertPurchase(ctx context.Context, arg InsertPurchaseParams) (int64, error) {
@@ -131,6 +140,9 @@ func (q *Queries) InsertPurchase(ctx context.Context, arg InsertPurchaseParams) 
 		arg.IpAddress,
 		arg.IpCountry,
 		arg.AccountCreatedAt,
+		arg.ClientOs,
+		arg.ClientBrowser,
+		arg.ScreenResolution,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -199,4 +211,34 @@ func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const playerEarlierModelScores = `-- name: PlayerEarlierModelScores :one
+SELECT
+    count(d.model_score_unblended) AS scored,
+    coalesce(sum(d.model_score_unblended ORDER BY p.event_time, p.transaction_id), 0)::float8 AS score_sum
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = $1
+  AND (p.event_time, p.transaction_id) < ($2::timestamptz, $3::text)
+`
+
+type PlayerEarlierModelScoresParams struct {
+	PlayerID      string
+	EventTime     pgtype.Timestamptz
+	TransactionID string
+}
+
+type PlayerEarlierModelScoresRow struct {
+	Scored   int64
+	ScoreSum float64
+}
+
+// Counts and sums the unblended model scores of the player's purchases that
+// come before the given one in (event_time, transaction_id) order.
+func (q *Queries) PlayerEarlierModelScores(ctx context.Context, arg PlayerEarlierModelScoresParams) (PlayerEarlierModelScoresRow, error) {
+	row := q.db.QueryRow(ctx, playerEarlierModelScores, arg.PlayerID, arg.EventTime, arg.TransactionID)
+	var i PlayerEarlierModelScoresRow
+	err := row.Scan(&i.Scored, &i.ScoreSum)
+	return i, err
 }

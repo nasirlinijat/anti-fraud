@@ -68,16 +68,29 @@ FROM feature_counts
 WHERE (kind = 'all' AND key = '')
    OR (kind = 'email' AND key = $1::text)
    OR (kind = 'device' AND key = $2::text)
+   OR (kind = 'os' AND key = $3::text)
+   OR (kind = 'browser' AND key = $4::text)
+   OR (kind = 'screen' AND key = $5::text)
 `
 
 type FeatureCountsParams struct {
-	EmailDomain string
-	DeviceName  pgtype.Text
+	EmailDomain      string
+	DeviceName       pgtype.Text
+	ClientOs         pgtype.Text
+	ClientBrowser    pgtype.Text
+	ScreenResolution pgtype.Text
 }
 
-// Reads the running totals for all purchases, the email domain and the device name.
+// Reads the running totals for all purchases, the email domain, the device name
+// and the client OS, browser and screen.
 func (q *Queries) FeatureCounts(ctx context.Context, arg FeatureCountsParams) ([]FeatureCount, error) {
-	rows, err := q.db.Query(ctx, featureCounts, arg.EmailDomain, arg.DeviceName)
+	rows, err := q.db.Query(ctx, featureCounts,
+		arg.EmailDomain,
+		arg.DeviceName,
+		arg.ClientOs,
+		arg.ClientBrowser,
+		arg.ScreenResolution,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -146,19 +159,26 @@ SELECT
     count(DISTINCT coalesce(email_domain, 'none')) AS distinct_emails,
     count(*) FILTER (WHERE coalesce(email_domain, 'none') = $3::text) AS email_uses,
     count(DISTINCT device_name) AS distinct_devices,
-    count(*) FILTER (WHERE device_name = $4::text) AS device_uses
+    count(*) FILTER (WHERE device_name = $4::text) AS device_uses,
+    count(*) FILTER (WHERE client_os = $5::text) AS os_uses,
+    count(*) FILTER (WHERE client_browser = $6::text) AS browser_uses,
+    count(*) FILTER (WHERE screen_resolution = $7::text) AS screen_uses,
+    count(DISTINCT client_browser) AS distinct_browsers
 FROM purchases
-WHERE player_id = $5
-  AND (event_time, transaction_id) < ($1::timestamptz, $6::text)
+WHERE player_id = $8
+  AND (event_time, transaction_id) < ($1::timestamptz, $9::text)
 `
 
 type PlayerHistoryParams struct {
-	EventTime     pgtype.Timestamptz
-	AmountMinor   int64
-	EmailDomain   string
-	DeviceName    pgtype.Text
-	PlayerID      string
-	TransactionID string
+	EventTime        pgtype.Timestamptz
+	AmountMinor      int64
+	EmailDomain      string
+	DeviceName       pgtype.Text
+	ClientOs         pgtype.Text
+	ClientBrowser    pgtype.Text
+	ScreenResolution pgtype.Text
+	PlayerID         string
+	TransactionID    string
 }
 
 type PlayerHistoryRow struct {
@@ -175,6 +195,10 @@ type PlayerHistoryRow struct {
 	EmailUses        int64
 	DistinctDevices  int64
 	DeviceUses       int64
+	OsUses           int64
+	BrowserUses      int64
+	ScreenUses       int64
+	DistinctBrowsers int64
 }
 
 // Summarizes the player's purchases that come before the given one in
@@ -185,6 +209,9 @@ func (q *Queries) PlayerHistory(ctx context.Context, arg PlayerHistoryParams) (P
 		arg.AmountMinor,
 		arg.EmailDomain,
 		arg.DeviceName,
+		arg.ClientOs,
+		arg.ClientBrowser,
+		arg.ScreenResolution,
 		arg.PlayerID,
 		arg.TransactionID,
 	)
@@ -203,6 +230,10 @@ func (q *Queries) PlayerHistory(ctx context.Context, arg PlayerHistoryParams) (P
 		&i.EmailUses,
 		&i.DistinctDevices,
 		&i.DeviceUses,
+		&i.OsUses,
+		&i.BrowserUses,
+		&i.ScreenUses,
+		&i.DistinctBrowsers,
 	)
 	return i, err
 }

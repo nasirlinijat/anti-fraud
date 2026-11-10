@@ -26,6 +26,8 @@ func LoadPolicy(reportPath string) (scoring.ModelPolicy, error) {
 		Policy *struct {
 			FlagAt     *float64 `json:"flag_at"`
 			ClearBelow *float64 `json:"clear_below"`
+			// Older reports have no blend weight; it is then 0.
+			PlayerBlendWeight float64 `json:"player_blend_weight"`
 		} `json:"policy"`
 	}
 	if err := json.Unmarshal(data, &report); err != nil {
@@ -34,7 +36,11 @@ func LoadPolicy(reportPath string) (scoring.ModelPolicy, error) {
 	if report.Policy == nil || report.Policy.FlagAt == nil || report.Policy.ClearBelow == nil {
 		return scoring.ModelPolicy{}, fmt.Errorf("model report %s has no policy with flag_at and clear_below", reportPath)
 	}
-	p := scoring.ModelPolicy{FlagAt: *report.Policy.FlagAt, ClearBelow: *report.Policy.ClearBelow}
+	p := scoring.ModelPolicy{
+		FlagAt:            *report.Policy.FlagAt,
+		ClearBelow:        *report.Policy.ClearBelow,
+		PlayerBlendWeight: report.Policy.PlayerBlendWeight,
+	}
 	if err := p.Validate(); err != nil {
 		return scoring.ModelPolicy{}, fmt.Errorf("model report %s: %w", reportPath, err)
 	}

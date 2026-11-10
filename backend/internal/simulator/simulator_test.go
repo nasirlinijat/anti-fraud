@@ -67,6 +67,10 @@ func (s *purchases) FeatureHistory(context.Context, features.Input) (features.Hi
 	return features.History{}, nil
 }
 
+func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time, string) (float64, int64, error) {
+	return 0, 0, nil
+}
+
 func (s *purchases) Save(_ context.Context, p score.Purchase, _ score.Decision) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

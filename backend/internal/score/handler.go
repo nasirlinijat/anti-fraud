@@ -36,6 +36,7 @@ type Blocklist interface {
 type Purchases interface {
 	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
 	FeatureHistory(ctx context.Context, in features.Input) (features.History, error)
+	PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error)
 	Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 }
 
@@ -43,6 +44,13 @@ type Purchases interface {
 type Model interface {
 	Predict(x []float64) (float64, error)
 	Features() []string
+}
+
+// combination is a model made of several models, such as *lgbm.Combined. The
+// player blend applies to its first model's score, before combining.
+type combination interface {
+	Scores(x []float64) ([]float64, error)
+	Combine(scores []float64) float64
 }
 
 // Handler serves the score endpoint.
@@ -102,6 +110,9 @@ type scoreRequest struct {
 	IPAddress            *string    `json:"ip_address"`
 	IPCountry            *string    `json:"ip_country"`
 	AccountCreatedAt     *time.Time `json:"account_created_at"`
+	ClientOS             *string    `json:"client_os"`
+	ClientBrowser        *string    `json:"client_browser"`
+	ScreenResolution     *string    `json:"screen_resolution"`
 }
 
 type scoreResponse struct {
@@ -155,14 +166,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	vector := features.Vector(in, history)
 	modelInputs := features.Map(vector)
 
-	var modelScore *float64
+	var modelScore, unblended *float64
 	if h.model != nil {
-		s, err := h.model.Predict(vector)
+		final, own, err := h.modelScore(r.Context(), p, vector)
 		if err != nil {
 			h.internalError(w, p, err)
 			return
 		}
-		modelScore = &s
+		modelScore, unblended = &final, &own
 	}
 
 	var result scoring.Result
@@ -195,11 +206,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.purchases.Save(ctx, p, Decision{
-		RulesetVersion: rs.Version,
-		Result:         result,
-		ModelInputs:    modelInputs,
-		ModelScore:     modelScore,
-		FeatureHistory: history,
+		RulesetVersion:      rs.Version,
+		Result:              result,
+		ModelInputs:         modelInputs,
+		ModelScore:          modelScore,
+		ModelScoreUnblended: unblended,
+		FeatureHistory:      history,
 	})
 	if errors.Is(err, ErrDuplicateTransaction) {
 		platform.WriteJSON(w, http.StatusConflict, platform.ErrorResponse{
@@ -221,6 +233,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RulesetVersion: rs.Version,
 		ModelScore:     modelScore,
 	})
+}
+
+// modelScore returns the score the policy applies to, and the score saved as
+// unblended: the main model's own score, which later purchases of the player
+// average. Without blending both come from the model alone.
+func (h *Handler) modelScore(ctx context.Context, p Purchase, vector []float64) (float64, float64, error) {
+	combined, isCombined := h.model.(combination)
+	if !isCombined {
+		own, err := h.model.Predict(vector)
+		if err != nil {
+			return 0, 0, err
+		}
+		if h.policy.PlayerBlendWeight == 0 {
+			return own, own, nil
+		}
+		sum, count, err := h.purchases.PlayerEarlierModelScores(ctx, p.PlayerID, p.EventTime, p.TransactionID)
+		if err != nil {
+			return 0, 0, err
+		}
+		return h.policy.Blend(own, sum, count), own, nil
+	}
+
+	scores, err := combined.Scores(vector)
+	if err != nil {
+		return 0, 0, err
+	}
+	own := scores[0]
+	if h.policy.PlayerBlendWeight > 0 {
+		sum, count, err := h.purchases.PlayerEarlierModelScores(ctx, p.PlayerID, p.EventTime, p.TransactionID)
+		if err != nil {
+			return 0, 0, err
+		}
+		scores[0] = h.policy.Blend(own, sum, count)
+	}
+	return combined.Combine(scores), own, nil
 }
 
 func (h *Handler) internalError(w http.ResponseWriter, p Purchase, err error) {
@@ -329,6 +376,9 @@ func (req scoreRequest) purchase() (Purchase, map[string]string) {
 		DeviceName:           optional(req.DeviceName),
 		DeviceID:             optional(req.DeviceID),
 		IPCountry:            optional(req.IPCountry),
+		ClientOS:             optional(req.ClientOS),
+		ClientBrowser:        optional(req.ClientBrowser),
+		ScreenResolution:     optional(req.ScreenResolution),
 	}
 
 	if req.EventTime.IsZero() {
