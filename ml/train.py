@@ -11,10 +11,12 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import FunctionTransformer, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
 import export
 import features
@@ -22,6 +24,14 @@ import features
 SEED = 1234
 AVERAGE_SEEDS = [SEED, 7, 99, 2024, 31337]
 FALSE_POSITIVE_RATES = [0.001, 0.005, 0.01, 0.02]
+# Features whose values are codes, not amounts or counts. The baseline encodes
+# each code as its own category; codes seen fewer than BASELINE_MIN_CODE_COUNT
+# times in training share one category.
+CODE_FEATURES = [
+    "product_code", "card_network", "card_type", "card_country", "card_category", "billing_country",
+    "device_type", "os_family", "browser_family", "card_issuer_code", "billing_region_code",
+]
+BASELINE_MIN_CODE_COUNT = 100
 
 
 def signed_log(x):
@@ -29,7 +39,27 @@ def signed_log(x):
     return np.sign(x) * np.log1p(np.abs(x))
 
 
-def baseline_model():
+def baseline_model(feature_names=None):
+    """Logistic regression with one-hot encoded codes. A missing number
+    (features.MISSING) is replaced by the training median and marked by its own
+    indicator column; a missing code is its own category."""
+    names = features.FEATURES if feature_names is None else feature_names
+    codes = [name for name in names if name in CODE_FEATURES]
+    numbers = [name for name in names if name not in CODE_FEATURES]
+    inputs = ColumnTransformer([
+        ("numbers", make_pipeline(
+            SimpleImputer(missing_values=features.MISSING, strategy="median", add_indicator=True),
+            FunctionTransformer(signed_log),
+            StandardScaler(),
+        ), numbers),
+        ("codes", OneHotEncoder(handle_unknown="infrequent_if_exist", min_frequency=BASELINE_MIN_CODE_COUNT), codes),
+    ])
+    return make_pipeline(inputs, LogisticRegression(max_iter=2000, random_state=SEED))
+
+
+def all_numeric_baseline_model():
+    """The earlier baseline, which reads codes and missing values as numbers.
+    It stays in the report for comparison."""
     return make_pipeline(
         FunctionTransformer(signed_log),
         StandardScaler(),
@@ -158,13 +188,14 @@ def main():
         "split_days": {name: f"{first}-{last}" for name, (first, last) in days.items()},
     }
 
-    baseline = baseline_model().fit(x_train, y_train)
-    baseline_test = baseline.predict_proba(x_test)[:, 1]
-    report["logistic_regression"] = {
-        "validation": evaluate(y_val, baseline.predict_proba(x_val)[:, 1], val_amount),
-        "test": evaluate(y_test, baseline_test, test_amount),
-        "test_first_fraud_only": evaluate(y_test[test_keep], baseline_test[test_keep], test_amount[test_keep]),
-    }
+    for name, make in [("logistic_regression", baseline_model), ("logistic_regression_all_numeric", all_numeric_baseline_model)]:
+        baseline = make().fit(x_train, y_train)
+        baseline_test = baseline.predict_proba(x_test)[:, 1]
+        report[name] = {
+            "validation": evaluate(y_val, baseline.predict_proba(x_val)[:, 1], val_amount),
+            "test": evaluate(y_test, baseline_test, test_amount),
+            "test_first_fraud_only": evaluate(y_test[test_keep], baseline_test[test_keep], test_amount[test_keep]),
+        }
 
     # The main model is the average of several models trained with different
     # random seeds; averaging smooths out each model's chance splits.
@@ -287,7 +318,10 @@ def main():
         golden, combined_report,
     )
 
-    print(json.dumps({name: report[name]["test"] for name in ("logistic_regression", "lightgbm")}, indent=2))
+    print(json.dumps(
+        {name: report[name]["test"] for name in ("logistic_regression", "logistic_regression_all_numeric", "lightgbm")},
+        indent=2,
+    ))
     print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
     print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "precision_targets", "policy")}, indent=2))
     print(f"models written to {model_path} and {combined_path}")
