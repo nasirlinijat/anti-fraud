@@ -24,7 +24,7 @@ type QueueItem struct {
 	// ModelVersion is the version of the model that gave ModelScore.
 	ModelVersion *string
 	FiredRules   []scoring.FiredRule
-	DecidedAt  time.Time
+	DecidedAt    time.Time
 }
 
 // Store reads the review queue.
