@@ -36,8 +36,7 @@ export interface Stats {
   model: { scored: number; flagged: number; cleared: number }
 }
 
-// getStats reads the dashboard statistics for a period. The development server
-// adds the API key.
+// getStats reads the dashboard statistics for a period. The proxy adds the API key.
 export async function getStats(period: Period): Promise<Stats> {
   const res = await fetch(`/stats?period=${period}`)
   if (!res.ok) {
@@ -126,7 +125,7 @@ export async function publishRuleset(config: RulesetConfig): Promise<Saved<Rules
   }
 }
 
-// The development server adds the API key to the blocklist requests.
+// The proxy adds the API key to the blocklist requests.
 export async function listBlocklist(): Promise<BlocklistEntry[]> {
   const res = await fetch('/blocklist')
   if (!res.ok) {
@@ -167,7 +166,7 @@ export type ScoreResult =
   | { ok: true; response: ScoreResponse }
   | { ok: false; status: number; error: ErrorResponse }
 
-// score sends one score request. The development server adds the API key.
+// score sends one score request. The proxy adds the API key.
 export async function score(request: Record<string, unknown>): Promise<ScoreResult> {
   let res: Response
   try {
@@ -189,7 +188,7 @@ export async function score(request: Record<string, unknown>): Promise<ScoreResu
       ? (body as ErrorResponse)
       : { error: `The backend answered with status ${res.status}.` }
   if (res.status === 401) {
-    error.error += '. Set API_KEY in the .env file and restart npm run dev.'
+    error.error += '. Check API_KEY in .env and restart the console and backend.'
   }
   return { ok: false, status: res.status, error }
 }

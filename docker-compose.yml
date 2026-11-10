@@ -10,7 +10,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 2s
       timeout: 3s
       retries: 15
@@ -26,12 +26,27 @@ services:
     ports:
       - "127.0.0.1:${PORT:?set PORT in .env}:${PORT:?set PORT in .env}"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    environment:
+      BACKEND_PORT: ${PORT:?set PORT in .env}
+      API_KEY: ${API_KEY:?set API_KEY in .env}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:8080"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ && wget -q -O /dev/null http://127.0.0.1:8080/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
   migrate:
     image: migrate/migrate:v4.20.1
-    profiles: [tools]
     volumes:
       - ./backend/migrations:/migrations:ro
     command:
