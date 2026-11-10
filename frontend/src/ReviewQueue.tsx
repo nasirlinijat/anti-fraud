@@ -314,9 +314,12 @@ function ReviewQueue() {
 
         const result: QueuePage = await response.json()
         if (!isCurrent()) return
+        // An unconfirmed save is cleared only when this page still lists the
+        // purchase, so it is known to be pending. A poll of another page says
+        // nothing about it, and the save may still commit.
         let reconciled = false
-        for (const [id, request] of requests.current) {
-          if (request !== null) continue
+        for (const [id, inFlight] of requests.current) {
+          if (inFlight !== null || !result.items.some(row => row.purchase_id === id)) continue
           requests.current.delete(id)
           reconciled = true
         }
@@ -388,7 +391,11 @@ function ReviewQueue() {
         setFeedback('Review access is unavailable. Check the backend configuration.')
         return
       }
-      if (response.status !== 201 && response.status !== 409 && response.status !== 404) {
+      if (response.status === 404) {
+        setFeedback(`${item.transaction_id} was not found. The queue is refreshing.`)
+        return
+      }
+      if (response.status !== 201 && response.status !== 409) {
         if (response.status >= 500) throw new Error('Review save could not be confirmed')
         setFeedback(`Could not save a decision for ${item.transaction_id}.`)
         return

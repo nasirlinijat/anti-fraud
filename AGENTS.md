@@ -54,7 +54,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Demo traffic | A seeded simulator that sends purchases in the same API format |
 | Caching | None. Indexed PostgreSQL queries only, no Redis |
 | Console updates | Polling every few seconds, no WebSockets |
-| API authentication | API key for the score endpoint |
+| API authentication | API key for the score endpoint. Each analyst has an individual key for the review endpoints |
 
 ### 3.2 Backend Layout
 
@@ -128,13 +128,16 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make generate` | Regenerates the database code from the SQL queries |
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
 
-The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing.
+The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
 
 | Endpoint | Response |
 |---|---|
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 | `POST /score` | Scores a purchase, saves the decision, and returns the outcome, rule score, and fired rules. Requires the `X-API-Key` header. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a transaction ID that was already scored |
+| `GET /reviews` | Lists purchases awaiting review, oldest first, with a `next_cursor` for the next page. Requires an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong key and 503 when no analyst keys are configured |
+| `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, and model score and version. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
+| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |
 
 `make test` sets `TEST_DATABASE_URL` from `DATABASE_URL`. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set.
 

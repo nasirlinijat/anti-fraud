@@ -94,7 +94,7 @@ Use the `POSTGRES_PORT` from `.env` in `DATABASE_URL`. Then, from `ml`:
 .venv/Scripts/python replay.py data/train_transaction.csv --url http://localhost:8082 --api-key replay-key
 ```
 
-By default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 3000` for a quick check. A full run sends about 170,000 purchases and takes about 45 minutes on a laptop. To run again, empty the tables first with `TRUNCATE decisions, purchases, feature_counts` in that database.
+By default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 3000` for a quick check. A full run sends about 170,000 purchases and takes about 45 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts` in that database.
 
 It writes to `output/replay/`:
 
