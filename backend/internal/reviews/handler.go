@@ -25,27 +25,41 @@ type caseReader interface {
 	Case(context.Context, int64) (CaseItem, error)
 }
 
-type reader interface {
+type reviewStore interface {
 	queueReader
 	caseReader
+	resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error)
 }
 
-// RegisterRoutes exposes the read-only review queue and review cases behind API key authentication.
-func RegisterRoutes(mux *http.ServeMux, store reader, apiKey string) {
-	queue := platform.RequireAPIKey(apiKey, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// RegisterRoutes exposes the queue, case evidence, and decisions to authenticated analysts.
+func RegisterRoutes(mux *http.ServeMux, store reviewStore, keys platform.AnalystKeys) {
+	mux.HandleFunc("GET /reviews", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
 		serveQueue(w, r, store)
 	}))
-	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		queue.ServeHTTP(w, r)
-	})
-	reviewCase := platform.RequireAPIKey(apiKey, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /reviews/{purchase_id}", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
 		serveCase(w, r, store)
 	}))
-	mux.HandleFunc("GET /reviews/{purchase_id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /reviews/{purchase_id}/decision", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, analystID string) {
+		serveResolution(w, r, store, analystID)
+	}))
+}
+
+func requireAnalyst(keys platform.AnalystKeys, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		reviewCase.ServeHTTP(w, r)
-	})
+		if !keys.Configured() {
+			platform.WriteError(w, http.StatusServiceUnavailable, "review access is not configured")
+			return
+		}
+		headers := r.Header.Values(platform.APIKeyHeader)
+		if len(headers) == 1 {
+			if analystID := keys.Analyst(headers[0]); analystID != "" {
+				next(w, r, analystID)
+				return
+			}
+		}
+		platform.WriteError(w, http.StatusUnauthorized, "missing or invalid analyst key")
+	}
 }
 
 type reviewResponse struct {

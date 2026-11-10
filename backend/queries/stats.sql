@@ -20,7 +20,10 @@ LIMIT sqlc.arg(max_rules);
 
 -- name: CountReviewQueue :one
 -- Counts the purchases waiting in the review queue.
-SELECT count(*) FROM decisions WHERE outcome = 'review';
+SELECT count(*)
+FROM decisions d
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id);
 
 -- name: CountModelEffects :one
 -- Counts, since the given time, the decisions scored by the model, the allowed

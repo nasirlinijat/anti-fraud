@@ -69,6 +69,13 @@ type Purchase struct {
 	ScreenResolution     pgtype.Text
 }
 
+type ReviewResolution struct {
+	PurchaseID int64
+	Decision   string
+	AnalystID  string
+	ResolvedAt pgtype.Timestamptz
+}
+
 type Ruleset struct {
 	Version         int32
 	ReviewThreshold int32

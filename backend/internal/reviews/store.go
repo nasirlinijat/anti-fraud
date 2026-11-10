@@ -48,6 +48,18 @@ func NewStore(conn db.DBTX) *Store {
 	return &Store{q: db.New(conn)}
 }
 
+func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error) {
+	row, err := s.q.ResolveReview(ctx, db.ResolveReviewParams{
+		TargetPurchaseID: purchaseID,
+		Decision:         decision,
+		AnalystID:        analystID,
+	})
+	if err != nil {
+		return resolution{}, fmt.Errorf("resolve review: %w", err)
+	}
+	return resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}, nil
+}
+
 // Queue returns up to limit purchases marked for review, the earliest decided first.
 func (s *Store) Queue(ctx context.Context, limit int) ([]QueueItem, error) {
 	return s.queue(ctx, limit, nil)

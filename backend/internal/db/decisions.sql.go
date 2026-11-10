@@ -41,6 +41,7 @@ FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.purchase_id = $1
   AND d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
 `
 
 type GetReviewCaseRow struct {
@@ -201,6 +202,7 @@ SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_i
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
   AND (
       $1::timestamptz IS NULL
       OR (d.decided_at, d.purchase_id) > (

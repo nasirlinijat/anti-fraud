@@ -28,7 +28,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
-	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.APIKey)
+	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys)
 	rulesetStore := rulesets.NewStore(pool)
 	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey)
 	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))

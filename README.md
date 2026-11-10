@@ -130,7 +130,7 @@ Use `GET /rulesets/active` to read the current version. To change settings, send
 
 ## API Documentation
 
-The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and shared API key header.
+The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.
 
 To read it in Swagger UI, run:
 
@@ -162,14 +162,14 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For `GET /reviews`, it forwards the key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Page | What it does |
 |---|---|
 | Dashboard (`#/dashboard`) | Decisions in the last 15 minutes, hour, day, week or all time: allowed, reviewed and blocked counts with their shares, the current review queue size, the most fired rules, and how many purchases the model sent to review or cleared. It reads `GET /stats` and refreshes every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
-| Review queue (`#/reviews`) | Enter the local `API_KEY` to browse purchases awaiting review, oldest queued first. The current page refreshes every five seconds. |
+| Review queue (`#/reviews`) | Enter your analyst key to browse and approve or reject purchases awaiting review. The current page refreshes every five seconds. |
 | Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version and shows its version number. |
 
 The tester is a local development tool: it only works through the development server, which holds the API key.
@@ -179,6 +179,16 @@ The tester is a local development tool: it only works through the development se
 | `npm run dev` | Starts the development server with hot reload |
 | `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
 | `npm run build` | Type checks and builds the production files into `frontend/dist/` |
+
+### Review access
+
+Run `make migrate` before starting the updated review API. Generate a distinct key for each analyst with `openssl rand -hex 32`. Set `REVIEW_ANALYST_KEYS` in your local `.env` and restart the backend. Replace the placeholders with generated keys and give each analyst their own key.
+
+```dotenv
+REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"analyst_id":"analyst-two","key":"<generated-key-two>"}]
+```
+
+Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
 ## Database Queries
 
