@@ -23,7 +23,28 @@ func (fn queueFunc) queue(ctx context.Context, limit int, after *queueCursor) ([
 	return fn(ctx, limit, after)
 }
 
+type caseFunc func(context.Context, int64) (CaseItem, error)
+
+func (fn caseFunc) Case(ctx context.Context, id int64) (CaseItem, error) {
+	return fn(ctx, id)
+}
+
+// fakeReader serves only the part of the store a test sets. Calling the
+// other part panics, which fails the test.
+type fakeReader struct {
+	queueReader
+	caseReader
+}
+
 func requestQueue(store queueReader, target, key string) *httptest.ResponseRecorder {
+	return serve(fakeReader{queueReader: store}, target, key)
+}
+
+func requestCase(store caseReader, target, key string) *httptest.ResponseRecorder {
+	return serve(fakeReader{caseReader: store}, target, key)
+}
+
+func serve(store reader, target, key string) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, store, queueTestKey)
 	r := httptest.NewRequest(http.MethodGet, target, nil)
@@ -134,6 +155,98 @@ func TestQueueHidesStoreErrors(t *testing.T) {
 		return nil, errors.New("private database details")
 	})
 	w := requestQueue(store, "/reviews", queueTestKey)
+	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+}
+
+func TestCaseRejectsUnauthorizedAndInvalidIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		target string
+		key    string
+		status int
+	}{
+		{"missing key", "/reviews/1", "", http.StatusUnauthorized},
+		{"wrong key", "/reviews/1", "wrong", http.StatusUnauthorized},
+		{"not a number", "/reviews/abc", queueTestKey, http.StatusBadRequest},
+		{"zero", "/reviews/0", queueTestKey, http.StatusBadRequest},
+		{"negative", "/reviews/-5", queueTestKey, http.StatusBadRequest},
+		{"too large", "/reviews/9223372036854775808", queueTestKey, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := caseFunc(func(context.Context, int64) (CaseItem, error) {
+				t.Fatal("rejected request queried the store")
+				return CaseItem{}, nil
+			})
+			w := requestCase(store, tc.target, tc.key)
+			if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status = %d, headers = %v, body = %s", w.Code, w.Header(), w.Body)
+			}
+		})
+	}
+}
+
+func TestCaseSerializesEvidence(t *testing.T) {
+	score := 0.42
+	version := "lgbm-ieee-v5-combined"
+	at := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
+		if id != 9007199254740993 {
+			t.Fatalf("store ID = %d", id)
+		}
+		return CaseItem{
+			QueueItem: QueueItem{
+				PurchaseID: id, TransactionID: "txn", PlayerID: "player", EventTime: at.Add(-time.Minute), DecidedAt: at,
+				AmountMinor: 2500, RuleScore: 70, ModelScore: &score, ModelVersion: &version,
+				FiredRules: []scoring.FiredRule{{Name: scoring.RuleHighAmount, Points: 30}, {Name: scoring.RuleCardVelocity, Points: 40}},
+			},
+			RulesetVersion: 3,
+		}, nil
+	})
+	w := requestCase(store, "/reviews/9007199254740993", queueTestKey)
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status = %d, headers = %v, body = %s", w.Code, w.Header(), w.Body)
+	}
+	var got caseResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode case response: %v", err)
+	}
+	if got.PurchaseID != "9007199254740993" || got.TransactionID != "txn" || got.AmountMinor != "2500" ||
+		got.PlayerID != "player" || got.RuleScore != 70 || got.RulesetVersion != 3 ||
+		got.EventTime.Format(time.RFC3339) != "2026-11-09T09:59:00Z" || got.QueuedAt.Format(time.RFC3339) != "2026-11-09T10:00:00Z" ||
+		got.ModelScore == nil || *got.ModelScore != score || got.ModelVersion == nil || *got.ModelVersion != version ||
+		len(got.FiredRules) != 2 || got.FiredRules[1].Name != scoring.RuleCardVelocity || got.FiredRules[1].Points != 40 {
+		t.Fatalf("unexpected case: %+v", got)
+	}
+}
+
+func TestCaseWithoutModelScoreOrRules(t *testing.T) {
+	store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
+		return CaseItem{QueueItem: QueueItem{PurchaseID: id, TransactionID: "txn"}, RulesetVersion: 1}, nil
+	})
+	w := requestCase(store, "/reviews/7", queueTestKey)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("status = %d, err = %v, body = %s", w.Code, err, w.Body)
+	}
+	rules, isList := body["fired_rules"].([]any)
+	if body["model_score"] != nil || body["model_version"] != nil || !isList || len(rules) != 0 {
+		t.Fatalf("expected null model fields and an empty rule list: %s", w.Body)
+	}
+}
+
+func TestCaseNotFoundAndStoreErrors(t *testing.T) {
+	notFound := caseFunc(func(context.Context, int64) (CaseItem, error) { return CaseItem{}, ErrNotFound })
+	w := requestCase(notFound, "/reviews/5", queueTestKey)
+	if w.Code != http.StatusNotFound || strings.TrimSpace(w.Body.String()) != `{"error":"review case not found"}` {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+
+	failing := caseFunc(func(context.Context, int64) (CaseItem, error) {
+		return CaseItem{}, errors.New("private database details")
+	})
+	w = requestCase(failing, "/reviews/5", queueTestKey)
 	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
 	}

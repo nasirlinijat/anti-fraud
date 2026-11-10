@@ -2,6 +2,7 @@ package reviews
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -119,5 +120,66 @@ func TestQueueRespectsLimit(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].TransactionID != "l-1" {
 		t.Errorf("Queue(1) = %+v, want only l-1", got)
+	}
+}
+
+func TestCaseReturnsEvidenceOfReviewPurchase(t *testing.T) {
+	tx := testTx(t)
+	at := time.Date(2000, 1, 1, 9, 10, 0, 0, time.UTC)
+	score := 0.7
+	version := testModelVersion
+	id := insertDecision(t, tx, "c-review", "review", at, &score,
+		`[{"name": "high_amount", "points": 30}, {"name": "card_velocity", "points": 40}]`)
+
+	got, err := NewStore(tx).Case(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	want := CaseItem{
+		QueueItem: QueueItem{
+			PurchaseID:    id,
+			TransactionID: "c-review",
+			EventTime:     time.Date(2000, 1, 1, 8, 0, 0, 0, time.UTC),
+			AmountMinor:   2500,
+			PlayerID:      "player-c-review",
+			RuleScore:     60,
+			ModelScore:    &score,
+			ModelVersion:  &version,
+			FiredRules: []scoring.FiredRule{
+				{Name: scoring.RuleHighAmount, Points: 30},
+				{Name: scoring.RuleCardVelocity, Points: 40},
+			},
+			DecidedAt: at,
+		},
+		RulesetVersion: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Case() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestCaseWithoutModelScore(t *testing.T) {
+	tx := testTx(t)
+	id := insertDecision(t, tx, "c-no-model", "review", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)
+
+	got, err := NewStore(tx).Case(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if got.ModelScore != nil || got.ModelVersion != nil || got.FiredRules == nil || len(got.FiredRules) != 0 {
+		t.Errorf("Case() = %+v, want no model score or version and an empty rule list", got)
+	}
+}
+
+func TestCaseNotFound(t *testing.T) {
+	tx := testTx(t)
+	allowed := insertDecision(t, tx, "c-allow", "allow", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)
+	blocked := insertDecision(t, tx, "c-block", "block", time.Date(2000, 1, 1, 9, 1, 0, 0, time.UTC), nil, `[]`)
+
+	store := NewStore(tx)
+	for name, id := range map[string]int64{"allowed purchase": allowed, "blocked purchase": blocked, "unknown ID": allowed + blocked + 1_000_000} {
+		if _, err := store.Case(context.Background(), id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: Case error = %v, want ErrNotFound", name, err)
+		}
 	}
 }
