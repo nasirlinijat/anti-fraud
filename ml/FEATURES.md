@@ -1,6 +1,8 @@
 # Model feature specification
 
-The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test should load both and compare every value.
+The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
+
+This file describes model v4 (48 features). Until the service is moved to v4, it still computes the v3 features (the v3 table without features 38-48, with `hour_of_day` and the float player average) and its Go test uses `ml/testdata/expected_features_v3.csv`.
 
 ## General rules
 
@@ -42,7 +44,7 @@ Any other or missing value is `-1`.
 | 4 | `card_network` | Code table above (`card4`) |
 | 5 | `card_type` | Code table above (`card6`) |
 | 6 | `player_txn_count` | Number of earlier purchases by the player |
-| 7 | `player_avg_amount` | Mean amount of the player's earlier purchases |
+| 7 | `player_avg_amount` | Sum of `amount_minor` of the player's earlier purchases, divided by 100, divided by their number |
 | 8 | `amount_to_avg` | `amount / player_avg_amount`, when the average is above 0 |
 | 9 | `secs_since_last` | Seconds since the player's previous purchase |
 | 10 | `secs_since_first` | Seconds since the player's first purchase |
@@ -50,32 +52,42 @@ Any other or missing value is `-1`.
 | 12 | `card_uses_24h` | Earlier purchases with the same card ID in the last day |
 | 13 | `player_distinct_cards` | Distinct card IDs the player used before |
 | 14 | `email_is_new_for_player` | 1 if the player has earlier purchases and none used this email, else 0 |
-| 15 | `hour_of_day` | `floor(event_time / 3600) mod 24` |
-| 16 | `card_country` | `card3` as a number |
-| 17 | `card_category` | `card5` as a number |
-| 18 | `billing_country` | `addr2` as a number |
-| 19 | `email_domain_share` | Earlier purchases (all players) with this email, divided by all earlier purchases |
-| 20 | `has_recipient_email` | 1 if a recipient email is present, else 0 |
-| 21 | `recipient_email_differs` | 1 if a recipient email is present and differs from the purchaser email, else 0 |
-| 22 | `player_max_amount` | Largest amount among the player's earlier purchases |
-| 23 | `player_uses_1h` | Earlier purchases by the player in the last hour |
-| 24 | `player_uses_24h` | Earlier purchases by the player in the last day |
-| 25 | `player_same_amount_count` | Earlier purchases by the player with exactly the same amount |
-| 26 | `player_distinct_emails` | Distinct emails the player used before |
-| 27 | `email_players_share` | Distinct earlier players who used this email, divided by all distinct earlier players |
-| 28 | `has_device_info` | 1 if the request has a device type or device name, else 0 |
-| 29 | `device_type` | desktop 0, mobile 1, else `-1` |
-| 30 | `device_info_share` | Earlier purchases (all players) with this device name, divided by all earlier purchases; `-1` when the device name is missing |
-| 31 | `device_players_share` | Distinct earlier players who used this device name, divided by all distinct earlier players; `-1` when the device name is missing |
-| 32 | `device_is_new_for_player` | 1 if the device name is present, the player has earlier purchases, and none used this device name, else 0 |
-| 33 | `player_distinct_devices` | Distinct known device names the player used before (missing names are not counted) |
-| 34 | `card_distinct_players` | Distinct players who used this card ID before |
-| 35 | `card1_distinct_players` | Distinct players who used this `card1` value before |
-| 36 | `card1_distinct_addresses` | Distinct billing regions (`addr1`, missing counts as `none`) used with this `card1` value before |
-| 37 | `card1_distinct_emails` | Distinct purchaser emails (missing counts as `none`) used with this `card1` value before |
-| 38 | `billing_distance` | Distance field from the request (`dist1`) |
+| 15 | `card_country` | `card3` as a number |
+| 16 | `card_category` | `card5` as a number |
+| 17 | `billing_country` | `addr2` as a number |
+| 18 | `email_domain_share` | Earlier purchases (all players) with this email, divided by all earlier purchases |
+| 19 | `has_recipient_email` | 1 if a recipient email is present, else 0 |
+| 20 | `recipient_email_differs` | 1 if a recipient email is present and differs from the purchaser email, else 0 |
+| 21 | `player_max_amount` | Largest amount among the player's earlier purchases |
+| 22 | `player_uses_1h` | Earlier purchases by the player in the last hour |
+| 23 | `player_uses_24h` | Earlier purchases by the player in the last day |
+| 24 | `player_same_amount_count` | Earlier purchases by the player with exactly the same amount |
+| 25 | `player_distinct_emails` | Distinct emails the player used before |
+| 26 | `email_players_share` | Distinct earlier players who used this email, divided by all distinct earlier players |
+| 27 | `has_device_info` | 1 if the request has a device type or device name, else 0 |
+| 28 | `device_type` | desktop 0, mobile 1, else `-1` |
+| 29 | `device_info_share` | Earlier purchases (all players) with this device name, divided by all earlier purchases; `-1` when the device name is missing |
+| 30 | `device_players_share` | Distinct earlier players who used this device name, divided by all distinct earlier players; `-1` when the device name is missing |
+| 31 | `device_is_new_for_player` | 1 if the device name is present, the player has earlier purchases, and none used this device name, else 0 |
+| 32 | `player_distinct_devices` | Distinct known device names the player used before (missing names are not counted) |
+| 33 | `card_distinct_players` | Distinct players who used this card ID before |
+| 34 | `card1_distinct_players` | Distinct players who used this `card1` value before |
+| 35 | `card1_distinct_addresses` | Distinct billing regions (`addr1`, missing counts as `none`) used with this `card1` value before |
+| 36 | `card1_distinct_emails` | Distinct purchaser emails (missing counts as `none`) used with this `card1` value before |
+| 37 | `billing_distance` | Distance field from the request (`dist1`) |
+| 38 | `account_age_days` | Days the account existed before the purchase: whole days between `account_created_at` and `event_time` (`D1` in IEEE-CIS); `-1` when unknown |
+| 39 | `has_client_info` | 1 if the request has a client OS, browser or screen, else 0 |
+| 40 | `os_family` | First word of the client OS in lower case: windows 0, ios 1, mac 2, android 3, linux 4, else `-1` |
+| 41 | `browser_family` | First word of the client browser in lower case: chrome 0, mobile 1, safari 2, ie 3, edge 4, firefox 5, samsung 6, android 7, opera 8, else `-1` |
+| 42 | `os_share` | Earlier purchases (all players) with exactly this client OS, divided by all earlier purchases; `-1` when the OS is missing |
+| 43 | `browser_share` | Same for the client browser |
+| 44 | `screen_share` | Same for the screen resolution |
+| 45 | `screen_area` | Width times height from a screen resolution written as `WIDTHxHEIGHT` (for example `1920x1080`); `-1` when missing or in another format |
+| 46 | `os_is_new_for_player` | 1 if the OS is present, the player has earlier purchases, and none used exactly this OS, else 0 |
+| 47 | `browser_is_new_for_player` | 1 if the browser is present, the player has earlier purchases, and none used exactly this browser, else 0 |
+| 48 | `player_distinct_browsers` | Distinct known browsers the player used before (missing browsers are not counted) |
 
-Features 19, 27, 30 and 31 count over all players, so the service needs running totals per email domain, per device name and overall, not only per player.
+Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 
 ## Mapping to the score request
 
@@ -100,9 +112,9 @@ Features 19, 27, 30 and 31 count over all players, so the service needs running 
 | `device_type` | `DeviceType` | Identity file, joined on `TransactionID` |
 | `device_name` | `DeviceInfo` | Identity file, joined on `TransactionID` |
 
-`device_id`, `ip_address`, `ip_country` and `account_created_at` are not model inputs: IEEE-CIS has no such columns. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number becomes `-1`.
+`device_id`, `ip_address` and `ip_country` are not model inputs: IEEE-CIS has no such columns. `account_created_at` gives `account_age_days`, which IEEE-CIS approximates with `D1` (days since the client began). The client OS, browser and screen come from the identity file's `id_30`, `id_31` and `id_33` (values such as `Windows 10`, `chrome 63.0` and `1920x1080`); the score request gets matching optional fields in ML-3. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number becomes `-1`.
 
-`hour_of_day` depends on the clock's reference point. IEEE-CIS times are offsets from an unknown start, so for live traffic the hour will be shifted; treat this feature as approximate until the team decides how to align it.
+`hour_of_day` was removed in model v4: IEEE-CIS times start at an unknown moment, so the hour was shifted for live traffic, and the model loses nothing without it.
 
 ## Model policy
 

@@ -22,9 +22,9 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 | File | Content |
 |---|---|
-| `backend/models/lgbm-ieee-v3.json` | LightGBM model dump that the Go service loads |
-| `backend/models/lgbm-ieee-v3.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
-| `backend/models/lgbm-ieee-v3.report.json` | Metrics, thresholds and export checks |
+| `backend/models/lgbm-ieee-v4.json` | LightGBM model dump for the Go service |
+| `backend/models/lgbm-ieee-v4.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
+| `backend/models/lgbm-ieee-v4.report.json` | Metrics, thresholds and export checks |
 | `ml/output/training_report.json` | Same report, kept locally |
 
 Options: `--version` (model name), `--review-rate` (share of legitimate purchases the model may send to review, default 0.005) and `--max-missed-fraud` (share of fraud a cleared review may contain, default 0.02).
@@ -106,14 +106,13 @@ The exact feature definitions for the Go service are in `FEATURES.md`.
 
 ## Features
 
-All history features use only transactions that happened before the current one, so the scoring service can compute the same values at request time. Anonymized IEEE-CIS columns (`C`, `D`, `M`, `V`, `id_*`) are never model inputs; `D1` is used only to build the player ID.
+All history features use only transactions that happened before the current one, so the scoring service can compute the same values at request time. Anonymized IEEE-CIS columns (`C`, `M`, `V` and most `D` and `id_*`) are never model inputs. The exceptions map to score request fields: `D1` (days since the client began) gives the account age, and `id_30`, `id_31` and `id_33` hold the client's operating system, browser and screen.
 
 | Feature | Meaning |
 |---|---|
 | `amount`, `cents` | Purchase amount and its fractional part |
 | `product_code`, `card_network`, `card_type` | Product code, card network and card type as small integer codes |
 | `card_country`, `card_category`, `billing_country` | Card and billing codes from the request |
-| `hour_of_day` | Hour of the purchase |
 | `email_domain_share` | Share of earlier purchases that used this email domain |
 | `email_players_share` | Share of earlier players who used this email domain |
 | `has_recipient_email`, `recipient_email_differs` | Whether a recipient email is set and differs from the purchaser's |
@@ -128,8 +127,25 @@ All history features use only transactions that happened before the current one,
 | `card_distinct_players` | Players who used this card before |
 | `card1_distinct_players`, `card1_distinct_addresses`, `card1_distinct_emails` | Players, billing regions and emails seen with this `card1` value before |
 | `billing_distance` | Distance field from the request (`dist1`) |
+| `account_age_days` | Days the account existed before the purchase (`D1`) |
+| `has_client_info`, `os_family`, `browser_family`, `screen_area` | Client details sent, OS and browser family, screen size |
+| `os_share`, `browser_share`, `screen_share` | How common the OS, browser and screen are among earlier purchases |
+| `os_is_new_for_player`, `browser_is_new_for_player`, `player_distinct_browsers` | OS and browsers the player used before |
 
-Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`. Money-velocity features (amount spent per card or player in a time window) were tested and left out because they did not improve the model.
+Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`. Money-velocity features (amount spent per card or player in a time window) were tested and left out because they did not improve the model. `hour_of_day` was removed in v4: IEEE-CIS times start at an unknown moment, so the hour is shifted for live traffic, and the model does not lose anything without it. Lifetime counts and ages (for example a card's total purchases) were tested and left out because they keep growing over the months and drift.
+
+### Model v4 against v3 (test month, days 153-183)
+
+| | v3 (38 features) | v4 (48 features) |
+|---|---|---|
+| ROC-AUC | 0.828 | **0.838** |
+| PR-AUC | 0.204 | **0.231** |
+| First-fraud-only PR-AUC | 0.116 | **0.126** |
+| Fraud caught / precision at 0.5% of legit flagged | 9.0% / 39% | **11.4% / 45%** |
+| Fraud caught / precision at 1% | 14.6% / 35% | **16.7% / 38%** |
+| Policy `flag_at` on the test month: flagged, precision, fraud caught | 0.97%, 38%, 10.6% | 0.94%, **44%**, **11.8%** |
+
+The Go service keeps loading v3 until it computes the v4 features.
 
 ## Evaluation
 

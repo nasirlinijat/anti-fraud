@@ -13,7 +13,6 @@ import (
 
 const (
 	modelPath   = "../../models/lgbm-ieee-v3.json"
-	goldenPath  = "../../models/lgbm-ieee-v3.golden.csv"
 	goldenRows  = 2000
 	maxScoreGap = 1e-9
 )
@@ -74,7 +73,18 @@ func TestPredictTinyModel(t *testing.T) {
 	}
 }
 
+// TestPredictMatchesGoldenRows checks every exported model against the scores
+// Python computed for its golden rows.
 func TestPredictMatchesGoldenRows(t *testing.T) {
+	for _, version := range []string{"lgbm-ieee-v3", "lgbm-ieee-v4"} {
+		t.Run(version, func(t *testing.T) {
+			checkGoldenRows(t, filepath.Join("../../models", version+".json"), filepath.Join("../../models", version+".golden.csv"))
+		})
+	}
+}
+
+func checkGoldenRows(t *testing.T, modelPath, goldenPath string) {
+	t.Helper()
 	model, err := Load(modelPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
