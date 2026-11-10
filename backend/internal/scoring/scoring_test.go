@@ -50,9 +50,9 @@ func TestEvaluate(t *testing.T) {
 			wantScore: 75,
 			wantOut:   OutcomeReview,
 			wantFired: []FiredRule{
-				{RuleHighAmount, 30},
-				{RuleNewAccount, 20},
-				{RuleCountryMismatch, 25},
+				{Name: RuleHighAmount, Points: 30, Message: "Amount 60000 minor units is at or above the limit of 50000"},
+				{Name: RuleNewAccount, Points: 20, Message: "Account is 2 hours old, under the limit of 24 hours"},
+				{Name: RuleCountryMismatch, Points: 25, Message: "IP country TR differs from card country AZ"},
 			},
 		},
 		{
@@ -62,8 +62,8 @@ func TestEvaluate(t *testing.T) {
 			wantScore: 55,
 			wantOut:   OutcomeReview,
 			wantFired: []FiredRule{
-				{RuleHighAmount, 30},
-				{RuleCountryMismatch, 25},
+				{Name: RuleHighAmount, Points: 30, Message: "Amount 60000 minor units is at or above the limit of 50000"},
+				{Name: RuleCountryMismatch, Points: 25, Message: "IP country TR differs from card country AZ"},
 			},
 		},
 		{
@@ -73,8 +73,8 @@ func TestEvaluate(t *testing.T) {
 			wantScore: 50,
 			wantOut:   OutcomeReview,
 			wantFired: []FiredRule{
-				{RuleHighAmount, 30},
-				{RuleNewAccount, 20},
+				{Name: RuleHighAmount, Points: 30, Message: "Amount 60000 minor units is at or above the limit of 50000"},
+				{Name: RuleNewAccount, Points: 20, Message: "Account is 2 hours old, under the limit of 24 hours"},
 			},
 		},
 		{
@@ -224,5 +224,62 @@ func TestCountryMismatch(t *testing.T) {
 		if got := countryMismatch(in, 0); got != tt.want {
 			t.Errorf("countryMismatch(%s) = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestFiredRuleMessagesStateTheValueAndTheLimit(t *testing.T) {
+	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	rs := Ruleset{ReviewThreshold: 10, BlockThreshold: 1000, Rules: map[RuleName]RuleConfig{
+		RuleCardVelocity: {Enabled: true, Weight: 40, Limit: 5},
+	}}
+	got := Evaluate(Input{EventTime: event, CardPurchasesLastHour: 7}, rs)
+	want := []FiredRule{{Name: RuleCardVelocity, Points: 40, Message: "Card used 7 times in 60 minutes (limit 5)"}}
+	if !reflect.DeepEqual(got.FiredRules, want) {
+		t.Errorf("fired = %+v, want %+v", got.FiredRules, want)
+	}
+}
+
+func TestNewAccountMessageNeverShowsNegativeAge(t *testing.T) {
+	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	created := event.Add(3 * time.Hour) // created after the purchase, for example from a clock skew
+	got := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, 24)
+	if want := "Account is 0 hours old, under the limit of 24 hours"; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+}
+
+func TestBlocklistMatchNamesTheEntryTypeButNotTheValue(t *testing.T) {
+	for entryType, want := range map[string]string{
+		"card":   "Blocked: the card is on the blocklist",
+		"device": "Blocked: the device is on the blocklist",
+		"player": "Blocked: the player is on the blocklist",
+		"ip":     "Blocked: the IP address is on the blocklist",
+	} {
+		got := BlocklistMatch(entryType)
+		if got.Name != RuleBlocklist || got.Points != 0 || got.Message != want {
+			t.Errorf("BlocklistMatch(%q) = %+v, want %q with no points", entryType, got, want)
+		}
+	}
+	if RuleBlocklist.Known() {
+		t.Error("blocklist must not be a configurable rule")
+	}
+}
+
+func TestEveryConfigurableRuleHasAMessage(t *testing.T) {
+	for _, r := range rules {
+		if r.message == nil {
+			t.Errorf("rule %s has no message", r.name)
+		}
+	}
+}
+
+func TestMessagesUseSingularForOne(t *testing.T) {
+	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	created := event.Add(-time.Hour)
+	if got, want := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, 1), "Account is 1 hour old, under the limit of 1 hour"; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+	if got, want := cardVelocityMessage(Input{CardPurchasesLastHour: 1}, 1), "Card used 1 time in 60 minutes (limit 1)"; got != want {
+		t.Errorf("message = %q, want %q", got, want)
 	}
 }

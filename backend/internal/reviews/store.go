@@ -163,6 +163,12 @@ func newQueueItem(
 	if err := json.Unmarshal(firedRules, &fired); err != nil {
 		return QueueItem{}, fmt.Errorf("decode fired rules of purchase %d: %w", purchaseID, err)
 	}
+	// Decisions saved before rule messages existed show the rule name.
+	for i := range fired {
+		if fired[i].Message == "" {
+			fired[i].Message = string(fired[i].Name)
+		}
+	}
 	item := QueueItem{
 		PurchaseID:    purchaseID,
 		TransactionID: transactionID,

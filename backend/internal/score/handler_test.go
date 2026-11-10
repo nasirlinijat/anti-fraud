@@ -196,10 +196,10 @@ func TestScoreReturnsFiredRules(t *testing.T) {
 		Outcome:       scoring.OutcomeBlock,
 		Score:         115,
 		FiredRules: []scoring.FiredRule{
-			{Name: scoring.RuleHighAmount, Points: 30},
-			{Name: scoring.RuleCardVelocity, Points: 40},
-			{Name: scoring.RuleNewAccount, Points: 20},
-			{Name: scoring.RuleCountryMismatch, Points: 25},
+			{Name: scoring.RuleHighAmount, Points: 30, Message: "Amount 60000 minor units is at or above the limit of 50000"},
+			{Name: scoring.RuleCardVelocity, Points: 40, Message: "Card used 5 times in 60 minutes (limit 5)"},
+			{Name: scoring.RuleNewAccount, Points: 20, Message: "Account is 1 hour old, under the limit of 24 hours"},
+			{Name: scoring.RuleCountryMismatch, Points: 25, Message: "IP country TR differs from card country AZ"},
 		},
 		RulesetVersion: 7,
 	}
@@ -421,9 +421,11 @@ func TestScoreBlocksBlocklistMatch(t *testing.T) {
 	}
 	got := decodeJSON[scoreResponse](t, rec)
 	want := scoreResponse{
-		TransactionID:  "txn-bl",
-		Outcome:        scoring.OutcomeBlock,
-		FiredRules:     []scoring.FiredRule{},
+		TransactionID: "txn-bl",
+		Outcome:       scoring.OutcomeBlock,
+		FiredRules: []scoring.FiredRule{
+			{Name: scoring.RuleBlocklist, Message: "Blocked: the card is on the blocklist"},
+		},
 		RulesetVersion: 7,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -537,7 +539,7 @@ func TestScoreWithPostgres(t *testing.T) {
 
 	rec := post(body(5))
 	got := decodeJSON[scoreResponse](t, rec)
-	want := []scoring.FiredRule{{Name: scoring.RuleCardVelocity, Points: 40}}
+	want := []scoring.FiredRule{{Name: scoring.RuleCardVelocity, Points: 40, Message: "Card used 5 times in 60 minutes (limit 5)"}}
 	if rec.Code != http.StatusOK || !reflect.DeepEqual(got.FiredRules, want) || got.RulesetVersion != 1 {
 		t.Errorf("sixth purchase: status %d, response %+v, want card_velocity fired under ruleset 1", rec.Code, got)
 	}

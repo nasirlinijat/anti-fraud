@@ -5,6 +5,7 @@ export type Outcome = 'allow' | 'review' | 'block'
 export interface FiredRule {
   name: string
   points: number
+  message: string
 }
 
 export interface ScoreResponse {

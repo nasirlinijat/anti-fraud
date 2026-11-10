@@ -87,8 +87,8 @@ func TestQueueReturnsReviewsOldestFirst(t *testing.T) {
 			ModelScore:    &score,
 			ModelVersion:  &version,
 			FiredRules: []scoring.FiredRule{
-				{Name: scoring.RuleHighAmount, Points: 30},
-				{Name: scoring.RuleCardVelocity, Points: 40},
+				{Name: scoring.RuleHighAmount, Points: 30, Message: "high_amount"},
+				{Name: scoring.RuleCardVelocity, Points: 40, Message: "card_velocity"},
 			},
 			DecidedAt: at(10),
 		},
@@ -146,8 +146,8 @@ func TestCaseReturnsEvidenceOfReviewPurchase(t *testing.T) {
 			ModelScore:    &score,
 			ModelVersion:  &version,
 			FiredRules: []scoring.FiredRule{
-				{Name: scoring.RuleHighAmount, Points: 30},
-				{Name: scoring.RuleCardVelocity, Points: 40},
+				{Name: scoring.RuleHighAmount, Points: 30, Message: "high_amount"},
+				{Name: scoring.RuleCardVelocity, Points: 40, Message: "card_velocity"},
 			},
 			DecidedAt: at,
 		},
@@ -220,5 +220,25 @@ func TestCaseNotFound(t *testing.T) {
 		if _, err := store.Case(context.Background(), id); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s: Case error = %v, want ErrNotFound", name, err)
 		}
+	}
+}
+
+func TestQueueAndCaseReturnTheSavedRuleMessage(t *testing.T) {
+	tx := testTx(t)
+	id := insertDecision(t, tx, "m-msg", "review", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil,
+		`[{"name": "card_velocity", "points": 40, "message": "Card used 5 times in 60 minutes (limit 5)"}, {"name": "high_amount", "points": 30}]`)
+	want := []scoring.FiredRule{
+		{Name: scoring.RuleCardVelocity, Points: 40, Message: "Card used 5 times in 60 minutes (limit 5)"},
+		{Name: scoring.RuleHighAmount, Points: 30, Message: "high_amount"}, // saved before messages existed
+	}
+
+	store := NewStore(tx)
+	queue, err := store.Queue(context.Background(), 1)
+	if err != nil || len(queue) != 1 || !reflect.DeepEqual(queue[0].FiredRules, want) {
+		t.Errorf("Queue fired rules = %+v, %v; want %+v", queue, err, want)
+	}
+	reviewCase, err := store.Case(context.Background(), id)
+	if err != nil || !reflect.DeepEqual(reviewCase.FiredRules, want) {
+		t.Errorf("Case fired rules = %+v, %v; want %+v", reviewCase.FiredRules, err, want)
 	}
 }
