@@ -93,6 +93,21 @@ It sends 500 purchases, 20 per second, and prints how many of each pattern were 
 make simulate ARGS="-seed 7 -count 2000 -rate 50 -suspicious 0.2"
 ```
 
+For a live demo, open the dashboard's **15 minutes** view and run:
+
+```bash
+make simulate ARGS="-count 0 -rate 5 -seed 1"
+```
+
+Live mode timestamps each purchase as it is sent. Press Ctrl+C to stop and see the totals by pattern. The seed controls the purchase sequence, while timestamps and the default run prefix vary by launch. Changing the send rate can change which time-based rules fire.
+
+If you need the simulator's exit status after Ctrl+C, build and run it directly from `backend` with `API_KEY` and `PORT` set. The binary exits successfully on interrupt if there were no send failures. Make and `go run` can report an interrupt after printing the summary.
+
+```bash
+go build -o ./bin/simulator ./cmd/simulator
+./bin/simulator -count 0 -rate 5 -seed 1
+```
+
 Without `make`, for example in Windows PowerShell, run it from `backend` with the same values as `.env`:
 
 ```powershell
@@ -101,19 +116,19 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-seed` | 1 | Random seed. The same seed and start give the same purchases |
-| `-start` | the last purchase happens now | Event time of the first purchase, in RFC 3339. The score API rejects event times more than 5 minutes in the future, so a later start fails |
-| `-count` | 500 | Number of purchases to send |
+| `-seed` | 1 | Random seed for the purchase sequence |
+| `-start` | the last backfill purchase happens now | Backfill start in RFC 3339. The score API rejects event times more than 5 minutes in the future. Use only with a positive count |
+| `-count` | 500 | Number of purchases to send. Use 0 for live mode until Ctrl+C |
 | `-rate` | 20 | Purchases sent per second, 0 for as fast as possible |
 | `-suspicious` | 0.1 | Share of traffic events that start a suspicious pattern |
 | `-players` | 300 | Number of regular players |
-| `-gap` | 20s | Mean simulated time between traffic events |
-| `-run` | built from seed and start | Prefix of all generated IDs |
+| `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
+| `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
 
-Event times are simulated, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix, so a new run does not clash with earlier ones. Sending the same run again fails with 409, because those transaction IDs are already scored.
+Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Reusing a run prefix with the same seed and settings can return 409 for transaction IDs that were already scored.
 
-With the default ruleset the patterns give these outcomes:
+In backfill with the default ruleset, the patterns give these outcomes:
 
 | Pattern | What happens | Outcome |
 |---|---|---|
