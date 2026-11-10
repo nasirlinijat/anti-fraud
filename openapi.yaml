@@ -529,6 +529,16 @@ paths:
                 decision:
                   type: string
                   enum: [approve, reject]
+                block_device:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the device of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. Offer it only for a review that has a device_id. A
+                    purchase without a device, or a device that is already
+                    blocked, is rejected without a new entry. A decision
+                    that conflicts with an earlier one saves nothing.
       responses:
         "201":
           description: The analyst decision was saved.
@@ -714,7 +724,7 @@ components:
   schemas:
     ReviewResolution:
       type: object
-      required: [purchase_id, decision, analyst_id, resolved_at]
+      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked]
       properties:
         purchase_id:
           type: string
@@ -729,6 +739,9 @@ components:
           type: string
           format: date-time
           description: Time when the database recorded the decision, in UTC.
+        device_blocked:
+          type: boolean
+          description: True when this rejection added the device of the purchase to the blocklist.
 
     ReviewPage:
       type: object
@@ -746,7 +759,7 @@ components:
 
     ReviewItem:
       type: object
-      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, rule_score, model_score, model_version, fired_rules]
+      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, device_id, rule_score, model_score, model_version, fired_rules]
       properties:
         purchase_id:
           type: string
@@ -766,6 +779,11 @@ components:
           description: The integer amount in minor units as a decimal string.
         player_id:
           type: string
+        device_id:
+          type: string
+          nullable: true
+          description: The device ID of the purchase. It is null when the purchase carried none.
+          example: device-7
         rule_score:
           type: integer
           minimum: 0

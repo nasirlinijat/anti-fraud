@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -20,7 +21,9 @@ type QueueItem struct {
 	EventTime     time.Time
 	AmountMinor   int64
 	PlayerID      string
-	RuleScore     int
+	// DeviceID is nil when the purchase carried no device ID.
+	DeviceID  *string
+	RuleScore int
 	// ModelScore is nil when the purchase was scored without a model.
 	ModelScore *float64
 	// ModelVersion is the version of the model that gave ModelScore.
@@ -39,17 +42,35 @@ type CaseItem struct {
 // ErrNotFound means no purchase under review has the given ID.
 var ErrNotFound = errors.New("review case not found")
 
-// Store reads the review queue.
+// DB is a connection that can also start a transaction. Both a pool and a
+// transaction qualify, so tests can run the store inside a rolled-back one.
+type DB interface {
+	db.DBTX
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+// Store reads the review queue and saves review decisions.
 type Store struct {
-	q *db.Queries
+	conn DB
+	q    *db.Queries
 }
 
-func NewStore(conn db.DBTX) *Store {
-	return &Store{q: db.New(conn)}
+func NewStore(conn DB) *Store {
+	return &Store{conn: conn, q: db.New(conn)}
 }
 
-func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error) {
-	row, err := s.q.ResolveReview(ctx, db.ResolveReviewParams{
+// resolve saves the decision. When the decision is a saved rejection and
+// blockDevice is set, it also blocklists the purchase's device in the same
+// transaction. Any other outcome adds no blocklist entry, and a device that is
+// already blocked is left as it is.
+func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (resolution, error) {
+	tx, err := s.conn.Begin(ctx)
+	if err != nil {
+		return resolution{}, fmt.Errorf("begin review decision: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row, err := db.New(tx).ResolveReview(ctx, db.ResolveReviewParams{
 		TargetPurchaseID: purchaseID,
 		Decision:         decision,
 		AnalystID:        analystID,
@@ -57,7 +78,30 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 	if err != nil {
 		return resolution{}, fmt.Errorf("resolve review: %w", err)
 	}
-	return resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}, nil
+	result := resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}
+
+	if row.Status == "saved" && decision == "reject" && blockDevice {
+		device, err := db.New(tx).GetPurchaseDeviceID(ctx, purchaseID)
+		if err != nil {
+			return resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
+		}
+		if device.Valid {
+			_, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{
+				Type:   blocklist.TypeDevice,
+				Value:  device.String,
+				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
+			})
+			if err != nil {
+				return resolution{}, err
+			}
+			result.deviceBlocked = added
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return resolution{}, fmt.Errorf("commit review decision: %w", err)
+	}
+	return result, nil
 }
 
 // Queue returns up to limit purchases marked for review, the earliest decided first.
@@ -83,7 +127,7 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 
 	items := make([]QueueItem, 0, len(rows))
 	for _, r := range rows {
-		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
 			r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
 		if err != nil {
 			return nil, err
@@ -103,7 +147,7 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 	if err != nil {
 		return CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
 	}
-	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
 		r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
 	if err != nil {
 		return CaseItem{}, err
@@ -112,7 +156,7 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 }
 
 func newQueueItem(
-	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string,
+	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string, deviceID pgtype.Text,
 	ruleScore int32, modelScore pgtype.Float8, modelVersion pgtype.Text, firedRules []byte, decidedAt pgtype.Timestamptz,
 ) (QueueItem, error) {
 	var fired []scoring.FiredRule
@@ -128,6 +172,10 @@ func newQueueItem(
 		RuleScore:     int(ruleScore),
 		FiredRules:    fired,
 		DecidedAt:     decidedAt.Time.UTC(),
+	}
+	if deviceID.Valid {
+		device := deviceID.String
+		item.DeviceID = &device
 	}
 	if modelScore.Valid {
 		score := modelScore.Float64

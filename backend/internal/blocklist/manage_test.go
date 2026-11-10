@@ -96,6 +96,65 @@ func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 	}
 }
 
+func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
+	tx := emptyTx(t)
+	ctx := context.Background()
+	store := blocklist.NewStore(tx)
+	device := blocklist.Entry{Type: blocklist.TypeDevice, Value: "device-9", Reason: "first"}
+
+	first, added, err := store.AddIfAbsent(ctx, device)
+	if err != nil || !added || first.ID == 0 || first.Type != blocklist.TypeDevice || first.Value != "device-9" || first.CreatedAt.IsZero() {
+		t.Fatalf("first AddIfAbsent = %+v, %v, %v; want a saved entry", first, added, err)
+	}
+
+	// No savepoint is needed: an existing entry is not an error, so the
+	// transaction stays usable.
+	device.Reason = "second"
+	if _, added, err := store.AddIfAbsent(ctx, device); err != nil || added {
+		t.Fatalf("second AddIfAbsent added = %v, err = %v; want no new entry and no error", added, err)
+	}
+	entries, err := store.List(ctx)
+	if err != nil || len(entries) != 1 || entries[0].ID != first.ID || entries[0].Reason != "first" {
+		t.Fatalf("entries = %+v, err = %v; want only the first entry", entries, err)
+	}
+	// The same value on another type is a different entry.
+	if _, added, err := store.AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "device-9", Reason: "other type"}); err != nil || !added {
+		t.Fatalf("other type: added = %v, err = %v; want saved", added, err)
+	}
+}
+
+func TestAddIfAbsentIsPartOfItsTransaction(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	const value = "device-rolled-back"
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypeDevice, Value: value, Reason: "test"}); err != nil || !added {
+		t.Fatalf("AddIfAbsent added = %v, err = %v", added, err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	_, found, err := blocklist.NewStore(pool).Match(ctx, blocklist.Subject{CardToken: "c", PlayerID: "p", DeviceID: ptrTo(value)})
+	if err != nil || found {
+		t.Fatalf("after rollback found = %v, err = %v; want the entry gone", found, err)
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
+
 // TestNewEntryBlocksNextPurchase adds an entry through the API and scores a
 // purchase right after it: the entry applies at once, with no restart or cache.
 func TestNewEntryBlocksNextPurchase(t *testing.T) {

@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getPurchaseDeviceID = `-- name: GetPurchaseDeviceID :one
+SELECT device_id FROM purchases WHERE id = $1
+`
+
+// Returns the device ID of a purchase, or NULL when it carried none.
+func (q *Queries) GetPurchaseDeviceID(ctx context.Context, purchaseID int64) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getPurchaseDeviceID, purchaseID)
+	var device_id pgtype.Text
+	err := row.Scan(&device_id)
+	return device_id, err
+}
+
 const resolveReview = `-- name: ResolveReview :one
 WITH candidate AS (
     SELECT d.purchase_id, d.outcome

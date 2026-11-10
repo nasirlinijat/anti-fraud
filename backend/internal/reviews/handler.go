@@ -28,7 +28,7 @@ type caseReader interface {
 type reviewStore interface {
 	queueReader
 	caseReader
-	resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error)
+	resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (resolution, error)
 }
 
 // RegisterRoutes exposes the queue, case evidence, and decisions to authenticated analysts.
@@ -69,6 +69,7 @@ type reviewResponse struct {
 	QueuedAt      time.Time           `json:"queued_at"`
 	AmountMinor   string              `json:"amount_minor"`
 	PlayerID      string              `json:"player_id"`
+	DeviceID      *string             `json:"device_id"`
 	RuleScore     int                 `json:"rule_score"`
 	ModelScore    *float64            `json:"model_score"`
 	ModelVersion  *string             `json:"model_version"`
@@ -146,6 +147,7 @@ func newReviewResponse(row QueueItem) reviewResponse {
 		QueuedAt:      row.DecidedAt.UTC(),
 		AmountMinor:   strconv.FormatInt(row.AmountMinor, 10),
 		PlayerID:      row.PlayerID,
+		DeviceID:      row.DeviceID,
 		RuleScore:     row.RuleScore,
 		ModelScore:    row.ModelScore,
 		ModelVersion:  row.ModelVersion,

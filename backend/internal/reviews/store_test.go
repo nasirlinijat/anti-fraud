@@ -171,6 +171,45 @@ func TestCaseWithoutModelScore(t *testing.T) {
 	}
 }
 
+func TestQueueReturnsDeviceID(t *testing.T) {
+	tx := testTx(t)
+	withDevice := insertDecision(t, tx, "qd-device", "review", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)
+	withoutDevice := insertDecision(t, tx, "qd-none", "review", time.Date(2000, 1, 1, 9, 1, 0, 0, time.UTC), nil, `[]`)
+	if _, err := tx.Exec(context.Background(), `UPDATE purchases SET device_id = 'device-q' WHERE id = $1`, withDevice); err != nil {
+		t.Fatalf("set device ID: %v", err)
+	}
+
+	got, err := NewStore(tx).Queue(context.Background(), 2)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Queue = %+v, %v; want 2 items", got, err)
+	}
+	if got[0].PurchaseID != withDevice || got[0].DeviceID == nil || *got[0].DeviceID != "device-q" {
+		t.Errorf("first item device = %v, want device-q", got[0].DeviceID)
+	}
+	if got[1].PurchaseID != withoutDevice || got[1].DeviceID != nil {
+		t.Errorf("second item device = %v, want nil", got[1].DeviceID)
+	}
+}
+
+func TestCaseReturnsDeviceID(t *testing.T) {
+	tx := testTx(t)
+	withDevice := insertDecision(t, tx, "c-device", "review", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)
+	withoutDevice := insertDecision(t, tx, "c-no-device", "review", time.Date(2000, 1, 1, 9, 1, 0, 0, time.UTC), nil, `[]`)
+	if _, err := tx.Exec(context.Background(), `UPDATE purchases SET device_id = 'device-7' WHERE id = $1`, withDevice); err != nil {
+		t.Fatalf("set device ID: %v", err)
+	}
+
+	store := NewStore(tx)
+	got, err := store.Case(context.Background(), withDevice)
+	if err != nil || got.DeviceID == nil || *got.DeviceID != "device-7" {
+		t.Errorf("Case(with device) = %+v, %v; want device-7", got.DeviceID, err)
+	}
+	got, err = store.Case(context.Background(), withoutDevice)
+	if err != nil || got.DeviceID != nil {
+		t.Errorf("Case(without device) = %+v, %v; want nil", got.DeviceID, err)
+	}
+}
+
 func TestCaseNotFound(t *testing.T) {
 	tx := testTx(t)
 	allowed := insertDecision(t, tx, "c-allow", "allow", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)

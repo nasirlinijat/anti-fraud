@@ -35,7 +35,7 @@ type fakeReviewReads struct {
 	caseReader
 }
 
-func (fakeReviewReads) resolve(context.Context, int64, string, string) (resolution, error) {
+func (fakeReviewReads) resolve(context.Context, int64, string, string, bool) (resolution, error) {
 	panic("unexpected decision request")
 }
 
@@ -151,7 +151,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	if first.PurchaseID != "9007199254740993" || first.AmountMinor != "9223372036854775807" ||
 		first.EventTime.Format(time.RFC3339Nano) != "2026-11-09T05:59:00.123456Z" ||
 		first.QueuedAt.Format(time.RFC3339Nano) != "2026-11-09T06:00:00.123456Z" ||
-		first.RuleScore != 60 || first.PlayerID != "player" || first.TransactionID != "first" ||
+		first.RuleScore != 60 || first.PlayerID != "player" || first.DeviceID != nil || first.TransactionID != "first" ||
 		first.ModelScore != nil || first.ModelVersion != nil || first.FiredRules == nil || len(first.FiredRules) != 0 {
 		t.Fatalf("unexpected first review: %+v", first)
 	}
@@ -238,6 +238,26 @@ func TestCaseSerializesEvidence(t *testing.T) {
 		got.ModelScore == nil || *got.ModelScore != score || got.ModelVersion == nil || *got.ModelVersion != version ||
 		len(got.FiredRules) != 2 || got.FiredRules[1].Name != scoring.RuleCardVelocity || got.FiredRules[1].Points != 40 {
 		t.Fatalf("unexpected case: %+v", got)
+	}
+}
+
+func TestCaseShowsDeviceID(t *testing.T) {
+	device := "device-1"
+	for name, want := range map[string]*string{"with device": &device, "without device": nil} {
+		t.Run(name, func(t *testing.T) {
+			store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
+				return CaseItem{QueueItem: QueueItem{PurchaseID: id, DeviceID: want}, RulesetVersion: 1}, nil
+			})
+			var body map[string]any
+			w := requestCase(t, store, "/reviews/7", queueTestKey)
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
+				t.Fatalf("status = %d, err = %v, body = %s", w.Code, err, w.Body)
+			}
+			got, present := body["device_id"]
+			if !present || (want == nil && got != nil) || (want != nil && got != *want) {
+				t.Fatalf("device_id = %v (present %v), want %v", got, present, want)
+			}
+		})
 	}
 }
 

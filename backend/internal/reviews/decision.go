@@ -15,8 +15,9 @@ import (
 const maxDecisionBytes = 1024
 
 type resolution struct {
-	status     string
-	resolvedAt time.Time
+	status        string
+	resolvedAt    time.Time
+	deviceBlocked bool
 }
 
 type decisionResponse struct {
@@ -24,6 +25,8 @@ type decisionResponse struct {
 	Decision   string    `json:"decision"`
 	AnalystID  string    `json:"analyst_id"`
 	ResolvedAt time.Time `json:"resolved_at"`
+	// DeviceBlocked is true when this rejection added the device to the blocklist.
+	DeviceBlocked bool `json:"device_blocked"`
 }
 
 func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, analystID string) {
@@ -35,7 +38,8 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 	}
 
 	var body struct {
-		Decision string `json:"decision"`
+		Decision    string `json:"decision"`
+		BlockDevice bool   `json:"block_device"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxDecisionBytes))
 	dec.DisallowUnknownFields()
@@ -62,7 +66,12 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 		return
 	}
 
-	result, err := store.resolve(r.Context(), purchaseID, body.Decision, analystID)
+	if body.BlockDevice && body.Decision != "reject" {
+		platform.WriteError(w, http.StatusBadRequest, "block_device is only allowed with a reject decision")
+		return
+	}
+
+	result, err := store.resolve(r.Context(), purchaseID, body.Decision, analystID, body.BlockDevice)
 	if err != nil {
 		log.Printf("save review decision: %v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
@@ -71,10 +80,11 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 	switch result.status {
 	case "saved":
 		platform.WriteJSON(w, http.StatusCreated, decisionResponse{
-			PurchaseID: id,
-			Decision:   body.Decision,
-			AnalystID:  analystID,
-			ResolvedAt: result.resolvedAt.UTC(),
+			PurchaseID:    id,
+			Decision:      body.Decision,
+			AnalystID:     analystID,
+			ResolvedAt:    result.resolvedAt.UTC(),
+			DeviceBlocked: result.deviceBlocked,
 		})
 	case "not_found":
 		platform.WriteError(w, http.StatusNotFound, "purchase not found")

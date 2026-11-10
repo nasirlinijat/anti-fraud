@@ -35,7 +35,7 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 }
 
 const getReviewCase = `-- name: GetReviewCase :one
-SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.ruleset_version, d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
@@ -50,6 +50,7 @@ type GetReviewCaseRow struct {
 	EventTime      pgtype.Timestamptz
 	AmountMinor    int64
 	PlayerID       string
+	DeviceID       pgtype.Text
 	RulesetVersion int32
 	RuleScore      int32
 	ModelScore     pgtype.Float8
@@ -67,6 +68,7 @@ func (q *Queries) GetReviewCase(ctx context.Context, purchaseID int64) (GetRevie
 		&i.EventTime,
 		&i.AmountMinor,
 		&i.PlayerID,
+		&i.DeviceID,
 		&i.RulesetVersion,
 		&i.RuleScore,
 		&i.ModelScore,
@@ -197,7 +199,7 @@ func (q *Queries) InsertPurchase(ctx context.Context, arg InsertPurchaseParams) 
 }
 
 const listReviewQueue = `-- name: ListReviewQueue :many
-SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
@@ -225,6 +227,7 @@ type ListReviewQueueRow struct {
 	EventTime     pgtype.Timestamptz
 	AmountMinor   int64
 	PlayerID      string
+	DeviceID      pgtype.Text
 	RuleScore     int32
 	ModelScore    pgtype.Float8
 	ModelVersion  pgtype.Text
@@ -247,6 +250,7 @@ func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams
 			&i.EventTime,
 			&i.AmountMinor,
 			&i.PlayerID,
+			&i.DeviceID,
 			&i.RuleScore,
 			&i.ModelScore,
 			&i.ModelVersion,

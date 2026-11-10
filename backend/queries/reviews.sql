@@ -18,3 +18,7 @@ SELECT CASE
     ELSE 'not_review'
 END::text AS status,
 (SELECT resolved_at FROM saved)::timestamptz AS resolved_at;
+
+-- name: GetPurchaseDeviceID :one
+-- Returns the device ID of a purchase, or NULL when it carried none.
+SELECT device_id FROM purchases WHERE id = sqlc.arg(purchase_id);
