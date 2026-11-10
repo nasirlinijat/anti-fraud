@@ -501,3 +501,46 @@ td {
   color: var(--muted);
   cursor: default;
 }
+
+.review-open,
+.review-back {
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+}
+
+.review-open {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.review-case h3,
+.review-case h4 {
+  margin-block: 1rem 0.5rem;
+}
+
+.review-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.review-facts dt {
+  color: var(--muted);
+}
+
+.review-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-rules {
+  min-inline-size: 0;
+  max-inline-size: 28rem;
+}
