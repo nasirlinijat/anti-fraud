@@ -79,6 +79,111 @@ func (q *Queries) GetReviewCase(ctx context.Context, purchaseID int64) (GetRevie
 	return i, err
 }
 
+const getSavedScore = `-- name: GetSavedScore :one
+SELECT
+    ROW(
+        p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.card_token,
+        p.card_issuer, p.card_network, p.card_type, p.card_country, p.card_category,
+        p.product_code, p.billing_region, p.billing_country, p.billing_distance,
+        p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
+        p.ip_address, p.ip_country, p.account_created_at,
+        p.client_os, p.client_browser, p.screen_resolution
+    ) IS NOT DISTINCT FROM ROW(
+        $1::text, $2::timestamptz, $3::bigint,
+        $4::text, $5::text,
+        $6::text, $7::text, $8::text,
+        $9::text, $10::text, $11::text,
+        $12::text, $13::text, $14::float8,
+        $15::text, $16::text,
+        $17::text, $18::text, $19::text,
+        $20::inet, $21::text, $22::timestamptz,
+        $23::text, $24::text, $25::text
+    ) AS request_matches,
+    d.outcome, d.rule_score, d.fired_rules, d.ruleset_version, d.model_score, d.model_version
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.transaction_id = $1
+`
+
+type GetSavedScoreParams struct {
+	TransactionID        string
+	EventTime            pgtype.Timestamptz
+	AmountMinor          int64
+	PlayerID             string
+	CardToken            string
+	CardIssuer           pgtype.Text
+	CardNetwork          pgtype.Text
+	CardType             pgtype.Text
+	CardCountry          pgtype.Text
+	CardCategory         pgtype.Text
+	ProductCode          pgtype.Text
+	BillingRegion        pgtype.Text
+	BillingCountry       pgtype.Text
+	BillingDistance      pgtype.Float8
+	EmailDomain          pgtype.Text
+	RecipientEmailDomain pgtype.Text
+	DeviceType           pgtype.Text
+	DeviceName           pgtype.Text
+	DeviceID             pgtype.Text
+	IpAddress            *netip.Addr
+	IpCountry            pgtype.Text
+	AccountCreatedAt     pgtype.Timestamptz
+	ClientOs             pgtype.Text
+	ClientBrowser        pgtype.Text
+	ScreenResolution     pgtype.Text
+}
+
+type GetSavedScoreRow struct {
+	RequestMatches bool
+	Outcome        string
+	RuleScore      int32
+	FiredRules     []byte
+	RulesetVersion int32
+	ModelScore     pgtype.Float8
+	ModelVersion   pgtype.Text
+}
+
+func (q *Queries) GetSavedScore(ctx context.Context, arg GetSavedScoreParams) (GetSavedScoreRow, error) {
+	row := q.db.QueryRow(ctx, getSavedScore,
+		arg.TransactionID,
+		arg.EventTime,
+		arg.AmountMinor,
+		arg.PlayerID,
+		arg.CardToken,
+		arg.CardIssuer,
+		arg.CardNetwork,
+		arg.CardType,
+		arg.CardCountry,
+		arg.CardCategory,
+		arg.ProductCode,
+		arg.BillingRegion,
+		arg.BillingCountry,
+		arg.BillingDistance,
+		arg.EmailDomain,
+		arg.RecipientEmailDomain,
+		arg.DeviceType,
+		arg.DeviceName,
+		arg.DeviceID,
+		arg.IpAddress,
+		arg.IpCountry,
+		arg.AccountCreatedAt,
+		arg.ClientOs,
+		arg.ClientBrowser,
+		arg.ScreenResolution,
+	)
+	var i GetSavedScoreRow
+	err := row.Scan(
+		&i.RequestMatches,
+		&i.Outcome,
+		&i.RuleScore,
+		&i.FiredRules,
+		&i.RulesetVersion,
+		&i.ModelScore,
+		&i.ModelVersion,
+	)
+	return i, err
+}
+
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,

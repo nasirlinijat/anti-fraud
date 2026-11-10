@@ -54,7 +54,12 @@ paths:
            review threshold is `review`, and anything lower is `allow`.
 
         Purchases with the outcome `review` go to the review queue for an
-        analyst. A transaction ID can be scored only once.
+        analyst. After authentication and validation, a retry with the same
+        transaction ID and matching purchase fields returns the saved decision
+        without scoring or saving again. Fields are compared after normal
+        request normalization, with timestamps compared at PostgreSQL's
+        microsecond precision. A valid request that reuses the ID with
+        different fields returns 409.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -102,7 +107,7 @@ paths:
                   screen_resolution: 1920x1080
       responses:
         "200":
-          description: The purchase was scored and saved.
+          description: The decision was saved for this purchase or returned from a matching earlier request.
           content:
             application/json:
               schema:
@@ -204,7 +209,7 @@ paths:
               example:
                 error: missing or invalid API key
         "409":
-          description: A purchase with this transaction ID was already scored.
+          description: This transaction ID belongs to a saved purchase with different fields.
           content:
             application/json:
               schema:
@@ -891,8 +896,8 @@ components:
           type: string
           minLength: 1
           description: >-
-            Unique ID of the purchase, chosen by the caller. Scoring the same
-            ID twice returns 409.
+            Unique ID of the purchase, chosen by the caller. Reuse this ID
+            with the same fields to recover the saved decision after a timeout.
           example: txn-10042
         event_time:
           type: string

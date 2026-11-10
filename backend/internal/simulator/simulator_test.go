@@ -50,7 +50,21 @@ type purchases struct {
 	mu        sync.Mutex
 	saved     []score.Purchase
 	decisions []score.Decision
-	ids       map[string]bool
+	ids       map[string]int
+}
+
+func (s *purchases) FindSavedDecision(_ context.Context, p score.Purchase) (*score.Decision, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i, ok := s.ids[p.TransactionID]
+	if !ok {
+		return nil, nil
+	}
+	if !reflect.DeepEqual(s.saved[i], p) {
+		return nil, score.ErrDuplicateTransaction
+	}
+	decision := s.decisions[i]
+	return &decision, nil
 }
 
 func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
@@ -76,10 +90,10 @@ func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time,
 func (s *purchases) Save(_ context.Context, p score.Purchase, d score.Decision) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ids[p.TransactionID] {
+	if _, ok := s.ids[p.TransactionID]; ok {
 		return 0, score.ErrDuplicateTransaction
 	}
-	s.ids[p.TransactionID] = true
+	s.ids[p.TransactionID] = len(s.saved)
 	s.saved = append(s.saved, p)
 	s.decisions = append(s.decisions, d)
 	return int64(len(s.saved)), nil
@@ -87,7 +101,7 @@ func (s *purchases) Save(_ context.Context, p score.Purchase, d score.Decision) 
 
 func newServer(t *testing.T) (*httptest.Server, *purchases) {
 	t.Helper()
-	store := &purchases{ids: map[string]bool{}}
+	store := &purchases{ids: map[string]int{}}
 	mux := http.NewServeMux()
 	score.RegisterRoutes(mux, score.NewHandler(rulesets{}, noBlocklist{}, store), testKey)
 	srv := httptest.NewServer(mux)
@@ -300,7 +314,9 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 func TestRunReportsFailures(t *testing.T) {
 	srv, _ := newServer(t)
 	traffic := generate(t, simulator.DefaultConfig(), 5)
-	traffic = append(traffic, traffic[0])
+	conflict := traffic[0]
+	conflict.Request.AmountMinor++
+	traffic = append(traffic, traffic[0], conflict)
 
 	var errs []error
 	client := &simulator.Client{BaseURL: srv.URL, APIKey: testKey, HTTP: srv.Client()}
@@ -308,8 +324,8 @@ func TestRunReportsFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if sum.Sent != 5 || sum.Failed != 1 || len(errs) != 1 {
-		t.Fatalf("sent %d, failed %d, errors %v; want 5 sent and the repeated purchase failed", sum.Sent, sum.Failed, errs)
+	if sum.Sent != 6 || sum.Failed != 1 || len(errs) != 1 || !strings.Contains(errs[0].Error(), "status 409") {
+		t.Fatalf("sent %d, failed %d, errors %v; want 6 sent and a conflict for the changed purchase", sum.Sent, sum.Failed, errs)
 	}
 
 	bad := &simulator.Client{BaseURL: srv.URL, APIKey: "wrong", HTTP: srv.Client()}

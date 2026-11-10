@@ -148,6 +148,39 @@ func (s *Store) PlayerEarlierModelScores(ctx context.Context, playerID string, a
 	return row.ScoreSum, row.Scored, nil
 }
 
+// FindSavedDecision returns nil when the transaction has no saved decision.
+// It returns ErrDuplicateTransaction if the saved purchase differs.
+func (s *Store) FindSavedDecision(ctx context.Context, p Purchase) (*Decision, error) {
+	row, err := db.New(s.conn).GetSavedScore(ctx, db.GetSavedScoreParams(purchaseParams(p)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read saved decision: %w", err)
+	}
+	if !row.RequestMatches {
+		return nil, ErrDuplicateTransaction
+	}
+
+	decision := Decision{
+		RulesetVersion: int(row.RulesetVersion),
+		Result: scoring.Result{
+			Outcome: scoring.Outcome(row.Outcome),
+			Score:   int(row.RuleScore),
+		},
+	}
+	if err := json.Unmarshal(row.FiredRules, &decision.Result.FiredRules); err != nil {
+		return nil, fmt.Errorf("decode saved fired rules: %w", err)
+	}
+	if row.ModelScore.Valid {
+		decision.ModelScore = &row.ModelScore.Float64
+	}
+	if row.ModelVersion.Valid {
+		decision.ModelVersion = &row.ModelVersion.String
+	}
+	return &decision, nil
+}
+
 // Save stores a purchase and its decision in one transaction and returns the
 // purchase ID. It returns ErrDuplicateTransaction if the transaction ID is already saved.
 func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error) {
@@ -176,33 +209,7 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 	defer tx.Rollback(ctx)
 
 	q := db.New(tx)
-	id, err := q.InsertPurchase(ctx, db.InsertPurchaseParams{
-		TransactionID:        p.TransactionID,
-		EventTime:            timestamptz(&p.EventTime),
-		AmountMinor:          p.AmountMinor,
-		PlayerID:             p.PlayerID,
-		CardToken:            p.CardToken,
-		CardIssuer:           text(p.CardIssuer),
-		CardNetwork:          text(p.CardNetwork),
-		CardType:             text(p.CardType),
-		CardCountry:          text(p.CardCountry),
-		CardCategory:         text(p.CardCategory),
-		ProductCode:          text(p.ProductCode),
-		BillingRegion:        text(p.BillingRegion),
-		BillingCountry:       text(p.BillingCountry),
-		BillingDistance:      float8(p.BillingDistance),
-		EmailDomain:          text(p.EmailDomain),
-		RecipientEmailDomain: text(p.RecipientEmailDomain),
-		DeviceType:           text(p.DeviceType),
-		DeviceName:           text(p.DeviceName),
-		DeviceID:             text(p.DeviceID),
-		IpAddress:            p.IPAddress,
-		IpCountry:            text(p.IPCountry),
-		AccountCreatedAt:     timestamptz(p.AccountCreatedAt),
-		ClientOs:             text(p.ClientOS),
-		ClientBrowser:        text(p.ClientBrowser),
-		ScreenResolution:     text(p.ScreenResolution),
-	})
+	id, err := q.InsertPurchase(ctx, purchaseParams(p))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "purchases_transaction_id_key" {
@@ -234,6 +241,37 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 		return 0, fmt.Errorf("commit purchase %s: %w", p.TransactionID, err)
 	}
 	return id, nil
+}
+
+// The insert and the saved-score lookup bind the same purchase fields.
+func purchaseParams(p Purchase) db.InsertPurchaseParams {
+	return db.InsertPurchaseParams{
+		TransactionID:        p.TransactionID,
+		EventTime:            timestamptz(&p.EventTime),
+		AmountMinor:          p.AmountMinor,
+		PlayerID:             p.PlayerID,
+		CardToken:            p.CardToken,
+		CardIssuer:           text(p.CardIssuer),
+		CardNetwork:          text(p.CardNetwork),
+		CardType:             text(p.CardType),
+		CardCountry:          text(p.CardCountry),
+		CardCategory:         text(p.CardCategory),
+		ProductCode:          text(p.ProductCode),
+		BillingRegion:        text(p.BillingRegion),
+		BillingCountry:       text(p.BillingCountry),
+		BillingDistance:      float8(p.BillingDistance),
+		EmailDomain:          text(p.EmailDomain),
+		RecipientEmailDomain: text(p.RecipientEmailDomain),
+		DeviceType:           text(p.DeviceType),
+		DeviceName:           text(p.DeviceName),
+		DeviceID:             text(p.DeviceID),
+		IpAddress:            p.IPAddress,
+		IpCountry:            text(p.IPCountry),
+		AccountCreatedAt:     timestamptz(p.AccountCreatedAt),
+		ClientOs:             text(p.ClientOS),
+		ClientBrowser:        text(p.ClientBrowser),
+		ScreenResolution:     text(p.ScreenResolution),
+	}
 }
 
 const uniqueViolation = "23505"

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -15,7 +17,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
-func testTx(t *testing.T) pgx.Tx {
+func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -27,13 +29,58 @@ func testTx(t *testing.T) pgx.Tx {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	return pool
+}
 
+func testTx(t *testing.T) pgx.Tx {
+	t.Helper()
+	pool := testPool(t)
+	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
 	t.Cleanup(func() { tx.Rollback(ctx) })
 	return tx
+}
+
+func testIsolatedPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	ctx := t.Context()
+	pool := testPool(t)
+	schema := fmt.Sprintf("score_retries_%d", time.Now().UnixNano())
+	ident := pgx.Identifier{schema}.Sanitize()
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+ident); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA "+ident+" CASCADE"); err != nil {
+			t.Error(err)
+		}
+	})
+	config := pool.Config()
+	config.MaxConns = max(config.MaxConns, 3)
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	isolated, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(isolated.Close)
+
+	migrations, err := filepath.Glob("../../migrations/*.up.sql")
+	if err != nil || len(migrations) == 0 {
+		t.Fatalf("find migrations: %v, found %d", err, len(migrations))
+	}
+	for _, path := range migrations {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := isolated.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("apply %s: %v", path, err)
+		}
+	}
+	return isolated
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -48,10 +95,10 @@ func minimalPurchase(transactionID string) Purchase {
 	}
 }
 
-func countRows(t *testing.T, tx pgx.Tx, query string, args ...any) int {
+func countRows(t *testing.T, conn Conn, query string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := tx.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+	if err := conn.QueryRow(t.Context(), query, args...).Scan(&n); err != nil {
 		t.Fatalf("%s: %v", query, err)
 	}
 	return n
@@ -210,6 +257,13 @@ func TestSaveIsAtomic(t *testing.T) {
 	}
 	if n := countRows(t, tx, `SELECT count(*) FROM purchases WHERE transaction_id = 'txn-bad-version'`); n != 0 {
 		t.Errorf("purchase was saved without its decision")
+	}
+	p := minimalPurchase("txn-bad-version")
+	if _, err := store.Save(ctx, p, Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}); err != nil {
+		t.Fatalf("retry after rollback: %v", err)
+	}
+	if got, err := store.FindSavedDecision(ctx, p); err != nil || got == nil || got.Result.Outcome != scoring.OutcomeAllow {
+		t.Errorf("lookup after successful retry = %+v, %v", got, err)
 	}
 }
 
