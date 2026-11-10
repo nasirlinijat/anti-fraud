@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
@@ -53,6 +54,9 @@ func TestGeneratorKeepsPendingPurchasesAndHistoryBounded(t *testing.T) {
 			t.Fatalf("tracking %d cards, want %d regular cards", len(g.recent), cfg.Players)
 		}
 		for _, times := range g.recent {
+			if !slices.IsSortedFunc(times, time.Time.Compare) {
+				t.Fatalf("out-of-order card history: %v", times)
+			}
 			if len(times) > 0 && times[len(times)-1].Sub(times[0]) >= time.Hour {
 				t.Fatalf("retained a card's history across %v", times[len(times)-1].Sub(times[0]))
 			}

@@ -87,7 +87,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-start` | the last backfill purchase happens now | Backfill start in RFC 3339. The score API rejects event times more than 5 minutes in the future. Use only with a positive count |
 | `-count` | 500 | Number of purchases to send. Use 0 for live mode until Ctrl+C |
 | `-rate` | 20 | Purchases sent per second, 0 for as fast as possible |
-| `-suspicious` | 0.1 | Share of traffic events that start a suspicious pattern |
+| `-suspicious` | 0.1 | Share of events that start a special scenario, including legitimate edge cases and fraud. Use 0 for normal purchases only or 1 for special scenarios only |
 | `-players` | 300 | Number of regular players |
 | `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
@@ -95,16 +95,24 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Reusing a run prefix with the same seed and settings can return 409 for transaction IDs that were already scored.
 
-In backfill with the default ruleset, the patterns give these outcomes:
+Each special scenario is equally likely when an event starts one. Some scenarios generate several purchases, so the share of special purchases can differ from the share of special events.
 
-| Pattern | What happens | Outcome |
-|---|---|---|
-| `normal` | A regular player buys with their own card from their own country | allow |
-| `card_testing` | A new account tries 7 to 9 small purchases on one card from another country | allow, then block from the sixth purchase (velocity) |
-| `account_takeover` | An old account buys for a large amount from another country and a new device | review |
-| `new_account_spend` | An account created a few hours ago buys for a large amount | review |
+| Pattern | What happens |
+|---|---|
+| `normal` | A regular player buys with their own card from their own country |
+| `card_testing` | A new account tries 7 to 9 small purchases on one card from another country |
+| `account_takeover` | An established account is used for a large purchase from another country and a new device |
+| `new_account_spend` | An account created a few hours ago buys for a large amount |
+| `traveler` | A player uses their usual card and device while abroad |
+| `new_phone` | A player uses their usual card from home on a new phone |
+| `internet_cafe` | Two or three players use their own cards on the same public computer and connection |
+| `burst_buyer` | A player makes four to seven small purchases in quick succession |
+| `new_casual_player` | A player with a new account makes a small purchase from home |
+| `returning_player` | A player who was inactive before the run returns for an ordinary purchase |
+| `stolen_card` | A different player makes one purchase with a regular player's card |
+| `low_and_slow` | Fraud looks like one ordinary purchase from an older account and can pass the rules |
 
-The pattern is never sent to the API. It is only used for the summary.
+The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 
 ## Ruleset API
 

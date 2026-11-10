@@ -46,9 +46,15 @@ func TestLiveUsesSeededSequenceWithWallClockTimes(t *testing.T) {
 			t.Fatalf("account creation time changed for %s", req.PlayerID)
 		}
 		accounts[req.PlayerID] = *req.AccountCreatedAt
-		if want[calls].Pattern == simulator.PatternNormal || want[calls].Pattern == simulator.PatternAccountTakeover {
+		switch want[calls].Pattern {
+		case simulator.PatternCardTesting, simulator.PatternNewAccountSpend, simulator.PatternNewCasualPlayer:
+			age := req.EventTime.Sub(*req.AccountCreatedAt)
+			if age < 10*time.Minute || age > 13*time.Hour {
+				t.Fatalf("new account age %v is outside the live run's expected range", age)
+			}
+		default:
 			if !req.AccountCreatedAt.Equal(*expect.AccountCreatedAt) {
-				t.Fatalf("regular account was not anchored to the run start: %v, want %v", req.AccountCreatedAt, expect.AccountCreatedAt)
+				t.Fatalf("established account was not anchored to the run start: %v, want %v", req.AccountCreatedAt, expect.AccountCreatedAt)
 			}
 		}
 

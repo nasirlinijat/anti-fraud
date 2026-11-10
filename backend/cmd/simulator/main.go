@@ -30,7 +30,7 @@ func main() {
 	start := flag.String("start", "", "backfill start in RFC 3339 (default: the last purchase happens now)")
 	run := flag.String("run", "", "prefix of all generated IDs (default: seed and start for backfill, unique for live)")
 	flag.Uint64Var(&cfg.Seed, "seed", cfg.Seed, "random seed for the purchase sequence")
-	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of traffic events that are suspicious, from 0 to 1")
+	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of events that start a special scenario (legitimate or fraud), from 0 to 1")
 	flag.IntVar(&cfg.Players, "players", cfg.Players, "number of regular players")
 	flag.DurationVar(&cfg.MeanGap, "gap", cfg.MeanGap, "mean simulated time between traffic events")
 	flag.Parse()

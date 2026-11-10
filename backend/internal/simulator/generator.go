@@ -27,10 +27,24 @@ const (
 	// PatternNewAccountSpend is a large purchase from an account created a few
 	// hours earlier.
 	PatternNewAccountSpend Pattern = "new_account_spend"
+	PatternTraveler        Pattern = "traveler"
+	PatternNewPhone        Pattern = "new_phone"
+	PatternInternetCafe    Pattern = "internet_cafe"
+	PatternBurstBuyer      Pattern = "burst_buyer"
+	PatternNewCasualPlayer Pattern = "new_casual_player"
+	PatternReturningPlayer Pattern = "returning_player"
+	PatternStolenCard      Pattern = "stolen_card"
+	PatternLowAndSlow      Pattern = "low_and_slow"
 )
 
 // Patterns lists every pattern in a fixed order.
-var Patterns = []Pattern{PatternNormal, PatternCardTesting, PatternAccountTakeover, PatternNewAccountSpend}
+var Patterns = func() []Pattern {
+	patterns := []Pattern{PatternNormal}
+	for _, scenario := range specialScenarios {
+		patterns = append(patterns, scenario.pattern)
+	}
+	return patterns
+}()
 
 // Request is a score request in the API format.
 type Request struct {
@@ -74,7 +88,8 @@ type Config struct {
 	// Start is the event time of the first purchase.
 	Start time.Time
 	// SuspiciousShare is the share of traffic, from 0 to 1, that starts a
-	// suspicious pattern instead of a normal purchase.
+	// special scenario instead of a normal purchase. A scenario can generate
+	// more than one purchase.
 	SuspiciousShare float64
 	// Players is the number of regular players.
 	Players int
@@ -122,7 +137,7 @@ var (
 	desktops      = []string{"Windows", "MacOS", "Linux"}
 )
 
-// Card velocity at which the default ruleset fires. Normal players stay below it.
+// Normal purchases are paced so a small pool can still model casual shoppers.
 const normalCardUsesPerHour = 3
 
 type player struct {
@@ -263,17 +278,10 @@ func (g *generator) event(at time.Time) {
 		g.normal(at)
 		return
 	}
-	switch g.rng.IntN(3) {
-	case 0:
-		g.cardTesting(at)
-	case 1:
-		g.accountTakeover(at)
-	default:
-		g.newAccountSpend(at)
-	}
+	specialScenarios[g.rng.IntN(len(specialScenarios))].generate(g, at)
 }
 
-// normal buys with a regular player whose card is below the velocity limit.
+// normal buys with a regular player whose card is below the casual pacing cap.
 func (g *generator) normal(at time.Time) {
 	p := g.players[g.rng.IntN(len(g.players))]
 	for range len(g.players) {
@@ -285,15 +293,23 @@ func (g *generator) normal(at time.Time) {
 	if g.usesLastHour(p.card.token, at) >= normalCardUsesPerHour {
 		return
 	}
-	amount := g.amount(199, 9999)
+	g.add(PatternNormal, g.request(p, at, g.regularAmount()))
+}
+
+func (g *generator) regularAmount() int64 {
+	amount := g.ordinaryAmount()
 	if g.rng.Float64() < 0.03 {
-		amount = g.amount(50000, 80000)
+		return g.amount(50000, 80000)
 	}
-	g.add(PatternNormal, g.request(p, at, amount))
+	return amount
+}
+
+func (g *generator) ordinaryAmount() int64 {
+	return g.amount(199, 9999)
 }
 
 // cardTesting sends 7 to 9 small purchases on one new card a minute or two
-// apart. The first five pass the velocity rule; the rest exceed it.
+// apart.
 func (g *generator) cardTesting(at time.Time) {
 	p := g.newScenarioPlayer(at, g.minutes(30, 360))
 	ipCountry := g.otherCountry(p.card.country)
@@ -328,7 +344,8 @@ func (g *generator) newAccountSpend(at time.Time) {
 }
 
 func (g *generator) add(pattern Pattern, req Request) {
-	// Only regular players can use their card again in a later event.
+	// Only regular cards can be reused across events. Purchases scheduled
+	// ahead by a single event always use cards outside this history.
 	if _, tracked := g.recent[req.CardToken]; tracked {
 		g.usesLastHour(req.CardToken, req.EventTime)
 		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
