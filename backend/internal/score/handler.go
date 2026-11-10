@@ -125,6 +125,7 @@ type scoreResponse struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	var req scoreRequest
 	if status, resp := decode(w, r, &req); resp != nil {
 		platform.WriteJSON(w, status, resp)
@@ -211,6 +212,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelInputs:         modelInputs,
 		ModelScore:          modelScore,
 		ModelScoreUnblended: unblended,
+		Latency:             time.Since(started),
 		FeatureHistory:      history,
 	})
 	if errors.Is(err, ErrDuplicateTransaction) {

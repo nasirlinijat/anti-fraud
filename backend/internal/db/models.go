@@ -28,6 +28,7 @@ type Decision struct {
 	ModelScore          pgtype.Float8
 	DecidedAt           pgtype.Timestamptz
 	ModelScoreUnblended pgtype.Float8
+	ScoringLatencyUs    pgtype.Int8
 }
 
 type FeatureCount struct {

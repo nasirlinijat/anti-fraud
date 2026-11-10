@@ -37,10 +37,10 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended
+    model_score_unblended, scoring_latency_us
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8
+    $8, $9
 )
 `
 
@@ -53,6 +53,7 @@ type InsertDecisionParams struct {
 	ModelInputs         []byte
 	ModelScore          pgtype.Float8
 	ModelScoreUnblended pgtype.Float8
+	ScoringLatencyUs    pgtype.Int8
 }
 
 func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) error {
@@ -65,6 +66,7 @@ func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) 
 		arg.ModelInputs,
 		arg.ModelScore,
 		arg.ModelScoreUnblended,
+		arg.ScoringLatencyUs,
 	)
 	return err
 }
