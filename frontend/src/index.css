@@ -495,9 +495,33 @@ td {
   margin-block-start: 0.75rem;
 }
 
-.review-pages button[aria-disabled="true"] {
+.review-pages button[aria-disabled="true"],
+.review-actions button[aria-disabled="true"] {
   border-color: var(--border);
   background: var(--surface);
   color: var(--muted);
   cursor: default;
+}
+
+.review-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.review-confirmation {
+  max-inline-size: min(26rem, calc(100% - 3rem));
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.review-confirmation:modal,
+.review-confirmation::backdrop {
+  overscroll-behavior: contain;
+}
+
+.review-confirmation::backdrop {
+  overflow: hidden;
 }

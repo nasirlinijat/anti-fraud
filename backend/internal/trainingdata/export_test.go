@@ -33,7 +33,7 @@ func emptyTx(t *testing.T) pgx.Tx {
 		t.Fatalf("Begin: %v", err)
 	}
 	t.Cleanup(func() { tx.Rollback(ctx) })
-	for _, table := range []string{"decisions", "purchases", "feature_counts"} {
+	for _, table := range []string{"review_resolutions", "decisions", "purchases", "feature_counts"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("empty %s: %v", table, err)
 		}

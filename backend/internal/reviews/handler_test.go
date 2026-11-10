@@ -23,9 +23,26 @@ func (fn queueFunc) queue(ctx context.Context, limit int, after *queueCursor) ([
 	return fn(ctx, limit, after)
 }
 
-func requestQueue(store queueReader, target, key string) *httptest.ResponseRecorder {
+func (fn queueFunc) resolve(context.Context, int64, string, string) (resolution, error) {
+	panic("unexpected decision request")
+}
+
+const secondAnalystTestKey = "second-queue-test-key"
+const serviceTestKey = "service-test-key"
+
+func testAnalystKeys(t *testing.T) platform.AnalystKeys {
+	t.Helper()
+	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"first","key":"`+queueTestKey+`"},{"analyst_id":"second","key":"`+secondAnalystTestKey+`"}]`, serviceTestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
+func requestQueue(t *testing.T, store reviewStore, target, key string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, store, queueTestKey)
+	RegisterRoutes(mux, store, testAnalystKeys(t))
 	r := httptest.NewRequest(http.MethodGet, target, nil)
 	if key != "" {
 		r.Header.Set(platform.APIKeyHeader, key)
@@ -59,6 +76,7 @@ func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
 	}{
 		{"missing key", "/reviews", "", http.StatusUnauthorized},
 		{"wrong key", "/reviews?cursor=!", "wrong", http.StatusUnauthorized},
+		{"service key", "/reviews", serviceTestKey, http.StatusUnauthorized},
 		{"empty cursor", "/reviews?cursor=", queueTestKey, http.StatusBadRequest},
 		{"malformed cursor", "/reviews?cursor=!", queueTestKey, http.StatusBadRequest},
 		{"repeated cursor", "/reviews?cursor=a&cursor=b", queueTestKey, http.StatusBadRequest},
@@ -69,7 +87,7 @@ func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
 				t.Fatal("rejected request queried the store")
 				return nil, nil
 			})
-			w := requestQueue(store, tc.target, tc.key)
+			w := requestQueue(t, store, tc.target, tc.key)
 			if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("status = %d, headers = %v, body = %s", w.Code, w.Header(), w.Body)
 			}
@@ -102,7 +120,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 			},
 		}, nil
 	})
-	w := requestQueue(store, "/reviews", queueTestKey)
+	w := requestQueue(t, store, "/reviews", queueTestKey)
 	page := readQueuePage(t, w)
 	if len(page.Items) != 2 || page.NextCursor != nil {
 		t.Fatalf("unexpected page: %+v", page)
@@ -122,7 +140,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	}
 
 	cursor := encodeCursor(queueCursor{decidedAt: at, purchaseID: 9007199254740993})
-	w = requestQueue(store, "/reviews?cursor="+cursor, queueTestKey)
+	w = requestQueue(t, store, "/reviews?cursor="+cursor, queueTestKey)
 	readQueuePage(t, w)
 	if got := strings.TrimSpace(w.Body.String()); got != `{"items":[],"next_cursor":null}` {
 		t.Fatalf("empty page = %s", got)
@@ -133,7 +151,7 @@ func TestQueueHidesStoreErrors(t *testing.T) {
 	store := queueFunc(func(context.Context, int, *queueCursor) ([]QueueItem, error) {
 		return nil, errors.New("private database details")
 	})
-	w := requestQueue(store, "/reviews", queueTestKey)
+	w := requestQueue(t, store, "/reviews", queueTestKey)
 	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
 	}
@@ -156,7 +174,7 @@ func TestQueuePaginationAgainstPostgres(t *testing.T) {
 	store := NewStore(tx)
 	target := "/reviews"
 	for start := 0; start < len(want); start += pageSize {
-		page := readQueuePage(t, requestQueue(store, target, queueTestKey))
+		page := readQueuePage(t, requestQueue(t, store, target, queueTestKey))
 		count := min(pageSize, len(want)-start)
 		if len(page.Items) < count || len(page.Items) > pageSize {
 			t.Fatalf("page starting at %d returned %d rows, expected at least %d", start, len(page.Items), count)

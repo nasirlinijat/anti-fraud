@@ -21,15 +21,37 @@ type queueReader interface {
 	queue(context.Context, int, *queueCursor) ([]QueueItem, error)
 }
 
-// RegisterRoutes exposes the read-only review queue behind API key authentication.
-func RegisterRoutes(mux *http.ServeMux, store queueReader, apiKey string) {
-	authorized := platform.RequireAPIKey(apiKey, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+type reviewStore interface {
+	queueReader
+	resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error)
+}
+
+// RegisterRoutes exposes the review queue and its decisions to authenticated analysts.
+func RegisterRoutes(mux *http.ServeMux, store reviewStore, keys platform.AnalystKeys) {
+	mux.HandleFunc("GET /reviews", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
 		serveQueue(w, r, store)
 	}))
-	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /reviews/{purchase_id}/decision", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, analystID string) {
+		serveResolution(w, r, store, analystID)
+	}))
+}
+
+func requireAnalyst(keys platform.AnalystKeys, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		authorized.ServeHTTP(w, r)
-	})
+		if !keys.Configured() {
+			platform.WriteError(w, http.StatusServiceUnavailable, "review access is not configured")
+			return
+		}
+		headers := r.Header.Values(platform.APIKeyHeader)
+		if len(headers) == 1 {
+			if analystID := keys.Analyst(headers[0]); analystID != "" {
+				next(w, r, analystID)
+				return
+			}
+		}
+		platform.WriteError(w, http.StatusUnauthorized, "missing or invalid analyst key")
+	}
 }
 
 type reviewResponse struct {

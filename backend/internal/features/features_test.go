@@ -146,7 +146,7 @@ func testTx(t *testing.T) pgx.Tx {
 	t.Cleanup(func() { tx.Rollback(ctx) })
 
 	// Start from an empty history inside the transaction; the rollback restores it.
-	for _, table := range []string{"decisions", "purchases", "feature_counts"} {
+	for _, table := range []string{"review_resolutions", "decisions", "purchases", "feature_counts"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("empty %s: %v", table, err)
 		}

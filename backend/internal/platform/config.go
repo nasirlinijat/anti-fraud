@@ -14,7 +14,8 @@ type Config struct {
 	// ModelPath is the fraud model file. When it is empty, scoring uses rules only.
 	ModelPath string
 	// APIKey authenticates requests to the score endpoint.
-	APIKey string
+	APIKey      string
+	AnalystKeys AnalystKeys
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -35,5 +36,10 @@ func LoadConfig() (Config, error) {
 	if cfg.APIKey == "" {
 		return Config{}, fmt.Errorf("required environment variable API_KEY is not set")
 	}
+	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AnalystKeys = keys
 	return cfg, nil
 }

@@ -71,7 +71,10 @@ func (q *Queries) CountOutcomes(ctx context.Context, since pgtype.Timestamptz) (
 }
 
 const countReviewQueue = `-- name: CountReviewQueue :one
-SELECT count(*) FROM decisions WHERE outcome = 'review'
+SELECT count(*)
+FROM decisions d
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
 `
 
 // Counts the purchases waiting in the review queue.
