@@ -24,15 +24,40 @@ def flag_by_money(y, score, amount, review_cost):
     return float(ranked[best]), float(net[best])
 
 
-def choose_thresholds(y_val, score_val, review_rate, max_missed_fraud, amount_val=None, review_cost=None):
-    """Chooses flag_at by review rate (a share of legitimate purchases), or by
-    money when review_cost is set; clear_below keeps max_missed_fraud."""
-    if review_cost is None:
-        flag_at = float(np.quantile(score_val[y_val == 0], 1 - review_rate))
-        flag_by = "review_rate"
-    else:
+PRECISION_TARGETS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+
+def flag_by_precision(y, score, target):
+    """Returns the lowest flag threshold whose flagged purchases reach the
+    target precision. When no threshold reaches it, the threshold is above
+    every score."""
+    order = np.argsort(-score, kind="stable")
+    ranked = score[order]
+    precision = np.cumsum(y[order] == 1) / np.arange(1, len(ranked) + 1)
+    # A threshold flags every purchase with the same score, so only the last
+    # purchase of each score is a possible cut.
+    cut = np.r_[ranked[1:] != ranked[:-1], True]
+    reached = np.flatnonzero(cut & (precision >= target))
+    if len(reached) == 0:
+        return float(np.nextafter(ranked[0], np.inf))
+    return float(ranked[reached[-1]])
+
+
+def choose_thresholds(
+    y_val, score_val, review_rate, max_missed_fraud, amount_val=None, review_cost=None, target_precision=None
+):
+    """Chooses flag_at by review rate (a share of legitimate purchases), by
+    money when review_cost is set, or by validation precision when
+    target_precision is set; clear_below keeps max_missed_fraud."""
+    if target_precision is not None:
+        flag_at = flag_by_precision(y_val, score_val, target_precision)
+        flag_by = "precision"
+    elif review_cost is not None:
         flag_at, _ = flag_by_money(y_val, score_val, amount_val, review_cost)
         flag_by = "money"
+    else:
+        flag_at = float(np.quantile(score_val[y_val == 0], 1 - review_rate))
+        flag_by = "review_rate"
     clear_below = float(np.quantile(score_val[y_val == 1], max_missed_fraud))
     return {
         "flag_at": round(flag_at, 6),
@@ -40,8 +65,30 @@ def choose_thresholds(y_val, score_val, review_rate, max_missed_fraud, amount_va
         "flag_by": flag_by,
         "review_rate": review_rate,
         "review_cost": review_cost,
+        "target_precision": target_precision,
         "max_missed_fraud": max_missed_fraud,
     }
+
+
+def precision_targets(y_val, score_val, y_test, score_test, amount_test, targets=PRECISION_TARGETS):
+    """For each target precision, the flag threshold chosen on validation and
+    what it flags in the test month."""
+    rows = []
+    for target in targets:
+        flag_at = flag_by_precision(y_val, score_val, target)
+        flagged = score_test >= flag_at
+        fraud = y_test == 1
+        rows.append({
+            "target_precision": target,
+            "flag_at": round(flag_at, 6),
+            "test_flagged_share": round(float(flagged.mean()), 5),
+            "test_precision": round(float((flagged & fraud).sum() / max(int(flagged.sum()), 1)), 4),
+            "test_fraud_caught": round(float((flagged & fraud).sum() / max(int(fraud.sum()), 1)), 4),
+            "test_fraud_money_caught": round(
+                float(amount_test[flagged & fraud].sum()) / max(float(amount_test[fraud].sum()), 1e-9), 4
+            ),
+        })
+    return rows
 
 
 def policy_effect(y, score, thresholds, amount=None):

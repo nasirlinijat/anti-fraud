@@ -407,6 +407,7 @@
     "flag_by": "review_rate",
     "review_rate": 0.005,
     "review_cost": null,
+    "target_precision": null,
     "max_missed_fraud": 0.02,
     "validation_effect": {
       "flagged_fraud_money_caught": 0.2021,

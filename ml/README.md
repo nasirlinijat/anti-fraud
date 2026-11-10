@@ -45,6 +45,22 @@ Effect on the test month with model v4 (85,430 purchases, 2,994 frauds worth 457
 
 The default stays the review rate. Fraud is worth about 150 on average, so at any realistic review cost the money rule asks analysts to check thousands of purchases a month, far more than a review team can handle; the review rate keeps the queue at a size people can work through. The money view still shows the model's value: at the default the flagged frauds are larger than average (288 against 153), so 11.8% of the frauds carry 22.3% of the fraud money. Use `--review-cost` when the team's review cost and capacity are known.
 
+`--target-precision` sets `flag_at` by how many flags must be real fraud: it picks the lowest threshold whose flagged purchases on the validation month reach that precision, so the model catches as much fraud as it can at that precision. If no threshold reaches it, nothing is flagged. Every combined report has a `precision_targets` table with the threshold for each target and its effect on the test month.
+
+Effect on the test month with the combined v5 model (blended, 85,430 purchases):
+
+| Target precision | `flag_at` | Flagged per 10,000 purchases | Test precision | Fraud caught | Fraud money caught |
+|---|---|---|---|---|---|
+| 30% | 0.9789 | 347 | 29% | 29.1% | 35.7% |
+| 40% | 0.9895 | 160 | 40% | 18.1% | 24.4% |
+| 50% | 0.9943 | 89 | 43% | 11.0% | 17.0% |
+| 60% | 0.9988 | 25 | 60% | 4.3% | 8.3% |
+| 70% | 0.9994 | 15 | 64% | 2.8% | 6.1% |
+| 80% | 0.9997 | 8 | 76% | 1.8% | 4.1% |
+| 90% | 0.9999 | 4 | 95% | 1.2% | 2.7% |
+
+Higher precision costs a lot of caught fraud: at 90% almost every flag is fraud, but only about 1 fraud in 80 is flagged. Above about 50% the validation month has few flagged purchases, so the test precision can land a few points under the target. The default stays the 0.5% review rate (43% precision, 11.3% of fraud caught); with the `review` outcome a flag only sends a purchase to an analyst, so a lower precision costs review time, not blocked players.
+
 The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows. Change `--version` whenever the feature list changes, so the service never loads a model with the wrong inputs.
 
 ## Compare feature groups

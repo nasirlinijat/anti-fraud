@@ -238,12 +238,71 @@
       }
     ]
   },
+  "precision_targets": [
+    {
+      "target_precision": 0.3,
+      "flag_at": 0.978902,
+      "test_flagged_share": 0.03471,
+      "test_precision": 0.2941,
+      "test_fraud_caught": 0.2912,
+      "test_fraud_money_caught": 0.3566
+    },
+    {
+      "target_precision": 0.4,
+      "flag_at": 0.989501,
+      "test_flagged_share": 0.01599,
+      "test_precision": 0.3968,
+      "test_fraud_caught": 0.181,
+      "test_fraud_money_caught": 0.2435
+    },
+    {
+      "target_precision": 0.5,
+      "flag_at": 0.994301,
+      "test_flagged_share": 0.00893,
+      "test_precision": 0.4299,
+      "test_fraud_caught": 0.1096,
+      "test_fraud_money_caught": 0.1702
+    },
+    {
+      "target_precision": 0.6,
+      "flag_at": 0.9988,
+      "test_flagged_share": 0.00252,
+      "test_precision": 0.6047,
+      "test_fraud_caught": 0.0434,
+      "test_fraud_money_caught": 0.0831
+    },
+    {
+      "target_precision": 0.7,
+      "flag_at": 0.9994,
+      "test_flagged_share": 0.00153,
+      "test_precision": 0.6412,
+      "test_fraud_caught": 0.0281,
+      "test_fraud_money_caught": 0.0613
+    },
+    {
+      "target_precision": 0.8,
+      "flag_at": 0.9997,
+      "test_flagged_share": 0.00082,
+      "test_precision": 0.7571,
+      "test_fraud_caught": 0.0177,
+      "test_fraud_money_caught": 0.0413
+    },
+    {
+      "target_precision": 0.9,
+      "flag_at": 0.9999,
+      "test_flagged_share": 0.00044,
+      "test_precision": 0.9474,
+      "test_fraud_caught": 0.012,
+      "test_fraud_money_caught": 0.0271
+    }
+  ],
   "policy": {
     "flag_at": 0.994001,
     "clear_below": 0.391385,
     "flag_by": "review_rate",
     "review_rate": 0.005,
     "review_cost": null,
+    "target_precision": null,
     "max_missed_fraud": 0.02,
     "player_blend_weight": 0.5,
     "validation_effect": {
