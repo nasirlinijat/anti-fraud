@@ -119,6 +119,38 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+func TestDeviceCardCount(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		count int64
+		limit int64
+		want  string
+	}{
+		{"missing device", 0, 1, ""},
+		{"below limit", 4, 5, ""},
+		{"at limit", 5, 5, "Device used 5 distinct cards in 60 minutes (limit 5)"},
+		{"above limit", 6, 5, "Device used 6 distinct cards in 60 minutes (limit 5)"},
+		{"one card limit", 1, 1, "Device used 1 distinct card in 60 minutes (limit 1)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := Ruleset{
+				ReviewThreshold: 15, BlockThreshold: 80,
+				Rules: map[RuleName]RuleConfig{RuleDeviceCardCount: {Enabled: true, Weight: 17, Limit: tc.limit}},
+			}
+			want := Result{Outcome: OutcomeAllow}
+			if tc.want != "" {
+				want = Result{
+					Outcome: OutcomeReview, Score: 17,
+					FiredRules: []FiredRule{{Name: RuleDeviceCardCount, Points: 17, Message: tc.want}},
+				}
+			}
+			if got := Evaluate(Input{DeviceCardsLastHour: tc.count}, rs); !reflect.DeepEqual(got, want) {
+				t.Errorf("result = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestRuleNameKnown(t *testing.T) {
 	tests := []struct {
 		name RuleName
@@ -128,6 +160,7 @@ func TestRuleNameKnown(t *testing.T) {
 		{RuleCardVelocity, true},
 		{RuleNewAccount, true},
 		{RuleCountryMismatch, true},
+		{RuleDeviceCardCount, true},
 		{"high_ammount", false},
 		{"", false},
 	}

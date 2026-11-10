@@ -852,8 +852,9 @@ components:
         rules:
           type: object
           description: |
-            Settings keyed by `high_amount`, `card_velocity`, `new_account`, or
-            `country_mismatch`. An empty object disables all weighted rules.
+            Settings keyed by `high_amount`, `card_velocity`, `new_account`,
+            `country_mismatch`, or `device_card_count`. An omitted rule is
+            disabled. An empty object disables all weighted rules.
             Enabled rule weights must add up to at most 2147483647.
           additionalProperties:
             type: object
@@ -871,8 +872,10 @@ components:
                 minimum: 0
                 description: |
                   Amount in minor units for `high_amount`, earlier purchases in
-                  an hour for `card_velocity`, or account age in hours for
-                  `new_account`. Required except for `country_mismatch`.
+                  an hour for `card_velocity`, account age in hours for
+                  `new_account`, or distinct cards on one device in 60 minutes
+                  for `device_card_count`. The device card count limit must be
+                  at least 1. Required except for `country_mismatch`.
           example:
             high_amount: { enabled: true, weight: 30, limit: 50000 }
             card_velocity: { enabled: true, weight: 40, limit: 5 }
@@ -1106,13 +1109,15 @@ components:
       properties:
         name:
           type: string
-          enum: [high_amount, card_velocity, new_account, country_mismatch, blocklist]
+          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
             the last hour. new_account fires when the account is newer than
             its limit in hours. country_mismatch fires when the card country
-            differs from the IP country. blocklist is the entry of a purchase
+            differs from the IP country. device_card_count fires when the
+            device reaches the distinct-card limit in 60 minutes, including
+            the current card. blocklist is the entry of a purchase
             blocked because its card, device, player or IP address is on the
             blocklist. It adds no points.
           example: card_velocity

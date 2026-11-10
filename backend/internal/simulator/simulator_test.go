@@ -83,6 +83,10 @@ func (s *purchases) FeatureHistory(context.Context, features.Input) (features.Hi
 	return features.History{}, nil
 }
 
+func (s *purchases) DeviceCardsLastHour(context.Context, string, string, time.Time) (int64, error) {
+	return 0, errors.New("unexpected device history lookup")
+}
+
 func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time, string) (float64, int64, error) {
 	return 0, 0, nil
 }

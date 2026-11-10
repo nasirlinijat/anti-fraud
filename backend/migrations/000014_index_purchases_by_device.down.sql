@@ -1,0 +1,1 @@
+DROP INDEX purchases_device_event_time;

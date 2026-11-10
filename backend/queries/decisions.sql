@@ -84,6 +84,16 @@ WHERE card_token = sqlc.arg(card_token)
   AND event_time > sqlc.arg(event_time)::timestamptz - interval '1 hour'
   AND event_time <= sqlc.arg(event_time)::timestamptz;
 
+-- name: CountDeviceDistinctCardsLastHour :one
+-- Include the current card exactly once, even if it already appears in history.
+SELECT (count(DISTINCT card_token) + 1)::bigint AS card_count
+FROM purchases
+WHERE device_id IS NOT NULL
+  AND device_id = sqlc.arg(device_id)::text
+  AND event_time > sqlc.arg(event_time)::timestamptz - interval '1 hour'
+  AND event_time <= sqlc.arg(event_time)::timestamptz
+  AND card_token <> sqlc.arg(card_token)::text;
+
 -- name: PlayerEarlierModelScores :one
 -- Counts and sums the unblended model scores of the player's purchases that
 -- come before the given one in (event_time, transaction_id) order.

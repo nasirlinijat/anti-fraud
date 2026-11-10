@@ -319,6 +319,50 @@ func TestCardPurchasesLastHour(t *testing.T) {
 	}
 }
 
+func TestDeviceCardsLastHour(t *testing.T) {
+	tx := testTx(t)
+	store := NewStore(tx)
+	ctx := t.Context()
+	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	device := "device-count"
+	decision := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+	for i, row := range []struct {
+		device *string
+		card   string
+		offset time.Duration
+	}{
+		{&device, "outside", -time.Hour},
+		{&device, "earliest", -time.Hour + time.Microsecond},
+		{&device, "earliest", -time.Minute},
+		{&device, "same-time", 0},
+		{&device, "current", -time.Minute},
+		{&device, "future", time.Microsecond},
+		{ptr("other-device"), "other-card", -time.Minute},
+		{nil, "unknown-device-card", -time.Minute},
+	} {
+		purchase := minimalPurchase(fmt.Sprintf("device-count-%d", i))
+		purchase.DeviceID = row.device
+		purchase.CardToken = row.card
+		purchase.EventTime = at.Add(row.offset)
+		if _, err := store.Save(ctx, purchase, decision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		device string
+		card   string
+		want   int64
+	}{
+		{device, "current", 3},
+		{device, "new-card", 4},
+		{"unused-device", "new-card", 1},
+	} {
+		if got, err := store.DeviceCardsLastHour(ctx, tc.device, tc.card, at); err != nil || got != tc.want {
+			t.Errorf("count for %s and %s = %d, %v, want %d", tc.device, tc.card, got, err, tc.want)
+		}
+	}
+}
+
 func TestNoFraudLabelColumns(t *testing.T) {
 	tx := testTx(t)
 	n := countRows(t, tx, `
