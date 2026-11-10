@@ -19,10 +19,10 @@ RETURNING id;
 -- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended
+    model_score_unblended, scoring_latency_us
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8
+    $8, $9
 );
 
 -- name: ListReviewQueue :many

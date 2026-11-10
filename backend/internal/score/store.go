@@ -59,6 +59,9 @@ type Decision struct {
 	// ModelScoreUnblended is the main model's own score, before blending and
 	// before combining with other models.
 	ModelScoreUnblended *float64
+	// Latency is how long scoring took, from the start of the request until
+	// the decision was ready to save. It is saved in microseconds.
+	Latency time.Duration
 	// FeatureHistory is the history the model inputs were computed from. Save
 	// uses it to add the purchase to the feature running totals.
 	FeatureHistory features.History
@@ -214,6 +217,7 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 		ModelInputs:         inputsJSON,
 		ModelScore:          float8(d.ModelScore),
 		ModelScoreUnblended: float8(d.ModelScoreUnblended),
+		ScoringLatencyUs:    pgtype.Int8{Int64: d.Latency.Microseconds(), Valid: true},
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)
