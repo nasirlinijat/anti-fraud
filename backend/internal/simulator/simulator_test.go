@@ -2,6 +2,7 @@ package simulator_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -46,9 +47,10 @@ func (noBlocklist) Match(context.Context, blocklist.Subject) (blocklist.Entry, b
 // purchases keeps saved purchases in memory and counts card uses like
 // CountCardPurchasesLastHour.
 type purchases struct {
-	mu    sync.Mutex
-	saved []score.Purchase
-	ids   map[string]bool
+	mu        sync.Mutex
+	saved     []score.Purchase
+	decisions []score.Decision
+	ids       map[string]bool
 }
 
 func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
@@ -71,7 +73,7 @@ func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time,
 	return 0, 0, nil
 }
 
-func (s *purchases) Save(_ context.Context, p score.Purchase, _ score.Decision) (int64, error) {
+func (s *purchases) Save(_ context.Context, p score.Purchase, d score.Decision) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ids[p.TransactionID] {
@@ -79,6 +81,7 @@ func (s *purchases) Save(_ context.Context, p score.Purchase, _ score.Decision) 
 	}
 	s.ids[p.TransactionID] = true
 	s.saved = append(s.saved, p)
+	s.decisions = append(s.decisions, d)
 	return int64(len(s.saved)), nil
 }
 
@@ -185,9 +188,16 @@ func TestGenerateHonoursSuspiciousShare(t *testing.T) {
 	}
 
 	cfg.SuspiciousShare = 1
+	seen := make(map[simulator.Pattern]bool)
 	for _, p := range generate(t, cfg, 300) {
 		if p.Pattern == simulator.PatternNormal {
 			t.Fatal("got a normal purchase with suspicious share 1")
+		}
+		seen[p.Pattern] = true
+	}
+	for _, pattern := range simulator.Patterns[1:] {
+		if !seen[pattern] {
+			t.Errorf("missing special scenario %s with suspicious share 1", pattern)
 		}
 	}
 }
@@ -216,13 +226,20 @@ func TestGenerateRejectsBadConfig(t *testing.T) {
 	}
 }
 
-// TestPatternsGetExpectedOutcomes sends the traffic through the real score
-// handler with the default ruleset.
-func TestPatternsGetExpectedOutcomes(t *testing.T) {
+func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 	srv, store := newServer(t)
 	cfg := simulator.DefaultConfig()
 	cfg.SuspiciousShare = 0.2
 	traffic := generate(t, cfg, 2000)
+	for _, p := range traffic {
+		body, err := json.Marshal(p.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), string(p.Pattern)) {
+			t.Fatalf("request includes simulator pattern %s: %s", p.Pattern, body)
+		}
+	}
 
 	client := &simulator.Client{BaseURL: srv.URL, APIKey: testKey, HTTP: srv.Client()}
 	sum, err := simulator.Run(context.Background(), client, traffic, 0, func(err error) { t.Error(err) })
@@ -236,38 +253,48 @@ func TestPatternsGetExpectedOutcomes(t *testing.T) {
 		t.Fatalf("saved %d purchases, want %d", len(store.saved), len(traffic))
 	}
 
-	want := map[simulator.Pattern][]string{
-		simulator.PatternNormal:          {"allow"},
-		simulator.PatternCardTesting:     {"allow", "block"},
-		simulator.PatternAccountTakeover: {"review"},
-		simulator.PatternNewAccountSpend: {"review"},
+	want := make(map[simulator.Pattern]map[string]int)
+	cardTestingUses := make(map[string]int)
+	for i, p := range traffic {
+		if store.saved[i].TransactionID != p.Request.TransactionID {
+			t.Fatalf("stored purchase %s out of order, want %s", store.saved[i].TransactionID, p.Request.TransactionID)
+		}
+		result := store.decisions[i].Result
+		if want[p.Pattern] == nil {
+			want[p.Pattern] = make(map[string]int)
+		}
+		want[p.Pattern][string(result.Outcome)]++
+		switch p.Pattern {
+		case simulator.PatternLowAndSlow:
+			if result.Outcome != scoring.OutcomeAllow || len(result.FiredRules) != 0 {
+				t.Errorf("low and slow should pass without firing a rule, got %+v", result)
+			}
+		case simulator.PatternCardTesting:
+			cardTestingUses[p.Request.CardToken]++
+			expected := scoring.OutcomeAllow
+			if cardTestingUses[p.Request.CardToken] >= 6 {
+				expected = scoring.OutcomeBlock
+			}
+			if result.Outcome != expected {
+				t.Errorf("card testing use %d: got %s, want %s", cardTestingUses[p.Request.CardToken], result.Outcome, expected)
+			}
+		}
+	}
+	if len(simulator.Patterns) != 12 || len(want) != 12 {
+		t.Fatalf("expected all 12 patterns, got registry %v and outcomes %v", simulator.Patterns, want)
 	}
 	for _, pattern := range simulator.Patterns {
-		outcomes := sum.Outcomes[pattern]
-		if len(outcomes) == 0 {
-			t.Errorf("pattern %s was not sent", pattern)
-			continue
+		if len(want[pattern]) == 0 {
+			t.Errorf("missing pattern %s", pattern)
 		}
-		total := 0
-		for _, outcome := range want[pattern] {
-			if outcomes[outcome] == 0 {
-				t.Errorf("pattern %s has no %s outcome: %v", pattern, outcome, outcomes)
-			}
-			total += outcomes[outcome]
-		}
-		if all := count(outcomes); total != all {
-			t.Errorf("pattern %s has unexpected outcomes: %v, want only %v", pattern, outcomes, want[pattern])
-		}
+	}
+	if want[simulator.PatternCardTesting]["block"] == 0 {
+		t.Error("mixed run did not complete a card-testing burst through its block phase")
+	}
+	if !reflect.DeepEqual(sum.Outcomes, want) {
+		t.Errorf("summary outcomes %v, want %v", sum.Outcomes, want)
 	}
 	t.Logf("outcomes: %v", sum.Outcomes)
-}
-
-func count(outcomes map[string]int) int {
-	n := 0
-	for _, v := range outcomes {
-		n += v
-	}
-	return n
 }
 
 func TestRunReportsFailures(t *testing.T) {
