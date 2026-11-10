@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { checkReadiness } from './api'
 import BlocklistPage from './pages/BlocklistPage'
 import DashboardPage from './pages/DashboardPage'
 import ReviewQueue from './ReviewQueue'
 import RulesetPage from './pages/RulesetPage'
 import TesterPage from './pages/TesterPage'
+import { usePolling } from './usePolling'
 
 type Status = 'checking' | 'ready' | 'unavailable'
 
@@ -25,11 +27,10 @@ function App() {
   const [status, setStatus] = useState<Status>('checking')
   const [path, setPath] = useState(currentPath)
 
-  useEffect(() => {
-    fetch('/ready')
-      .then((res) => setStatus(res.ok ? 'ready' : 'unavailable'))
-      .catch(() => setStatus('unavailable'))
-  }, [])
+  usePolling(checkReadiness, {
+    onSuccess: () => setStatus('ready'),
+    onError: () => setStatus('unavailable'),
+  })
 
   useEffect(() => {
     const onHashChange = () => setPath(currentPath())

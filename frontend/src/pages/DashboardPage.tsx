@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useState } from 'react'
 import { getStats, periods, type Period, type Stats } from '../api'
+import { usePolling } from '../usePolling'
 
 const DecisionChart = lazy(() => import('./DecisionChart'))
 
@@ -32,31 +33,15 @@ function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Poll every few seconds. A failed refresh keeps the last data on screen.
-  useEffect(() => {
-    const controller = new AbortController()
-    let pending = false
-    const load = () => {
-      if (pending) return
-      pending = true
-      void getStats(period, controller.signal)
-        .then((s) => {
-          if (controller.signal.aborted) return
-          setStats(s)
-          setError(null)
-        })
-        .catch((e: unknown) => {
-          if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'The statistics cannot be loaded.')
-        })
-        .finally(() => { pending = false })
-    }
-    load()
-    const timer = window.setInterval(load, REFRESH_MS)
-    return () => {
-      controller.abort()
-      window.clearInterval(timer)
-    }
-  }, [period])
+  const load = useCallback((signal: AbortSignal) => getStats(period, signal), [period])
+  const { stop } = usePolling(load, {
+    intervalMs: REFRESH_MS,
+    onSuccess: (result) => {
+      setStats(result)
+      setError(null)
+    },
+    onError: (error) => setError(error instanceof Error ? error.message : 'The statistics cannot be loaded.'),
+  })
 
   const shown = stats?.period === period ? stats : null
   const outcomes = shown?.outcomes
@@ -70,6 +55,7 @@ function DashboardPage() {
           {periods.map((p) => (
             <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => {
               if (p !== period) {
+                stop()
                 setError(null)
                 setPeriod(p)
               }
