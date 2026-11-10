@@ -1,6 +1,10 @@
 import { lazy, Suspense, useCallback, useState } from 'react'
 import { getStats, periods, type Period, type Stats } from '../api'
+import { OutcomeBadge, TimeDisplayToggle, Timestamp } from '../Display'
+import { formatUsdMinor } from '../displayFormat'
 import { usePolling } from '../usePolling'
+import { useTimeDisplay } from '../useTimeDisplay'
+import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
 const DecisionChart = lazy(() => import('./DecisionChart'))
 
@@ -32,6 +36,7 @@ function DashboardPage() {
   const [period, setPeriod] = useState<Period>('24h')
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const time = useTimeDisplay()
 
   const load = useCallback((signal: AbortSignal) => getStats(period, signal), [period])
   const { stop } = usePolling(load, {
@@ -65,13 +70,18 @@ function DashboardPage() {
           ))}
         </div>
       </div>
-      <p className="muted small" aria-live="polite">
-        {error
-          ? `${error} Retrying every ${REFRESH_MS / 1000} seconds.`
-          : shown
-            ? `${period === 'all' ? 'All decisions' : `Decisions made in the last ${periodNames[period]}`}. Updated ${new Date(shown.generated_at).toLocaleTimeString()}, refreshes every ${REFRESH_MS / 1000} seconds.`
-            : 'Loading…'}
-      </p>
+      {error && <ErrorState polite>{error} Retrying every {REFRESH_MS / 1000} seconds.</ErrorState>}
+      {!shown && !error && <LoadingSkeleton label="Loading dashboard…" />}
+      {shown && (
+        <div className="dashboard-update">
+          <p className="muted small">
+            {period === 'all' ? 'All decisions' : `Decisions made in the last ${periodNames[period]}`}.
+            {' Updated '}<Timestamp value={shown.generated_at} display={time} />,
+            refreshes every {REFRESH_MS / 1000} seconds.
+          </p>
+          <TimeDisplayToggle display={time} />
+        </div>
+      )}
 
       {outcomes && (
         <>
@@ -81,17 +91,17 @@ function DashboardPage() {
               <span className="tile-value">{number.format(outcomes.total)}</span>
             </div>
             <div className="tile tile-allow">
-              <span className="tile-label">Allowed</span>
+              <span className="tile-label"><OutcomeBadge outcome="allow" /></span>
               <span className="tile-value">{number.format(outcomes.allow)}</span>
               <span className="tile-note">{share(outcomes.allow, outcomes.total)}</span>
             </div>
             <div className="tile tile-review">
-              <span className="tile-label">Sent to review</span>
+              <span className="tile-label"><OutcomeBadge outcome="review" /></span>
               <span className="tile-value">{number.format(outcomes.review)}</span>
               <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
             </div>
             <div className="tile tile-block">
-              <span className="tile-label">Blocked</span>
+              <span className="tile-label"><OutcomeBadge outcome="block" /></span>
               <span className="tile-value">{number.format(outcomes.block)}</span>
               <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
             </div>
@@ -102,10 +112,8 @@ function DashboardPage() {
               </span>
             </div>
             <div className="tile">
-              <span className="tile-label">Blocked value (minor units)</span>
-              <span className="tile-value tile-money">
-                {shown.blocked_value_minor == null ? '–' : number.format(BigInt(shown.blocked_value_minor))}
-              </span>
+              <span className="tile-label">Blocked value (USD)</span>
+              <span className="tile-value tile-money">{formatUsdMinor(shown.blocked_value_minor)}</span>
             </div>
             <div className="tile">
               <span className="tile-label">Review queue now</span>
@@ -115,7 +123,7 @@ function DashboardPage() {
           </div>
 
           {shown.decision_series?.buckets.length > 0 && (
-            <Suspense fallback={<p className="muted">Loading decisions over time…</p>}>
+            <Suspense fallback={<LoadingSkeleton label="Loading decisions over time…" />}>
               <DecisionChart series={shown.decision_series} since={shown.since} until={shown.generated_at} />
             </Suspense>
           )}
@@ -124,7 +132,7 @@ function DashboardPage() {
             <section className="panel">
               <h3>Most fired rules</h3>
               {shown.top_rules.length === 0 ? (
-                <p className="muted">No rule fired in this period.</p>
+                <EmptyState>No rule fired in this period.</EmptyState>
               ) : (
                 <ul className="bars">
                   {shown.top_rules.map((rule) => (
@@ -148,7 +156,7 @@ function DashboardPage() {
             <section className="panel">
               <h3>Fraud model</h3>
               {shown.model.scored === 0 ? (
-                <p className="muted">No decision in this period has a model score. The backend may run with rules only.</p>
+                <EmptyState>No decision in this period has a model score. The backend may run with rules only.</EmptyState>
               ) : (
                 <dl className="facts">
                   <dt>Scored by the model</dt>
@@ -168,10 +176,10 @@ function DashboardPage() {
           </div>
 
           {outcomes.total === 0 && (
-            <p className="muted">
+            <EmptyState>
               No decisions in this period yet. Send purchases from the Tester page, or run the simulator with{' '}
               <code>make simulate</code>.
-            </p>
+            </EmptyState>
           )}
         </>
       )}

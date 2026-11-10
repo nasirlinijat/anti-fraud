@@ -1,5 +1,6 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DecisionSeries } from '../api'
+import { outcomeLabels } from '../displayFormat'
 
 const utcTime = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const utcDay = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' })
@@ -48,9 +49,9 @@ export default function DecisionChart({ series, since, until }: { series: Decisi
               cursor={{ fill: 'var(--border)', opacity: 0.45 }}
             />
             <Legend itemSorter={null} formatter={(value: string) => <span className="decision-legend-label">{value}</span>} />
-            <Bar dataKey="allow" name="Allowed" stackId="outcomes" fill="var(--allow)" isAnimationActive={false} />
-            <Bar dataKey="review" name="Sent to review" stackId="outcomes" fill="var(--review)" isAnimationActive={false} />
-            <Bar dataKey="block" name="Blocked" stackId="outcomes" fill="var(--block)" isAnimationActive={false} />
+            <Bar dataKey="allow" name={outcomeLabels.allow} stackId="outcomes" fill="var(--allow)" isAnimationActive={false} />
+            <Bar dataKey="review" name={outcomeLabels.review} stackId="outcomes" fill="var(--review)" isAnimationActive={false} />
+            <Bar dataKey="block" name={outcomeLabels.block} stackId="outcomes" fill="var(--block)" isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </figure>
@@ -60,7 +61,12 @@ export default function DecisionChart({ series, since, until }: { series: Decisi
           <table>
             <caption>Decision counts by time (UTC)</caption>
             <thead>
-              <tr><th scope="col">Time bucket</th><th scope="col">Allowed</th><th scope="col">Sent to review</th><th scope="col">Blocked</th></tr>
+              <tr>
+                <th scope="col">Time bucket</th>
+                <th scope="col">{outcomeLabels.allow}</th>
+                <th scope="col">{outcomeLabels.review}</th>
+                <th scope="col">{outcomeLabels.block}</th>
+              </tr>
             </thead>
             <tbody>
               {series.buckets.map((bucket) => (

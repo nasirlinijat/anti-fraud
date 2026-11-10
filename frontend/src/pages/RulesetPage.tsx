@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react'
 import { getActiveRuleset, publishRuleset, type ErrorResponse, type Ruleset, type RulesetConfig } from '../api'
 import { usePolling } from '../usePolling'
+import { ErrorState, LoadingSkeleton } from '../ViewState'
 
 const ruleDetails = [
   { name: 'high_amount', label: 'High amount', limit: 'Minimum amount (minor units)' },
@@ -220,12 +221,9 @@ function RulesetPage() {
       <h2>Rulesets</h2>
       <p className="muted">Publish a new ruleset to change how future purchases are scored.</p>
       {active && <RulesetForm initial={active} />}
-      {!active && !loadError && <p role="status">Loading the active ruleset…</p>}
+      {!active && !loadError && <LoadingSkeleton label="Loading the active ruleset…" />}
       {loadError && (
-        <>
-          <p className="alert" role="alert">{loadError}</p>
-          <button type="button" className="secondary" onClick={() => { setLoadError(''); refresh() }}>Retry</button>
-        </>
+        <ErrorState onRetry={() => { setLoadError(''); refresh() }}>{loadError}</ErrorState>
       )}
     </section>
   )

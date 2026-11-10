@@ -1,5 +1,7 @@
 import { type FormEvent, useState } from 'react'
 import { score, type ErrorResponse, type ScoreResponse } from '../api'
+import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge } from '../Display'
+import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
 type Kind = 'text' | 'integer' | 'number' | 'time'
 
@@ -252,11 +254,13 @@ function TesterPage() {
         </form>
       </section>
 
-      <section className="result" aria-live="polite">
+      <section className="result">
         <h2>Result</h2>
-        {!result && !error && <p className="muted">Send a purchase to see its decision.</p>}
+        {!result && !error && (sending
+          ? <LoadingSkeleton label="Scoring purchase…" />
+          : <EmptyState>Send a purchase to see its decision.</EmptyState>)}
         {error && (
-          <div className="alert" role="alert">
+          <ErrorState>
             <strong>{error.error}</strong>
             {Object.keys(fieldErrors).length > 0 && (
               <ul>
@@ -267,9 +271,9 @@ function TesterPage() {
                 ))}
               </ul>
             )}
-          </div>
+          </ErrorState>
         )}
-        {result && <ResultView result={result} />}
+        <div aria-live="polite">{result && <ResultView result={result} />}</div>
       </section>
     </div>
   )
@@ -278,12 +282,12 @@ function TesterPage() {
 function ResultView({ result }: { result: ScoreResponse }) {
   return (
     <div>
-      <p className={`outcome outcome-${result.outcome}`}>{result.outcome}</p>
+      <p className="result-outcome"><OutcomeBadge outcome={result.outcome} /></p>
       <dl className="facts">
         <dt>Rule score</dt>
-        <dd>{result.score}</dd>
-        <dt>Model score</dt>
-        <dd>{result.model_score === null ? 'no model, rules only' : result.model_score.toFixed(4)}</dd>
+        <dd><RuleScoreBadge value={result.score} /></dd>
+        <dt>Model risk</dt>
+        <dd><ModelRiskBadge value={result.model_score} /></dd>
         <dt>Model version</dt>
         <dd>{result.model_version ?? 'none'}</dd>
         <dt>Ruleset</dt>
@@ -295,7 +299,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
       </dl>
       <h3>Fired rules</h3>
       {result.fired_rules.length === 0 ? (
-        <p className="muted">No rule fired.</p>
+        <EmptyState>No rule fired.</EmptyState>
       ) : (
         <table>
           <thead>

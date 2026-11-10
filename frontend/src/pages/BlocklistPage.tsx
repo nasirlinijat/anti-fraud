@@ -8,7 +8,10 @@ import {
   type EntryType,
   type ErrorResponse,
 } from '../api'
+import { TimeDisplayToggle, Timestamp } from '../Display'
 import { usePolling } from '../usePolling'
+import { useTimeDisplay } from '../useTimeDisplay'
+import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
 const typeNames: Record<EntryType, string> = {
   card: 'Card token',
@@ -34,6 +37,7 @@ function BlocklistPage() {
   const [formError, setFormError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
+  const time = useTimeDisplay()
 
   const { refresh } = usePolling(listBlocklist, {
     onSuccess: (list) => {
@@ -148,12 +152,10 @@ function BlocklistPage() {
 
       <section>
         <h3>Entries{entries ? ` (${entries.length})` : ''}</h3>
-        {loadError && (
-          <div className="alert" role="alert">
-            {loadError}
-          </div>
-        )}
-        {entries && entries.length === 0 && <p className="muted">The blocklist is empty.</p>}
+        {loadError && <ErrorState>{loadError}</ErrorState>}
+        {!entries && !loadError && <LoadingSkeleton label="Loading blocklist…" />}
+        {entries && entries.length === 0 && <EmptyState>The blocklist is empty.</EmptyState>}
+        {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
         {entries && entries.length > 0 && (
           <table>
             <thead>
@@ -175,7 +177,7 @@ function BlocklistPage() {
                     <code>{entry.value}</code>
                   </td>
                   <td>{entry.reason}</td>
-                  <td className="muted small">{new Date(entry.created_at).toLocaleString()}</td>
+                  <td className="muted small"><Timestamp value={entry.created_at} display={time} /></td>
                   <td className="num">
                     <button
                       type="button"
