@@ -140,3 +140,28 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		t.Errorf("seed weight = %d, error = %v, want 30", oldWeight, err)
 	}
 }
+
+func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, "test-key")
+	for _, tc := range []struct {
+		name  string
+		rules string
+		field string
+	}{
+		{"missing limit", `"device_card_count":{"enabled":true,"weight":20}`, "rules.device_card_count.limit"},
+		{"zero limit", `"device_card_count":{"enabled":true,"weight":20,"limit":0}`, "rules.device_card_count.limit"},
+		{"negative limit", `"device_card_count":{"enabled":false,"weight":20,"limit":-1}`, "rules.device_card_count.limit"},
+		{"negative weight", `"device_card_count":{"enabled":true,"weight":-1,"limit":5}`, "rules.device_card_count.weight"},
+		{"total weight overflow", `"device_card_count":{"enabled":true,"weight":2147483647,"limit":5},"high_amount":{"enabled":true,"weight":1,"limit":1000}`, "rules"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{%s}}`, tc.rules)
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
+			var got platform.ErrorResponse
+			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Fields[tc.field] == "" {
+				t.Errorf("status = %d, body = %s, want 400 with %s", rec.Code, rec.Body, tc.field)
+			}
+		})
+	}
+}

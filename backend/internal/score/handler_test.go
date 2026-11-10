@@ -44,20 +44,22 @@ type fakeRulesets struct {
 func (f fakeRulesets) Active(context.Context) (scoring.Ruleset, error) { return f.rs, f.err }
 
 type fakePurchases struct {
-	find         func(Purchase) (*Decision, error)
-	findCalls    int
-	cardUses     int
-	countErr     error
-	historyErr   error
-	earlierSum   float64
-	earlierCount int64
-	earlierErr   error
-	history      features.History
-	saveErr      error
-	countCard    string
-	countAt      time.Time
-	saved        []Purchase
-	decisions    []Decision
+	find             func(Purchase) (*Decision, error)
+	findCalls        int
+	cardUses         int
+	countErr         error
+	deviceCardsErr   error
+	deviceCardsCalls int
+	historyErr       error
+	earlierSum       float64
+	earlierCount     int64
+	earlierErr       error
+	history          features.History
+	saveErr          error
+	countCard        string
+	countAt          time.Time
+	saved            []Purchase
+	decisions        []Decision
 }
 
 func (f *fakePurchases) FindSavedDecision(_ context.Context, p Purchase) (*Decision, error) {
@@ -71,6 +73,11 @@ func (f *fakePurchases) FindSavedDecision(_ context.Context, p Purchase) (*Decis
 func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
 	f.countCard, f.countAt = card, at
 	return f.cardUses, f.countErr
+}
+
+func (f *fakePurchases) DeviceCardsLastHour(context.Context, string, string, time.Time) (int64, error) {
+	f.deviceCardsCalls++
+	return 0, f.deviceCardsErr
 }
 
 func (f *fakePurchases) FeatureHistory(context.Context, features.Input) (features.History, error) {
@@ -549,6 +556,40 @@ func TestScoreContinuesToRulesOnBlocklistMiss(t *testing.T) {
 	}
 }
 
+func TestScoreDeviceHistoryLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		rule       *scoring.RuleConfig
+		body       string
+		blocked    bool
+		wantCalls  int
+		wantStatus int
+	}{
+		{"omitted rule", nil, blocklistBody, false, 0, http.StatusOK},
+		{"disabled rule", &scoring.RuleConfig{Limit: 5}, blocklistBody, false, 0, http.StatusOK},
+		{"missing device", &scoring.RuleConfig{Enabled: true, Limit: 5}, minimalBody, false, 0, http.StatusOK},
+		{"blocklist match", &scoring.RuleConfig{Enabled: true, Limit: 5}, blocklistBody, true, 0, http.StatusOK},
+		{"lookup error", &scoring.RuleConfig{Enabled: true, Limit: 5}, blocklistBody, false, 1, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := scoring.Ruleset{Version: 7, ReviewThreshold: 50, BlockThreshold: 80}
+			if tc.rule != nil {
+				rs.Rules = map[scoring.RuleName]scoring.RuleConfig{scoring.RuleDeviceCardCount: *tc.rule}
+			}
+			store := &fakePurchases{deviceCardsErr: errors.New("device history unavailable")}
+			bl := &fakeBlocklist{matched: tc.blocked, entry: blocklist.Entry{Type: blocklist.TypeCard}}
+			rec := serveWith(t, fakeRulesets{rs: rs}, bl, store, testKey, tc.body)
+			if rec.Code != tc.wantStatus || store.deviceCardsCalls != tc.wantCalls {
+				t.Errorf("status = %d, device history calls = %d, want %d and %d: %s",
+					rec.Code, store.deviceCardsCalls, tc.wantStatus, tc.wantCalls, rec.Body)
+			}
+			if tc.wantStatus == http.StatusInternalServerError && len(store.saved) != 0 {
+				t.Error("purchase saved after a device history lookup failure")
+			}
+		})
+	}
+}
+
 func TestScoreBlocklistError(t *testing.T) {
 	purchases := &fakePurchases{}
 	bl := &fakeBlocklist{err: errors.New("database is down")}
@@ -648,6 +689,101 @@ func TestScoreWithPostgres(t *testing.T) {
 	}
 	if modelVersion != nil || got.ModelVersion != nil {
 		t.Errorf("model version = %v saved, %v returned; want none without a model", modelVersion, got.ModelVersion)
+	}
+}
+
+type deviceHistoryStore struct {
+	*Store
+	calls int
+}
+
+func (s *deviceHistoryStore) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error) {
+	s.calls++
+	return s.Store.DeviceCardsLastHour(ctx, deviceID, cardToken, at)
+}
+
+func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
+	tx := testTx(t)
+	ctx := t.Context()
+	rulesetStore := rulesets.NewStore(tx)
+	purchaseStore := &deviceHistoryStore{Store: NewStore(tx)}
+	mux := http.NewServeMux()
+	rulesets.RegisterRoutes(mux, rulesetStore, testKey)
+	RegisterRoutes(mux, NewHandler(rulesetStore, blocklist.NewStore(tx), purchaseStore), testKey)
+
+	originalRuleset, err := rulesetStore.Active(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := func(n int) string {
+		return fmt.Sprintf(`{"transaction_id":"device-score-%d","card_token":"device-card-%d",
+			"device_id":"device-score","player_id":"device-player","amount_minor":1000,
+			"event_time":"2026-11-08T10:00:00Z"}`, n, n)
+	}
+	first := postScore(ctx, mux, testKey, body(1))
+	original := decodeJSON[scoreResponse](t, first)
+	if first.Code != http.StatusOK || original.Outcome != scoring.OutcomeAllow || original.Score != 0 ||
+		original.RulesetVersion != originalRuleset.Version || purchaseStore.calls != 0 {
+		t.Fatalf("score before publishing: %d %s, history calls = %d", first.Code, first.Body, purchaseStore.calls)
+	}
+
+	publish := httptest.NewRequestWithContext(ctx, http.MethodPost, "/rulesets", strings.NewReader(`{
+		"review_threshold":20,"block_threshold":80,
+		"rules":{"device_card_count":{"enabled":true,"weight":20,"limit":5}}
+	}`))
+	publish.Header.Set(platform.APIKeyHeader, testKey)
+	published := httptest.NewRecorder()
+	mux.ServeHTTP(published, publish)
+	if published.Code != http.StatusCreated {
+		t.Fatalf("publish: %d %s", published.Code, published.Body)
+	}
+	active, err := rulesetStore.Active(ctx)
+	wantConfig := scoring.RuleConfig{Enabled: true, Weight: 20, Limit: 5}
+	if err != nil || active.Version <= originalRuleset.Version || active.Rules[scoring.RuleDeviceCardCount] != wantConfig {
+		t.Fatalf("active ruleset = %+v, %v, want new version with %+v", active, err, wantConfig)
+	}
+	if n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules WHERE ruleset_version = $1`, originalRuleset.Version); n != len(originalRuleset.Rules) {
+		t.Errorf("prior ruleset has %d rules, want %d", n, len(originalRuleset.Rules))
+	}
+	for name, config := range originalRuleset.Rules {
+		n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules
+			WHERE ruleset_version = $1 AND rule_name = $2 AND enabled = $3 AND weight = $4 AND rule_limit = $5`,
+			originalRuleset.Version, string(name), config.Enabled, config.Weight, config.Limit)
+		if n != 1 {
+			t.Errorf("prior ruleset lost original settings for %s", name)
+		}
+	}
+
+	for n := 2; n <= 5; n++ {
+		rec := postScore(ctx, mux, testKey, body(n))
+		got := decodeJSON[scoreResponse](t, rec)
+		if rec.Code != http.StatusOK || got.RulesetVersion != active.Version {
+			t.Fatalf("score %d: %d %s, want 200 under ruleset %d", n, rec.Code, rec.Body, active.Version)
+		}
+		if n < 5 && (got.Outcome != scoring.OutcomeAllow || got.Score != 0 || len(got.FiredRules) != 0) {
+			t.Errorf("card %d fired below limit: %s", n, rec.Body)
+		}
+		if n == 5 {
+			want := []scoring.FiredRule{{Name: scoring.RuleDeviceCardCount, Points: 20, Message: "Device used 5 distinct cards in 60 minutes (limit 5)"}}
+			if got.Outcome != scoring.OutcomeReview || got.Score != 20 || !reflect.DeepEqual(got.FiredRules, want) {
+				t.Errorf("card 5: %s, want review with %+v", rec.Body, want)
+			}
+			retry := postScore(ctx, mux, testKey, body(n))
+			if retry.Code != http.StatusOK || retry.Body.String() != rec.Body.String() {
+				t.Errorf("card 5 retry: %d %s, want saved rule evidence %s", retry.Code, retry.Body, rec.Body)
+			}
+		}
+	}
+	retry := postScore(ctx, mux, testKey, body(1))
+	if retry.Code != http.StatusOK || retry.Body.String() != first.Body.String() {
+		t.Errorf("pre-activation retry: %d %s, want original response %s", retry.Code, retry.Body, first.Body)
+	}
+	conflict := postScore(ctx, mux, testKey, strings.Replace(body(1), `"amount_minor":1000`, `"amount_minor":2000`, 1))
+	if conflict.Code != http.StatusConflict {
+		t.Errorf("conflicting retry: %d %s, want 409", conflict.Code, conflict.Body)
+	}
+	if purchaseStore.calls != 4 {
+		t.Errorf("device history queried %d times, want 4 fresh scores only", purchaseStore.calls)
 	}
 }
 

@@ -34,6 +34,30 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 	return count, err
 }
 
+const countDeviceDistinctCardsLastHour = `-- name: CountDeviceDistinctCardsLastHour :one
+SELECT (count(DISTINCT card_token) + 1)::bigint AS card_count
+FROM purchases
+WHERE device_id IS NOT NULL
+  AND device_id = $1::text
+  AND event_time > $2::timestamptz - interval '1 hour'
+  AND event_time <= $2::timestamptz
+  AND card_token <> $3::text
+`
+
+type CountDeviceDistinctCardsLastHourParams struct {
+	DeviceID  string
+	EventTime pgtype.Timestamptz
+	CardToken string
+}
+
+// Include the current card exactly once, even if it already appears in history.
+func (q *Queries) CountDeviceDistinctCardsLastHour(ctx context.Context, arg CountDeviceDistinctCardsLastHourParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeviceDistinctCardsLastHour, arg.DeviceID, arg.EventTime, arg.CardToken)
+	var card_count int64
+	err := row.Scan(&card_count)
+	return card_count, err
+}
+
 const getReviewCase = `-- name: GetReviewCase :one
 SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.ruleset_version, d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at

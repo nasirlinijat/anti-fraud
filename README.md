@@ -118,6 +118,8 @@ The simulator keeps pattern names local and prints the score API's actual outcom
 
 Use `GET /rulesets/active` to read the current version. To change settings, send the full configuration without its `version` field to `POST /rulesets`. Both endpoints require the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
 
+Device card count starts off. To enable it, publish a new ruleset with `device_card_count` enabled. The Rulesets page suggests 5 distinct cards in 60 minutes, including the current card, and a weight of 20 points. Before rolling back to a version of the service that predates this rule, publish a new ruleset that omits `device_card_count`.
+
 ## API Documentation
 
 The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.

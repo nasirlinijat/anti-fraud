@@ -142,6 +142,8 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 			if name != scoring.RuleCountryMismatch {
 				fields[field+".limit"] = "is required"
 			}
+		case name == scoring.RuleDeviceCardCount && *rule.Limit <= 0:
+			fields[field+".limit"] = "must be a positive integer"
 		case *rule.Limit < 0:
 			fields[field+".limit"] = "must be a non-negative integer"
 		case name == scoring.RuleNewAccount && *rule.Limit > math.MaxInt64/int64(time.Hour):

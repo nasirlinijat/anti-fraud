@@ -18,7 +18,8 @@ type Input struct {
 	IPCountry             *string
 	AccountCreatedAt      *time.Time
 	EventTime             time.Time
-	CardPurchasesLastHour int // earlier purchases in the hour before EventTime
+	CardPurchasesLastHour int   // earlier purchases in the hour before EventTime
+	DeviceCardsLastHour   int64 // distinct cards including the current card, or zero without device history
 }
 
 // RuleConfig is the setting for one rule.

@@ -8,6 +8,12 @@ const ruleDetails = [
   { name: 'card_velocity', label: 'Card velocity', limit: 'Earlier purchases in one hour' },
   { name: 'new_account', label: 'New account', limit: 'Maximum account age (hours)' },
   { name: 'country_mismatch', label: 'Country mismatch' },
+  {
+    name: 'device_card_count',
+    label: 'Device card count',
+    limit: 'Distinct cards in 60 minutes (including the current card)',
+    preset: { enabled: false, weight: '20', limit: '5' },
+  },
 ] as const
 
 const maxInt32 = 2_147_483_647n
@@ -53,7 +59,7 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
     config.rules[name] = {
       enabled: rule.enabled,
       weight: Number(integer(rule.weight, `${field}.weight`, 0n, maxInt32, errors)),
-      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, 0n, maxInt64, errors),
+      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, name === 'device_card_count' ? 1n : 0n, maxInt64, errors),
     }
   }
   return config
@@ -166,7 +172,8 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
           const { name, label } = detail
           const limitLabel = 'limit' in detail ? detail.limit : undefined
           const savedRule = draft.rules[name]
-          const rule = savedRule ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
+          const preset = 'preset' in detail ? detail.preset : undefined
+          const rule = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
           const field = `rules.${name}`
           return (
             <fieldset key={name} disabled={saving}>
@@ -192,7 +199,7 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
                   value={rule.weight}
                   error={fields[`${field}.weight`]}
                   onChange={(weight) => updateRule(name, { ...rule, weight })}
-                  disabled={!savedRule}
+                  disabled={!savedRule && !preset}
                 />
                 {limitLabel && (
                   <IntegerField
@@ -201,7 +208,7 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
                     value={rule.limit ?? ''}
                     error={fields[`${field}.limit`]}
                     onChange={(limit) => updateRule(name, { ...rule, limit })}
-                    disabled={!savedRule}
+                    disabled={!savedRule && !preset}
                   />
                 )}
               </div>

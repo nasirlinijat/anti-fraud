@@ -101,6 +101,19 @@ func (s *Store) CardPurchasesLastHour(ctx context.Context, cardToken string, at 
 	return int(n), nil
 }
 
+// DeviceCardsLastHour counts distinct cards used on a device, including the current card.
+func (s *Store) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error) {
+	n, err := db.New(s.conn).CountDeviceDistinctCardsLastHour(ctx, db.CountDeviceDistinctCardsLastHourParams{
+		DeviceID:  deviceID,
+		EventTime: timestamptz(&at),
+		CardToken: cardToken,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count distinct device cards: %w", err)
+	}
+	return n, nil
+}
+
 // FeatureInput returns the request fields the model features use.
 func (p Purchase) FeatureInput() features.Input {
 	return features.Input{

@@ -13,6 +13,7 @@ const (
 	RuleCardVelocity    RuleName = "card_velocity"
 	RuleNewAccount      RuleName = "new_account"
 	RuleCountryMismatch RuleName = "country_mismatch"
+	RuleDeviceCardCount RuleName = "device_card_count"
 
 	// RuleBlocklist names the entry of a purchase that matched the blocklist.
 	// It is not a configurable rule, so Known does not report it.
@@ -30,6 +31,7 @@ var rules = []struct {
 	{RuleCardVelocity, cardVelocity, cardVelocityMessage},
 	{RuleNewAccount, newAccount, newAccountMessage},
 	{RuleCountryMismatch, countryMismatch, countryMismatchMessage},
+	{RuleDeviceCardCount, deviceCardCount, deviceCardCountMessage},
 }
 
 // Known reports whether the scoring core implements a rule with this name.
@@ -48,6 +50,10 @@ func highAmount(in Input, limit int64) bool {
 
 func cardVelocity(in Input, limit int64) bool {
 	return int64(in.CardPurchasesLastHour) >= limit
+}
+
+func deviceCardCount(in Input, limit int64) bool {
+	return in.DeviceCardsLastHour > 0 && in.DeviceCardsLastHour >= limit
 }
 
 // newAccount takes limit in hours.
@@ -71,6 +77,10 @@ func highAmountMessage(in Input, limit int64) string {
 
 func cardVelocityMessage(in Input, limit int64) string {
 	return fmt.Sprintf("Card used %d %s in 60 minutes (limit %d)", in.CardPurchasesLastHour, plural(int64(in.CardPurchasesLastHour), "time", "times"), limit)
+}
+
+func deviceCardCountMessage(in Input, limit int64) string {
+	return fmt.Sprintf("Device used %d distinct %s in 60 minutes (limit %d)", in.DeviceCardsLastHour, plural(in.DeviceCardsLastHour, "card", "cards"), limit)
 }
 
 func newAccountMessage(in Input, limit int64) string {
