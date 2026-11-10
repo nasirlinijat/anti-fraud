@@ -68,9 +68,17 @@
       "flagged": 1322,
       "fraud_money_caught": 0.245,
       "first_purchase_fraud_caught": 0.2936
+    },
+    "combined_blended": {
+      "false_positive_rate": 0.01,
+      "fraud_caught": 0.181,
+      "precision": 0.3968,
+      "flagged": 1366,
+      "fraud_money_caught": 0.2435,
+      "first_purchase_fraud_caught": 0.3174
     }
   },
-  "test": {
+  "test_unblended": {
     "rows": 85430,
     "fraud_rate": 0.035,
     "roc_auc": 0.8369,
@@ -110,7 +118,7 @@
       }
     ]
   },
-  "test_first_fraud_only": {
+  "test_first_fraud_only_unblended": {
     "rows": 83558,
     "fraud_rate": 0.0134,
     "roc_auc": 0.8915,
@@ -150,34 +158,115 @@
       }
     ]
   },
+  "test": {
+    "rows": 85430,
+    "fraud_rate": 0.035,
+    "roc_auc": 0.8411,
+    "pr_auc": 0.2404,
+    "operating_points": [
+      {
+        "false_positive_rate": 0.001,
+        "threshold": 0.9988,
+        "fraud_caught": 0.0424,
+        "precision": 0.6135,
+        "flagged": 207,
+        "fraud_money_caught": 0.0823
+      },
+      {
+        "false_positive_rate": 0.005,
+        "threshold": 0.994601,
+        "fraud_caught": 0.1045,
+        "precision": 0.4359,
+        "flagged": 718,
+        "fraud_money_caught": 0.1651
+      },
+      {
+        "false_positive_rate": 0.01,
+        "threshold": 0.989401,
+        "fraud_caught": 0.181,
+        "precision": 0.3968,
+        "flagged": 1366,
+        "fraud_money_caught": 0.2435
+      },
+      {
+        "false_positive_rate": 0.02,
+        "threshold": 0.982202,
+        "fraud_caught": 0.2558,
+        "precision": 0.3182,
+        "flagged": 2407,
+        "fraud_money_caught": 0.3263
+      }
+    ]
+  },
+  "test_first_fraud_only": {
+    "rows": 83558,
+    "fraud_rate": 0.0134,
+    "roc_auc": 0.8921,
+    "pr_auc": 0.1996,
+    "operating_points": [
+      {
+        "false_positive_rate": 0.001,
+        "threshold": 0.9988,
+        "fraud_caught": 0.0838,
+        "precision": 0.5402,
+        "flagged": 174,
+        "fraud_money_caught": 0.1473
+      },
+      {
+        "false_positive_rate": 0.005,
+        "threshold": 0.994601,
+        "fraud_caught": 0.1747,
+        "precision": 0.3261,
+        "flagged": 601,
+        "fraud_money_caught": 0.2112
+      },
+      {
+        "false_positive_rate": 0.01,
+        "threshold": 0.989401,
+        "fraud_caught": 0.262,
+        "precision": 0.263,
+        "flagged": 1118,
+        "fraud_money_caught": 0.2708
+      },
+      {
+        "false_positive_rate": 0.02,
+        "threshold": 0.982202,
+        "fraud_caught": 0.3476,
+        "precision": 0.192,
+        "flagged": 2031,
+        "fraud_money_caught": 0.3538
+      }
+    ]
+  },
   "policy": {
-    "flag_at": 0.994401,
-    "clear_below": 0.4029,
+    "flag_at": 0.994001,
+    "clear_below": 0.391385,
     "flag_by": "review_rate",
     "review_rate": 0.005,
     "review_cost": null,
     "max_missed_fraud": 0.02,
+    "player_blend_weight": 0.5,
     "validation_effect": {
-      "flagged_fraud_money_caught": 0.1968,
-      "fraud_money_missed_by_clearing": 0.0097,
-      "flagged_share": 0.0091,
-      "flagged_precision": 0.4762,
-      "flagged_fraud_caught": 0.1336,
-      "cleared_share": 0.2551,
-      "cleared_fraud_rate": 0.0025,
-      "cleared_legit_share": 0.2629,
+      "flagged_fraud_money_caught": 0.198,
+      "fraud_money_missed_by_clearing": 0.0092,
+      "flagged_share": 0.0096,
+      "flagged_precision": 0.4944,
+      "flagged_fraud_caught": 0.1463,
+      "cleared_share": 0.2486,
+      "cleared_fraud_rate": 0.0026,
+      "cleared_legit_share": 0.2562,
       "fraud_missed_by_clearing": 0.02
     },
     "test_effect": {
-      "flagged_fraud_money_caught": 0.1965,
-      "fraud_money_missed_by_clearing": 0.0088,
-      "flagged_share": 0.0094,
-      "flagged_precision": 0.4282,
-      "flagged_fraud_caught": 0.1146,
-      "cleared_share": 0.2286,
-      "cleared_fraud_rate": 0.003,
-      "cleared_legit_share": 0.2362,
-      "fraud_missed_by_clearing": 0.0197
+      "flagged_fraud_money_caught": 0.1767,
+      "fraud_money_missed_by_clearing": 0.0081,
+      "flagged_share": 0.0092,
+      "flagged_precision": 0.4284,
+      "flagged_fraud_caught": 0.1129,
+      "cleared_share": 0.2142,
+      "cleared_fraud_rate": 0.0031,
+      "cleared_legit_share": 0.2213,
+      "fraud_missed_by_clearing": 0.019
     }
   },
   "export": {

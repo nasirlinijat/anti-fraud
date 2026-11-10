@@ -190,6 +190,22 @@ v5 adds `card_issuer_code` (`card1`) and `billing_region_code` (`addr1`) as numb
 | Combined policy: flags, precision, fraud caught | 0.96%, 44%, 12.0% | 0.93%, 43%, 11.6% |
 | Combined policy: reviews cleared, fraud missed by clearing | 19.5%, 1.9% | **22.3%**, 1.9% |
 
+### Blending with the player's earlier scores
+
+The live, past-only version of the 1st-place solution's post-processing (which averaged each client's predictions). Before combining, the main model's score is blended with the average of the same player's earlier main-model scores: `0.5 * score + 0.5 * earlier average` (`--player-blend`, default 0.5; a player's first purchase keeps its score). The percentile table of the main model is built from blended validation scores, and the thresholds are chosen on the blended combined score. The service reads the earlier scores from the saved decisions (`model_score_unblended`, the main model's own score, so a blended score never feeds the next blend).
+
+Blending the final combined score instead lowered precision, so the blend happens inside the combination.
+
+| Test month, combined model | Without blending | With blending |
+|---|---|---|
+| PR-AUC | 0.233 | **0.240** |
+| First-fraud PR-AUC | 0.191 | **0.200** |
+| Fraud caught / precision at 1% review | 16.7% / 37.8% | **18.1% / 39.7%** |
+| Fraud caught on a player's first purchase at 1% | 29.4% | **31.7%** |
+| Precision at 0.5% / 0.1% review | 43.7% / 63.0% | 43.6% / 61.4% |
+
+Replay check: 10,000 purchases scored exactly like Python, including the blend.
+
 ### Averaging 5 models
 
 The main model is the average of 5 LightGBM models trained with different random seeds (`--models`, default 5). They are exported as one file: every tree of every model with its leaf values divided by 5, so the score is the sigmoid of the average raw score and the Go reader needs no change (4,700 trees, about 5 µs per purchase). The report keeps the first model alone as `single_model_test`.

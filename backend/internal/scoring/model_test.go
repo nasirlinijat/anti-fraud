@@ -73,3 +73,21 @@ func TestModelPolicyValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestBlend(t *testing.T) {
+	p := ModelPolicy{FlagAt: 0.3, ClearBelow: 0.01, PlayerBlendWeight: 0.5}
+	if got := p.Blend(0.2, 0, 0); got != 0.2 {
+		t.Errorf("no earlier scores: %v, want 0.2", got)
+	}
+	if got := p.Blend(0.2, 1.2, 2); got != 0.5*0.2+0.5*0.6 {
+		t.Errorf("blend = %v, want %v", got, 0.5*0.2+0.5*0.6)
+	}
+	if got := (ModelPolicy{}).Blend(0.2, 1.2, 2); got != 0.2 {
+		t.Errorf("weight 0: %v, want 0.2", got)
+	}
+	for _, w := range []float64{-0.1, 1, math.NaN()} {
+		if err := (ModelPolicy{FlagAt: 0.3, ClearBelow: 0.01, PlayerBlendWeight: w}).Validate(); err == nil {
+			t.Errorf("Validate accepted blend weight %v", w)
+		}
+	}
+}

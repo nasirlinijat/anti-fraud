@@ -12,6 +12,9 @@ type ModelPolicy struct {
 	FlagAt float64
 	// ClearBelow allows a purchase the rules sent to review when the score is below it.
 	ClearBelow float64
+	// PlayerBlendWeight is the weight of the player's earlier average score in
+	// the score the thresholds apply to; 0 turns blending off.
+	PlayerBlendWeight float64
 }
 
 // Validate reports whether the thresholds are usable: both between 0 and 1,
@@ -20,7 +23,19 @@ func (p ModelPolicy) Validate() error {
 	if math.IsNaN(p.FlagAt) || math.IsNaN(p.ClearBelow) || p.ClearBelow < 0 || p.FlagAt > 1 || p.ClearBelow >= p.FlagAt {
 		return fmt.Errorf("model policy needs 0 <= clear_below < flag_at <= 1, got clear_below %v and flag_at %v", p.ClearBelow, p.FlagAt)
 	}
+	if math.IsNaN(p.PlayerBlendWeight) || p.PlayerBlendWeight < 0 || p.PlayerBlendWeight >= 1 {
+		return fmt.Errorf("model policy needs 0 <= player_blend_weight < 1, got %v", p.PlayerBlendWeight)
+	}
 	return nil
+}
+
+// Blend mixes a model score with the average of the player's earlier scores.
+// With no earlier scores the score is returned unchanged.
+func (p ModelPolicy) Blend(score, earlierSum float64, earlierCount int64) float64 {
+	if p.PlayerBlendWeight == 0 || earlierCount == 0 {
+		return score
+	}
+	return (1-p.PlayerBlendWeight)*score + p.PlayerBlendWeight*(earlierSum/float64(earlierCount))
 }
 
 // ApplyModel returns the outcome after the model score. The model can clear a

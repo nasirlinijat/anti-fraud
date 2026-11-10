@@ -53,8 +53,12 @@ type Decision struct {
 	// ModelInputs maps each model feature name to its value. It is saved even
 	// when no model is loaded, so the inputs can be exported for training.
 	ModelInputs map[string]float64
-	// ModelScore is nil when no model is loaded.
+	// ModelScore is nil when no model is loaded. It is the score after blending
+	// with the player's earlier scores.
 	ModelScore *float64
+	// ModelScoreUnblended is the main model's own score, before blending and
+	// before combining with other models.
+	ModelScoreUnblended *float64
 	// FeatureHistory is the history the model inputs were computed from. Save
 	// uses it to add the purchase to the feature running totals.
 	FeatureHistory features.History
@@ -124,6 +128,20 @@ func (s *Store) FeatureHistory(ctx context.Context, in features.Input) (features
 	return features.NewStore(s.conn).History(ctx, in)
 }
 
+// PlayerEarlierModelScores counts and sums the unblended model scores of the
+// player's purchases before the given one.
+func (s *Store) PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error) {
+	row, err := db.New(s.conn).PlayerEarlierModelScores(ctx, db.PlayerEarlierModelScoresParams{
+		PlayerID:      playerID,
+		EventTime:     timestamptz(&at),
+		TransactionID: transactionID,
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("read earlier model scores: %w", err)
+	}
+	return row.ScoreSum, row.Scored, nil
+}
+
 // Save stores a purchase and its decision in one transaction and returns the
 // purchase ID. It returns ErrDuplicateTransaction if the transaction ID is already saved.
 func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error) {
@@ -188,13 +206,14 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 	}
 
 	err = q.InsertDecision(ctx, db.InsertDecisionParams{
-		PurchaseID:     id,
-		RulesetVersion: int32(d.RulesetVersion),
-		Outcome:        string(d.Result.Outcome),
-		RuleScore:      int32(d.Result.Score),
-		FiredRules:     firedJSON,
-		ModelInputs:    inputsJSON,
-		ModelScore:     float8(d.ModelScore),
+		PurchaseID:          id,
+		RulesetVersion:      int32(d.RulesetVersion),
+		Outcome:             string(d.Result.Outcome),
+		RuleScore:           int32(d.Result.Score),
+		FiredRules:          firedJSON,
+		ModelInputs:         inputsJSON,
+		ModelScore:          float8(d.ModelScore),
+		ModelScoreUnblended: float8(d.ModelScoreUnblended),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)

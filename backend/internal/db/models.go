@@ -19,14 +19,15 @@ type BlocklistEntry struct {
 }
 
 type Decision struct {
-	PurchaseID     int64
-	RulesetVersion int32
-	Outcome        string
-	RuleScore      int32
-	FiredRules     []byte
-	ModelInputs    []byte
-	ModelScore     pgtype.Float8
-	DecidedAt      pgtype.Timestamptz
+	PurchaseID          int64
+	RulesetVersion      int32
+	Outcome             string
+	RuleScore           int32
+	FiredRules          []byte
+	ModelInputs         []byte
+	ModelScore          pgtype.Float8
+	DecidedAt           pgtype.Timestamptz
+	ModelScoreUnblended pgtype.Float8
 }
 
 type FeatureCount struct {

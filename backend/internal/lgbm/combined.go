@@ -84,17 +84,36 @@ func LoadCombined(path string) (*Combined, error) {
 
 // Predict returns the highest percentile among the models.
 func (c *Combined) Predict(x []float64) (float64, error) {
-	best := 0.0
+	scores, err := c.Scores(x)
+	if err != nil {
+		return 0, err
+	}
+	return c.Combine(scores), nil
+}
+
+// Scores returns each model's own score, in the order of the combination.
+// The first model is the main model.
+func (c *Combined) Scores(x []float64) ([]float64, error) {
+	scores := make([]float64, len(c.models))
 	for i, model := range c.models {
 		score, err := model.Predict(x)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
+		scores[i] = score
+	}
+	return scores, nil
+}
+
+// Combine returns the highest percentile of the given model scores.
+func (c *Combined) Combine(scores []float64) float64 {
+	best := 0.0
+	for i, score := range scores {
 		table := c.tables[i]
 		below := sort.SearchFloat64s(table, score-percentileTolerance)
 		best = max(best, float64(below)/float64(len(table)))
 	}
-	return best, nil
+	return best
 }
 
 // Version returns the combination's version, such as "lgbm-ieee-v5-combined".

@@ -36,20 +36,23 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
-    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score
+    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
+    model_score_unblended
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7,
+    $8
 )
 `
 
 type InsertDecisionParams struct {
-	PurchaseID     int64
-	RulesetVersion int32
-	Outcome        string
-	RuleScore      int32
-	FiredRules     []byte
-	ModelInputs    []byte
-	ModelScore     pgtype.Float8
+	PurchaseID          int64
+	RulesetVersion      int32
+	Outcome             string
+	RuleScore           int32
+	FiredRules          []byte
+	ModelInputs         []byte
+	ModelScore          pgtype.Float8
+	ModelScoreUnblended pgtype.Float8
 }
 
 func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) error {
@@ -61,6 +64,7 @@ func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) 
 		arg.FiredRules,
 		arg.ModelInputs,
 		arg.ModelScore,
+		arg.ModelScoreUnblended,
 	)
 	return err
 }
@@ -207,4 +211,34 @@ func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const playerEarlierModelScores = `-- name: PlayerEarlierModelScores :one
+SELECT
+    count(d.model_score_unblended) AS scored,
+    coalesce(sum(d.model_score_unblended ORDER BY p.event_time, p.transaction_id), 0)::float8 AS score_sum
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = $1
+  AND (p.event_time, p.transaction_id) < ($2::timestamptz, $3::text)
+`
+
+type PlayerEarlierModelScoresParams struct {
+	PlayerID      string
+	EventTime     pgtype.Timestamptz
+	TransactionID string
+}
+
+type PlayerEarlierModelScoresRow struct {
+	Scored   int64
+	ScoreSum float64
+}
+
+// Counts and sums the unblended model scores of the player's purchases that
+// come before the given one in (event_time, transaction_id) order.
+func (q *Queries) PlayerEarlierModelScores(ctx context.Context, arg PlayerEarlierModelScoresParams) (PlayerEarlierModelScoresRow, error) {
+	row := q.db.QueryRow(ctx, playerEarlierModelScores, arg.PlayerID, arg.EventTime, arg.TransactionID)
+	var i PlayerEarlierModelScoresRow
+	err := row.Scan(&i.Scored, &i.ScoreSum)
+	return i, err
 }

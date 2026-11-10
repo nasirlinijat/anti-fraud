@@ -46,6 +46,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CountReviewQueue", countReviewQueue, nil},
 		{"CountModelEffects", countModelEffects, []any{at}},
 		{"ListModelInputs", listModelInputs, []any{at, "txn-1", int32(5000)}},
+		{"PlayerEarlierModelScores", playerEarlierModelScores, []any{"player-1", at, "txn-1"}},
 	}
 	for _, q := range queries {
 		t.Run(q.name, func(t *testing.T) {

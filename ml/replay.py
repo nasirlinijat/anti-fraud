@@ -220,7 +220,8 @@ def main():
 
     dump = json.loads(Path(args.model).read_text())
     policy = json.loads(Path(args.model).with_suffix(".report.json").read_text())["policy"]
-    policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"]}
+    blend = policy.get("player_blend_weight", 0)
+    policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"], "player_blend_weight": blend}
 
     built = features.build(data.copy())
     if "combination" in dump:
@@ -229,7 +230,11 @@ def main():
             (json.loads((Path(args.model).parent / part["file"]).read_text()), np.array(part["percentiles"]))
             for part in dump["models"]
         ]
-        python_score = export.combined_score(parts, built[dump["feature_names"]].to_numpy())
+        # The service blends the main model's score with the player's earlier
+        # main-model scores saved in this replay.
+        python_score = export.combined_score(
+            parts, built[dump["feature_names"]].to_numpy(), built["player_id"].to_numpy(), blend
+        )
     else:
         python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
 

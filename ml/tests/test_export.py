@@ -108,6 +108,15 @@ def test_averaged_export_matches_the_models(model_and_rows, tmp_path):
     assert report["export"]["tree_reader_max_difference"] < 1e-9
 
 
+def test_blend_with_history_uses_only_earlier_scores():
+    scores = [0.2, 0.8, 0.4, 0.6, 1.0]
+    players = ["a", "b", "a", "a", "b"]
+    got = export.blend_with_history(scores, players, 0.5)
+    want = [0.2, 0.8, 0.5 * 0.4 + 0.5 * 0.2, 0.5 * 0.6 + 0.5 * (0.2 + 0.4) / 2, 0.5 * 1.0 + 0.5 * 0.8]
+    assert np.allclose(got, want, atol=1e-15)
+    assert np.array_equal(export.blend_with_history(scores, players, 0), scores)
+
+
 def test_unsupported_split_is_rejected():
     node = {"split_feature": 0, "decision_type": "==", "left_child": {"leaf_value": 0}, "right_child": {"leaf_value": 1}}
     with pytest.raises(ValueError):

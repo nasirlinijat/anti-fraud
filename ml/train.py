@@ -105,6 +105,8 @@ def main():
     parser.add_argument("--review-rate", type=float, default=0.005)
     parser.add_argument("--max-missed-fraud", type=float, default=0.02)
     parser.add_argument("--models", type=int, default=5, help="number of models averaged into the main model (1 to 5)")
+    parser.add_argument("--player-blend", type=float, default=0.5,
+                        help="weight of the player's earlier average score in the final score (0 turns blending off)")
     parser.add_argument("--inputs", help="train from model inputs exported by the service instead of the IEEE-CIS CSV")
     parser.add_argument("--labels", help="CSV with transaction_id and is_fraud, needed with --inputs")
     parser.add_argument("--day-zero", default="2017-12-01T00:00:00Z",
@@ -233,9 +235,25 @@ def main():
     tables = [export.percentile_table(model_val), export.percentile_table(first_val)]
     combined_val = np.maximum(export.percentile(tables[0], model_val), export.percentile(tables[1], first_val))
     combined_test = np.maximum(export.percentile(tables[0], model_test), export.percentile(tables[1], first_test))
+    # Blend the main model's score with the average of the player's earlier
+    # main-model scores, then combine. Blending the combined score instead
+    # lowered precision in tests. Only purchases after the training days have
+    # honest scores, so the history of earlier scores starts there, as it
+    # would in a fresh service.
+    unblended_test = combined_test
+    window = data[data["day"] > days["train"][1]]
+    window_main = export.average_proba(models, window[features.FEATURES])
+    blended_main = pd.Series(
+        export.blend_with_history(window_main, window["player_id"].to_numpy(), args.player_blend), index=window.index
+    )
+    main_val, main_test = blended_main.loc[validation.index].to_numpy(), blended_main.loc[test.index].to_numpy()
+    tables = [export.percentile_table(main_val), export.percentile_table(first_val)]
+    combined_val = np.maximum(export.percentile(tables[0], main_val), export.percentile(tables[1], first_val))
+    combined_test = np.maximum(export.percentile(tables[0], main_test), export.percentile(tables[1], first_test))
     combined_thresholds = export.choose_thresholds(
         y_val, combined_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost
     )
+    combined_thresholds["player_blend_weight"] = args.player_blend
     first_purchase = test["player_txn_count"].to_numpy() == 0
     combined_report = {
         "features": features.FEATURES,
@@ -245,8 +263,10 @@ def main():
                 **{k: v for k, v in at_false_positive_rate(y_test, score, 0.01, test_amount).items() if k != "threshold"},
                 "first_purchase_fraud_caught": first_purchase_recall(y_test, score, first_purchase),
             }
-            for name, score in [("main", model_test), ("combined", combined_test)]
+            for name, score in [("main", model_test), ("combined", unblended_test), ("combined_blended", combined_test)]
         },
+        "test_unblended": evaluate(y_test, unblended_test, test_amount),
+        "test_first_fraud_only_unblended": evaluate(y_test[test_keep], unblended_test[test_keep], test_amount[test_keep]),
         "test": evaluate(y_test, combined_test, test_amount),
         "test_first_fraud_only": evaluate(y_test[test_keep], combined_test[test_keep], test_amount[test_keep]),
         "policy": {

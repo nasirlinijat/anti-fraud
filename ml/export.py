@@ -164,9 +164,34 @@ def percentile(table, scores):
     return np.searchsorted(table, np.asarray(scores) - PERCENTILE_TOLERANCE, side="left") / len(table)
 
 
-def combined_score(parts, rows):
-    """Highest percentile among the models. parts holds (dump, table) pairs."""
-    return np.max([percentile(table, predict_fast(dump, rows)) for dump, table in parts], axis=0)
+def blend_with_history(scores, player_ids, weight):
+    """Blends each score with the average of the same player's earlier scores,
+    in the given (time) order: (1 - weight) * score + weight * earlier mean.
+    A player's first purchase keeps its score. The earlier scores are summed
+    one by one in order, as the service's database sum does."""
+    scores = pd.Series(np.asarray(scores, dtype=float))
+    players = pd.Series(np.asarray(player_ids))
+    if weight == 0:
+        return scores.to_numpy()
+    earlier = scores.groupby(players, sort=False).shift(1).fillna(0.0)
+    earlier_sum = earlier.groupby(players, sort=False).cumsum().to_numpy()
+    count = players.groupby(players, sort=False).cumcount().to_numpy()
+    blended = (1 - weight) * scores.to_numpy() + weight * (earlier_sum / np.maximum(count, 1))
+    return np.where(count > 0, blended, scores.to_numpy())
+
+
+def combined_score(parts, rows, player_ids=None, blend_weight=0):
+    """Highest percentile among the models. parts holds (dump, table) pairs.
+    With blend_weight, the first model's score is blended with the player's
+    earlier first-model scores before its percentile is taken; rows must then
+    be in time order."""
+    percentiles = []
+    for index, (dump, table) in enumerate(parts):
+        score = predict_fast(dump, rows)
+        if index == 0 and blend_weight:
+            score = blend_with_history(score, player_ids, blend_weight)
+        percentiles.append(percentile(table, score))
+    return np.max(percentiles, axis=0)
 
 
 def export_combined(version, out_dir, parts, golden_rows, report):

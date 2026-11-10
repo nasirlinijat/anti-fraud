@@ -18,9 +18,11 @@ RETURNING id;
 
 -- name: InsertDecision :exec
 INSERT INTO decisions (
-    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score
+    purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
+    model_score_unblended
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7,
+    $8
 );
 
 -- name: ListReviewQueue :many
@@ -45,4 +47,15 @@ SELECT count(*)
 FROM purchases
 WHERE card_token = sqlc.arg(card_token)
   AND event_time > sqlc.arg(event_time)::timestamptz - interval '1 hour'
-  AND event_time <= sqlc.arg(event_time)::timestamptz;
+  AND event_time <= sqlc.arg(event_time)::timestamptz;
+
+-- name: PlayerEarlierModelScores :one
+-- Counts and sums the unblended model scores of the player's purchases that
+-- come before the given one in (event_time, transaction_id) order.
+SELECT
+    count(d.model_score_unblended) AS scored,
+    coalesce(sum(d.model_score_unblended ORDER BY p.event_time, p.transaction_id), 0)::float8 AS score_sum
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = sqlc.arg(player_id)
+  AND (p.event_time, p.transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text);
