@@ -16,6 +16,7 @@ import (
 )
 
 const maxBodyBytes = 64 << 10
+const maxDeviceSpikeWindowDays = 3650
 
 // RegisterRoutes exposes the active ruleset and version publishing.
 func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string) {
@@ -30,9 +31,12 @@ type configPayload struct {
 }
 
 type rulePayload struct {
-	Enabled *bool  `json:"enabled"`
-	Weight  *int32 `json:"weight"`
-	Limit   *int64 `json:"limit"`
+	Enabled          *bool  `json:"enabled"`
+	Weight           *int32 `json:"weight"`
+	Limit            *int64 `json:"limit"`
+	WindowDays       *int32 `json:"window_days,omitempty"`
+	MinAmountMinor   *int64 `json:"min_amount_minor,omitempty"`
+	AmountMultiplier *int32 `json:"amount_multiplier,omitempty"`
 }
 
 func (s *Store) getActive(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +146,7 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 			if name != scoring.RuleCountryMismatch {
 				fields[field+".limit"] = "is required"
 			}
-		case name == scoring.RuleDeviceCardCount && *rule.Limit <= 0:
+		case (name == scoring.RuleDeviceCardCount || name == scoring.RuleNewDeviceSpike) && *rule.Limit <= 0:
 			fields[field+".limit"] = "must be a positive integer"
 		case *rule.Limit < 0:
 			fields[field+".limit"] = "must be a non-negative integer"
@@ -150,6 +154,25 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 			fields[field+".limit"] = "exceeds the maximum account age in hours"
 		default:
 			config.Limit = *rule.Limit
+		}
+		if name == scoring.RuleNewDeviceSpike {
+			if rule.WindowDays == nil || *rule.WindowDays < 1 || *rule.WindowDays > maxDeviceSpikeWindowDays {
+				fields[field+".window_days"] = fmt.Sprintf("must be an integer from 1 to %d", maxDeviceSpikeWindowDays)
+			} else {
+				config.WindowDays = *rule.WindowDays
+			}
+			if rule.MinAmountMinor == nil || *rule.MinAmountMinor <= 0 {
+				fields[field+".min_amount_minor"] = "must be a positive integer in minor units"
+			} else {
+				config.MinAmountMinor = *rule.MinAmountMinor
+			}
+			if rule.AmountMultiplier == nil || *rule.AmountMultiplier < 2 {
+				fields[field+".amount_multiplier"] = "must be an integer of at least 2"
+			} else {
+				config.AmountMultiplier = *rule.AmountMultiplier
+			}
+		} else if rule.WindowDays != nil || rule.MinAmountMinor != nil || rule.AmountMultiplier != nil {
+			fields[field] = "window_days, min_amount_minor, and amount_multiplier are only supported for new_device_spike"
 		}
 		if config.Enabled {
 			maxScore += int64(config.Weight)
@@ -166,7 +189,13 @@ func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
 	rules := make(map[scoring.RuleName]*rulePayload, len(rs.Rules))
 	for name, rule := range rs.Rules {
 		weight := int32(rule.Weight)
-		rules[name] = &rulePayload{Enabled: &rule.Enabled, Weight: &weight, Limit: &rule.Limit}
+		payload := &rulePayload{Enabled: &rule.Enabled, Weight: &weight, Limit: &rule.Limit}
+		if name == scoring.RuleNewDeviceSpike {
+			payload.WindowDays = &rule.WindowDays
+			payload.MinAmountMinor = &rule.MinAmountMinor
+			payload.AmountMultiplier = &rule.AmountMultiplier
+		}
+		rules[name] = payload
 	}
 	platform.WriteJSON(w, status, struct {
 		Version int `json:"version"`

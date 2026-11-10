@@ -4,7 +4,7 @@ FROM rulesets
 WHERE is_active;
 
 -- name: ListRulesetRules :many
-SELECT rule_name, enabled, weight, rule_limit
+SELECT rule_name, enabled, weight, rule_limit, window_days, min_amount_minor, amount_multiplier
 FROM ruleset_rules
 WHERE ruleset_version = $1;
 
@@ -22,5 +22,7 @@ FROM rulesets
 RETURNING version;
 
 -- name: InsertRulesetRule :exec
-INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit)
-VALUES ($1, $2, $3, $4, $5);
+INSERT INTO ruleset_rules (
+    ruleset_version, rule_name, enabled, weight, rule_limit, window_days, min_amount_minor, amount_multiplier
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);

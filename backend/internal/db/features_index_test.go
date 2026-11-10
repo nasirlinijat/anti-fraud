@@ -52,6 +52,9 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"ListModelInputs", listModelInputs, []any{at, "txn-1", int32(5000)}},
 		{"PlayerEarlierModelScores", playerEarlierModelScores, []any{"player-1", at, "txn-1"}},
 		{"CountDeviceDistinctCardsLastHour", countDeviceDistinctCardsLastHour, []any{"device-1", at, "card-1"}},
+		{"GetTrustedPurchaseHistory", getTrustedPurchaseHistory, []any{
+			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
+		}},
 	}
 	for _, q := range queries {
 		t.Run(q.name, func(t *testing.T) {

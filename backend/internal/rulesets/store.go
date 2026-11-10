@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -44,9 +45,12 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 			return scoring.Ruleset{}, fmt.Errorf("ruleset %d has unknown rule %q", row.Version, r.RuleName)
 		}
 		rules[name] = scoring.RuleConfig{
-			Enabled: r.Enabled,
-			Weight:  int(r.Weight),
-			Limit:   r.RuleLimit,
+			Enabled:          r.Enabled,
+			Weight:           int(r.Weight),
+			Limit:            r.RuleLimit,
+			WindowDays:       r.WindowDays.Int32,
+			MinAmountMinor:   r.MinAmountMinor.Int64,
+			AmountMultiplier: r.AmountMultiplier.Int32,
 		}
 	}
 
@@ -76,12 +80,16 @@ func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Rulese
 			return fmt.Errorf("insert ruleset: %w", err)
 		}
 		for name, rule := range rs.Rules {
+			spike := name == scoring.RuleNewDeviceSpike
 			if err := q.InsertRulesetRule(ctx, db.InsertRulesetRuleParams{
-				RulesetVersion: version,
-				RuleName:       string(name),
-				Enabled:        rule.Enabled,
-				Weight:         int32(rule.Weight),
-				RuleLimit:      rule.Limit,
+				RulesetVersion:   version,
+				RuleName:         string(name),
+				Enabled:          rule.Enabled,
+				Weight:           int32(rule.Weight),
+				RuleLimit:        rule.Limit,
+				WindowDays:       pgtype.Int4{Int32: rule.WindowDays, Valid: spike},
+				MinAmountMinor:   pgtype.Int8{Int64: rule.MinAmountMinor, Valid: spike},
+				AmountMultiplier: pgtype.Int4{Int32: rule.AmountMultiplier, Valid: spike},
 			}); err != nil {
 				return fmt.Errorf("insert rule %q: %w", name, err)
 			}

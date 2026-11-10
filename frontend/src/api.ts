@@ -73,6 +73,9 @@ export interface RuleSettings {
   enabled: boolean
   weight: number
   limit?: bigint
+  window_days?: number
+  min_amount_minor?: bigint
+  amount_multiplier?: number
 }
 
 export interface RulesetConfig {
@@ -85,7 +88,7 @@ export interface Ruleset extends RulesetConfig {
   version: number
 }
 
-// The API sends 64-bit limits as JSON integers. Keep their exact value in the editor.
+// The API sends 64-bit thresholds as JSON integers. Keep their exact value in the editor.
 const rulesetJSON = JSON as JSON & {
   parse(text: string, reviver: (key: string, value: unknown, context?: { source: string }) => unknown): unknown
   rawJSON?(text: string): unknown
@@ -93,7 +96,7 @@ const rulesetJSON = JSON as JSON & {
 
 async function readRuleset(res: Response): Promise<Ruleset> {
   return rulesetJSON.parse(await res.text(), (key: string, value: unknown, context?: { source: string }) => {
-    if (key !== 'limit' || typeof value !== 'number') return value
+    if ((key !== 'limit' && key !== 'min_amount_minor') || typeof value !== 'number') return value
     if (Number.isSafeInteger(value)) return BigInt(value)
     if (context) return BigInt(context.source)
     throw new ApiError('response', 'This browser cannot read the rule limit exactly.', res.status)

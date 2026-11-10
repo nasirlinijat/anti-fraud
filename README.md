@@ -120,6 +120,8 @@ Use `GET /rulesets/active` to read the current version. To change settings, send
 
 Device card count starts off. To enable it, publish a new ruleset with `device_card_count` enabled. The Rulesets page suggests 5 distinct cards in 60 minutes, including the current card, and a weight of 20 points. Before rolling back to a version of the service that predates this rule, publish a new ruleset that omits `device_card_count`.
 
+New device spike also starts off. The Rulesets page suggests at least 3 trusted purchases in 90 days, a minimum amount of 1,000 minor units, a minimum of 3 times the trusted average, and a weight of 50 points. Trusted history includes allowed purchases and approvals recorded by the time of scoring. Before rolling back to a service version that predates this rule, publish a new ruleset that omits `new_device_spike` and keep the migration that stores its settings for historical versions.
+
 ## API Documentation
 
 The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.

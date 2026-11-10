@@ -1,6 +1,8 @@
 package scoring
 
 import (
+	"math"
+	"math/big"
 	"reflect"
 	"testing"
 	"time"
@@ -151,6 +153,49 @@ func TestDeviceCardCount(t *testing.T) {
 	}
 }
 
+func TestNewDeviceSpike(t *testing.T) {
+	cfg := RuleConfig{Enabled: true, Weight: 50, Limit: 3, WindowDays: 90, MinAmountMinor: 1000, AmountMultiplier: 3}
+	rs := Ruleset{ReviewThreshold: 50, BlockThreshold: 80, Rules: map[RuleName]RuleConfig{RuleNewDeviceSpike: cfg}}
+	history := func(count, total int64) *TrustedPurchaseHistory {
+		return &TrustedPurchaseHistory{Count: count, TotalMinor: big.NewInt(total)}
+	}
+	known := history(3, 900)
+	known.DeviceSeen = true
+	large := &TrustedPurchaseHistory{Count: 6, TotalMinor: new(big.Int).Mul(big.NewInt(math.MaxInt64), big.NewInt(2))}
+	for _, tc := range []struct {
+		name    string
+		amount  int64
+		history *TrustedPurchaseHistory
+		want    bool
+	}{
+		{"missing device", 1200, nil, false},
+		{"insufficient history", 1200, history(2, 500), false},
+		{"known device", 1200, known, false},
+		{"below absolute floor", 999, history(3, 900), false},
+		{"exact absolute floor", 1000, history(3, 900), true},
+		{"below relative threshold", 1199, history(3, 1200), false},
+		{"exact relative threshold", 1200, history(3, 1200), true},
+		{"below fractional threshold", 1000, history(4, 1334), false},
+		{"above fractional threshold", 1001, history(4, 1334), true},
+		{"large below threshold", math.MaxInt64 - 1, large, false},
+		{"large at threshold", math.MaxInt64, large, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Evaluate(Input{AmountMinor: tc.amount, TrustedHistory: tc.history}, rs)
+			if !tc.want {
+				if got.Score != 0 || got.Outcome != OutcomeAllow || len(got.FiredRules) != 0 {
+					t.Errorf("unexpected fired rule: %+v", got)
+				}
+				return
+			}
+			if got.Score != cfg.Weight || got.Outcome != OutcomeReview || len(got.FiredRules) != 1 ||
+				got.FiredRules[0].Name != RuleNewDeviceSpike || got.FiredRules[0].Points != cfg.Weight || got.FiredRules[0].Message == "" {
+				t.Errorf("result = %+v, want new device spike with %d points and a message", got, cfg.Weight)
+			}
+		})
+	}
+}
+
 func TestRuleNameKnown(t *testing.T) {
 	tests := []struct {
 		name RuleName
@@ -161,6 +206,7 @@ func TestRuleNameKnown(t *testing.T) {
 		{RuleNewAccount, true},
 		{RuleCountryMismatch, true},
 		{RuleDeviceCardCount, true},
+		{RuleNewDeviceSpike, true},
 		{"high_ammount", false},
 		{"", false},
 	}
@@ -184,7 +230,7 @@ func TestHighAmount(t *testing.T) {
 
 	for _, tt := range tests {
 		in := Input{AmountMinor: tt.amount}
-		if got := highAmount(in, 50000); got != tt.want {
+		if got := highAmount(in, RuleConfig{Limit: 50000}); got != tt.want {
 			t.Errorf("highAmount(%d) = %v, want %v", tt.amount, got, tt.want)
 		}
 	}
@@ -203,7 +249,7 @@ func TestCardVelocity(t *testing.T) {
 
 	for _, tt := range tests {
 		in := Input{CardPurchasesLastHour: tt.earlier}
-		if got := cardVelocity(in, 5); got != tt.want {
+		if got := cardVelocity(in, RuleConfig{Limit: 5}); got != tt.want {
 			t.Errorf("cardVelocity(%d earlier) = %v, want %v", tt.earlier, got, tt.want)
 		}
 	}
@@ -231,7 +277,7 @@ func TestNewAccount(t *testing.T) {
 
 	for _, tt := range tests {
 		in := Input{EventTime: event, AccountCreatedAt: tt.created}
-		if got := newAccount(in, 24); got != tt.want {
+		if got := newAccount(in, RuleConfig{Limit: 24}); got != tt.want {
 			t.Errorf("newAccount(%s) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
@@ -254,7 +300,7 @@ func TestCountryMismatch(t *testing.T) {
 
 	for _, tt := range tests {
 		in := Input{CardCountry: tt.card, IPCountry: tt.ip}
-		if got := countryMismatch(in, 0); got != tt.want {
+		if got := countryMismatch(in, RuleConfig{}); got != tt.want {
 			t.Errorf("countryMismatch(%s) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
@@ -275,7 +321,7 @@ func TestFiredRuleMessagesStateTheValueAndTheLimit(t *testing.T) {
 func TestNewAccountMessageNeverShowsNegativeAge(t *testing.T) {
 	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	created := event.Add(3 * time.Hour) // created after the purchase, for example from a clock skew
-	got := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, 24)
+	got := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, RuleConfig{Limit: 24})
 	if want := "Account is 0 hours old, under the limit of 24 hours"; got != want {
 		t.Errorf("message = %q, want %q", got, want)
 	}
@@ -309,10 +355,10 @@ func TestEveryConfigurableRuleHasAMessage(t *testing.T) {
 func TestMessagesUseSingularForOne(t *testing.T) {
 	event := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	created := event.Add(-time.Hour)
-	if got, want := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, 1), "Account is 1 hour old, under the limit of 1 hour"; got != want {
+	if got, want := newAccountMessage(Input{EventTime: event, AccountCreatedAt: &created}, RuleConfig{Limit: 1}), "Account is 1 hour old, under the limit of 1 hour"; got != want {
 		t.Errorf("message = %q, want %q", got, want)
 	}
-	if got, want := cardVelocityMessage(Input{CardPurchasesLastHour: 1}, 1), "Card used 1 time in 60 minutes (limit 1)"; got != want {
+	if got, want := cardVelocityMessage(Input{CardPurchasesLastHour: 1}, RuleConfig{Limit: 1}), "Card used 1 time in 60 minutes (limit 1)"; got != want {
 		t.Errorf("message = %q, want %q", got, want)
 	}
 }

@@ -208,6 +208,55 @@ func (q *Queries) GetSavedScore(ctx context.Context, arg GetSavedScoreParams) (G
 	return i, err
 }
 
+const getTrustedPurchaseHistory = `-- name: GetTrustedPurchaseHistory :one
+SELECT
+    count(*) AS trusted_count,
+    coalesce(sum(p.amount_minor), 0)::text AS total_minor,
+    coalesce(bool_or(p.device_id = $1::text), false)::boolean AS device_seen
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = $2::text
+  AND p.event_time > $3::timestamptz
+  AND (p.event_time, p.transaction_id) < ($4::timestamptz, $5::text)
+  AND CASE d.outcome
+      WHEN 'allow' THEN true
+      WHEN 'review' THEN (
+          SELECT r.decision = 'approve'
+          FROM review_resolutions r
+          WHERE r.purchase_id = p.id
+      )
+      ELSE false
+  END
+`
+
+type GetTrustedPurchaseHistoryParams struct {
+	DeviceID      string
+	PlayerID      string
+	Since         pgtype.Timestamptz
+	EventTime     pgtype.Timestamptz
+	TransactionID string
+}
+
+type GetTrustedPurchaseHistoryRow struct {
+	TrustedCount int64
+	TotalMinor   string
+	DeviceSeen   bool
+}
+
+// Use one set of trusted purchases for the count, total, and device match.
+func (q *Queries) GetTrustedPurchaseHistory(ctx context.Context, arg GetTrustedPurchaseHistoryParams) (GetTrustedPurchaseHistoryRow, error) {
+	row := q.db.QueryRow(ctx, getTrustedPurchaseHistory,
+		arg.DeviceID,
+		arg.PlayerID,
+		arg.Since,
+		arg.EventTime,
+		arg.TransactionID,
+	)
+	var i GetTrustedPurchaseHistoryRow
+	err := row.Scan(&i.TrustedCount, &i.TotalMinor, &i.DeviceSeen)
+	return i, err
+}
+
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,

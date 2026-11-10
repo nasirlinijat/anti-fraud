@@ -853,8 +853,8 @@ components:
           type: object
           description: |
             Settings keyed by `high_amount`, `card_velocity`, `new_account`,
-            `country_mismatch`, or `device_card_count`. An omitted rule is
-            disabled. An empty object disables all weighted rules.
+            `country_mismatch`, `device_card_count`, or `new_device_spike`.
+            An omitted rule is disabled. An empty object disables all weighted rules.
             Enabled rule weights must add up to at most 2147483647.
           additionalProperties:
             type: object
@@ -874,8 +874,25 @@ components:
                   Amount in minor units for `high_amount`, earlier purchases in
                   an hour for `card_velocity`, account age in hours for
                   `new_account`, or distinct cards on one device in 60 minutes
-                  for `device_card_count`. The device card count limit must be
-                  at least 1. Required except for `country_mismatch`.
+                  for `device_card_count`, or minimum trusted purchase count
+                  for `new_device_spike`. Both count limits must be at least 1.
+                  Required except for `country_mismatch`.
+              window_days:
+                type: integer
+                format: int32
+                minimum: 1
+                maximum: 3650
+                description: Trusted purchase lookback in days. Required only for `new_device_spike`.
+              min_amount_minor:
+                type: integer
+                format: int64
+                minimum: 1
+                description: Minimum purchase amount in minor units. Required only for `new_device_spike`.
+              amount_multiplier:
+                type: integer
+                format: int32
+                minimum: 2
+                description: Minimum multiple of the exact trusted average. Required only for `new_device_spike`.
           example:
             high_amount: { enabled: true, weight: 30, limit: 50000 }
             card_velocity: { enabled: true, weight: 40, limit: 5 }
@@ -1109,7 +1126,7 @@ components:
       properties:
         name:
           type: string
-          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, blocklist]
+          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
@@ -1117,7 +1134,9 @@ components:
             its limit in hours. country_mismatch fires when the card country
             differs from the IP country. device_card_count fires when the
             device reaches the distinct-card limit in 60 minutes, including
-            the current card. blocklist is the entry of a purchase
+            the current card. new_device_spike fires when a purchase on a
+            device absent from the player's trusted history reaches the
+            configured purchase count and both amount thresholds. blocklist is the entry of a purchase
             blocked because its card, device, player or IP address is on the
             blocklist. It adds no points.
           example: card_velocity

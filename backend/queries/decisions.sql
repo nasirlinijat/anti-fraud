@@ -94,6 +94,27 @@ WHERE device_id IS NOT NULL
   AND event_time <= sqlc.arg(event_time)::timestamptz
   AND card_token <> sqlc.arg(card_token)::text;
 
+-- name: GetTrustedPurchaseHistory :one
+-- Use one set of trusted purchases for the count, total, and device match.
+SELECT
+    count(*) AS trusted_count,
+    coalesce(sum(p.amount_minor), 0)::text AS total_minor,
+    coalesce(bool_or(p.device_id = sqlc.arg(device_id)::text), false)::boolean AS device_seen
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = sqlc.arg(player_id)::text
+  AND p.event_time > sqlc.arg(since)::timestamptz
+  AND (p.event_time, p.transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text)
+  AND CASE d.outcome
+      WHEN 'allow' THEN true
+      WHEN 'review' THEN (
+          SELECT r.decision = 'approve'
+          FROM review_resolutions r
+          WHERE r.purchase_id = p.id
+      )
+      ELSE false
+  END;
+
 -- name: PlayerEarlierModelScores :one
 -- Counts and sums the unblended model scores of the player's purchases that
 -- come before the given one in (event_time, transaction_id) order.
