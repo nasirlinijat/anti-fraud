@@ -3,9 +3,10 @@ package stats
 import (
 	"context"
 	"fmt"
-	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 )
 
@@ -34,47 +35,60 @@ type ModelEffects struct {
 	Cleared int64 `json:"cleared"`
 }
 
-// Summary is the dashboard data for decisions made since a time.
+// Summary is the dashboard data for a decision window.
 type Summary struct {
-	Outcomes    Outcomes     `json:"outcomes"`
-	TopRules    []RuleCount  `json:"top_rules"`
-	ReviewQueue int64        `json:"review_queue"`
-	Model       ModelEffects `json:"model"`
+	Outcomes            Outcomes       `json:"outcomes"`
+	TopRules            []RuleCount    `json:"top_rules"`
+	ReviewQueue         int64          `json:"review_queue"`
+	Model               ModelEffects   `json:"model"`
+	P95ScoringLatencyUs *int64         `json:"p95_scoring_latency_us"`
+	BlockedValueMinor   string         `json:"blocked_value_minor"`
+	DecisionSeries      DecisionSeries `json:"decision_series"`
 }
 
 // Store reads decision statistics.
 type Store struct {
-	conn db.DBTX
+	pool *pgxpool.Pool
 }
 
-func NewStore(conn db.DBTX) *Store {
-	return &Store{conn: conn}
+func NewStore(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool}
 }
 
-// Summary counts the decisions made at or after since. The review queue size is
-// the current one, whatever the period.
-func (s *Store) Summary(ctx context.Context, since time.Time, maxRules int) (Summary, error) {
-	q := db.New(s.conn)
-	at := pgtype.Timestamptz{Time: since.UTC(), Valid: true}
-	sum := Summary{TopRules: []RuleCount{}}
+// Summary reads one snapshot so decisions arriving during the poll cannot make
+// the timeline and totals disagree. The review queue size is always global.
+func (s *Store) Summary(ctx context.Context, window Window, maxRules int) (Summary, error) {
+	var sum Summary
+	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		var err error
+		sum, err = readSummary(ctx, db.New(tx), window, maxRules)
+		return err
+	})
+	return sum, err
+}
 
-	outcomes, err := q.CountOutcomes(ctx, at)
+func readSummary(ctx context.Context, q *db.Queries, window Window, maxRules int) (Summary, error) {
+	since := pgtype.Timestamptz{Time: window.Since, Valid: true}
+	until := pgtype.Timestamptz{Time: window.Until, Valid: true}
+	overview, err := q.DecisionOverview(ctx, db.DecisionOverviewParams{Since: since, Until: until})
 	if err != nil {
-		return Summary{}, fmt.Errorf("count outcomes: %w", err)
+		return Summary{}, fmt.Errorf("read decision overview: %w", err)
 	}
-	for _, o := range outcomes {
-		switch o.Outcome {
-		case "allow":
-			sum.Outcomes.Allow = o.Decisions
-		case "review":
-			sum.Outcomes.Review = o.Decisions
-		case "block":
-			sum.Outcomes.Block = o.Decisions
-		}
-		sum.Outcomes.Total += o.Decisions
+	sum := Summary{
+		Outcomes: Outcomes{Allow: overview.Allowed, Review: overview.Reviewed, Block: overview.Blocked, Total: overview.Total},
+		TopRules: []RuleCount{},
+	}
+	if overview.LatencySamples > 0 {
+		sum.P95ScoringLatencyUs = &overview.P95LatencyUs
+	}
+	if sum.BlockedValueMinor, err = q.BlockedValue(ctx, db.BlockedValueParams{Since: since, Until: until}); err != nil {
+		return Summary{}, fmt.Errorf("sum blocked value: %w", err)
+	}
+	if sum.DecisionSeries, err = readDecisionSeries(ctx, q, window, overview); err != nil {
+		return Summary{}, fmt.Errorf("read decision buckets: %w", err)
 	}
 
-	rules, err := q.TopFiredRules(ctx, db.TopFiredRulesParams{Since: at, MaxRules: int32(maxRules)})
+	rules, err := q.TopFiredRules(ctx, db.TopFiredRulesParams{Since: since, Until: until, MaxRules: int32(maxRules)})
 	if err != nil {
 		return Summary{}, fmt.Errorf("count fired rules: %w", err)
 	}
@@ -86,7 +100,7 @@ func (s *Store) Summary(ctx context.Context, since time.Time, maxRules int) (Sum
 		return Summary{}, fmt.Errorf("count review queue: %w", err)
 	}
 
-	model, err := q.CountModelEffects(ctx, at)
+	model, err := q.CountModelEffects(ctx, db.CountModelEffectsParams{Since: since, Until: until})
 	if err != nil {
 		return Summary{}, fmt.Errorf("count model effects: %w", err)
 	}

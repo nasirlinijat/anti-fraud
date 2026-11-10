@@ -1,7 +1,8 @@
-package stats_test
+package stats
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -9,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
 func testTx(t *testing.T) pgx.Tx {
@@ -45,7 +46,7 @@ func ptr[T any](v T) *T { return &v }
 
 // save stores a decision with the given outcome, rule score and fired rules,
 // decided the given time ago.
-func save(t *testing.T, tx pgx.Tx, id string, outcome scoring.Outcome, ruleScore int, rules []scoring.FiredRule, modelScore *float64, ago time.Duration) {
+func save(t *testing.T, tx pgx.Tx, id string, outcome scoring.Outcome, ruleScore int, rules []scoring.FiredRule, modelScore *float64, ago time.Duration) int64 {
 	t.Helper()
 	ctx := context.Background()
 	p := score.Purchase{
@@ -64,9 +65,10 @@ func save(t *testing.T, tx pgx.Tx, id string, outcome scoring.Outcome, ruleScore
 	if err != nil {
 		t.Fatalf("Save %s: %v", id, err)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE decisions SET decided_at = now() - $1::interval WHERE purchase_id = $2", ago.String(), purchaseID); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE decisions SET decided_at = $1 WHERE purchase_id = $2", now.Add(-ago), purchaseID); err != nil {
 		t.Fatalf("set decided_at: %v", err)
 	}
+	return purchaseID
 }
 
 func TestSummary(t *testing.T) {
@@ -87,27 +89,34 @@ func TestSummary(t *testing.T) {
 	save(t, tx, "f", scoring.OutcomeBlock, 95, []scoring.FiredRule{velocity, high, mismatch}, ptr(0.5), time.Minute) // blocked by the rules
 	save(t, tx, "old", scoring.OutcomeReview, 50, []scoring.FiredRule{high, newAccount}, nil, 3*time.Hour)
 
-	store := stats.NewStore(tx)
-	got, err := store.Summary(ctx, time.Now().Add(-time.Hour), 10)
+	window := Window{Since: now.Add(-time.Hour), Until: now, BucketWidth: 5 * time.Minute}
+	got, err := readSummary(ctx, db.New(tx), window, 10)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
-	want := stats.Summary{
-		Outcomes: stats.Outcomes{Allow: 3, Review: 2, Block: 1, Total: 6},
-		TopRules: []stats.RuleCount{
+	want := Summary{
+		Outcomes: Outcomes{Allow: 3, Review: 2, Block: 1, Total: 6},
+		TopRules: []RuleCount{
 			{Name: "high_amount", Fired: 4, Points: 120},
 			{Name: "country_mismatch", Fired: 2, Points: 50},
 			{Name: "card_velocity", Fired: 1, Points: 40},
 			{Name: "new_account", Fired: 1, Points: 20},
 		},
-		ReviewQueue: 3,
-		Model:       stats.ModelEffects{Scored: 6, Flagged: 1, Cleared: 1},
+		ReviewQueue:         3,
+		Model:               ModelEffects{Scored: 6, Flagged: 1, Cleared: 1},
+		P95ScoringLatencyUs: ptr(int64(0)),
+		BlockedValueMinor:   "1000",
+		DecisionSeries:      DecisionSeries{BucketSeconds: 300, Buckets: make([]DecisionBucket, 12)},
 	}
+	for i := range want.DecisionSeries.Buckets {
+		want.DecisionSeries.Buckets[i].Start = window.Since.Add(time.Duration(i) * window.BucketWidth)
+	}
+	want.DecisionSeries.Buckets[11] = DecisionBucket{Start: now.Add(-5 * time.Minute), Allow: 3, Review: 2, Block: 1}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("last hour summary =\n%+v\nwant\n%+v", got, want)
 	}
 
-	all, err := store.Summary(ctx, time.Unix(0, 0), 2)
+	all, err := readSummary(ctx, db.New(tx), Window{Since: time.Unix(0, 0).UTC(), Until: now}, 2)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -117,16 +126,99 @@ func TestSummary(t *testing.T) {
 	if len(all.TopRules) != 2 || all.TopRules[0].Name != "high_amount" || all.TopRules[0].Fired != 5 {
 		t.Errorf("all time top rules = %+v, want 2 rules led by high_amount fired 5 times", all.TopRules)
 	}
+	if all.DecisionSeries.BucketSeconds != 300 || len(all.DecisionSeries.Buckets) != 36 ||
+		all.DecisionSeries.Buckets[0].Review != 1 || all.DecisionSeries.Buckets[35].Allow != 3 {
+		t.Errorf("unexpected all-time series: %+v", all.DecisionSeries)
+	}
 }
 
 func TestSummaryWithoutDecisions(t *testing.T) {
 	tx := testTx(t)
-	got, err := stats.NewStore(tx).Summary(context.Background(), time.Now().Add(-time.Hour), 10)
+	got, err := readSummary(t.Context(), db.New(tx), Window{Since: time.Unix(0, 0).UTC(), Until: now}, 10)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
-	want := stats.Summary{TopRules: []stats.RuleCount{}}
+	want := Summary{
+		TopRules: []RuleCount{}, BlockedValueMinor: "0",
+		DecisionSeries: DecisionSeries{BucketSeconds: 60, Buckets: []DecisionBucket{}},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("empty summary = %+v, want %+v", got, want)
+	}
+}
+
+func TestDecisionMetricsUseTheSameWindow(t *testing.T) {
+	tx := testTx(t)
+	ctx := t.Context()
+	if _, err := tx.Exec(ctx, "SET LOCAL TIME ZONE 'America/New_York'"); err != nil {
+		t.Fatal(err)
+	}
+	window := Window{Since: now.Add(-14*time.Minute - 30*time.Second), Until: now.Add(30 * time.Second), BucketWidth: time.Minute}
+	old := save(t, tx, "before-window", scoring.OutcomeBlock, 80, nil, nil, now.Sub(window.Since)+time.Microsecond)
+	first := save(t, tx, "at-lower-bound", scoring.OutcomeBlock, 80, nil, nil, now.Sub(window.Since))
+	last := save(t, tx, "at-last-microsecond", scoring.OutcomeBlock, 80, nil, nil, now.Sub(window.Until)+time.Microsecond)
+	end := save(t, tx, "at-upper-bound", scoring.OutcomeBlock, 80, nil, nil, now.Sub(window.Until))
+	rejected := save(t, tx, "analyst-rejection", scoring.OutcomeReview, 50, nil, nil, 12*time.Minute)
+	if _, err := tx.Exec(ctx, `INSERT INTO review_resolutions (purchase_id, decision, analyst_id) VALUES ($1, 'reject', 'test')`, rejected); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE decisions SET scoring_latency_us = NULL WHERE purchase_id = ANY($1::bigint[])`, []int64{old, first, last, end, rejected}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE purchases SET amount_minor = 9223372036854775807 WHERE id = ANY($1::bigint[])`, []int64{first, last}); err != nil {
+		t.Fatal(err)
+	}
+	legacyOnly, err := readSummary(ctx, db.New(tx), window, 10)
+	if err != nil || legacyOnly.P95ScoringLatencyUs != nil {
+		t.Fatalf("legacy-only p95 = %v, error = %v", legacyOnly.P95ScoringLatencyUs, err)
+	}
+
+	for ms := 1; ms <= 20; ms++ {
+		id := save(t, tx, fmt.Sprintf("latency-%d", ms), scoring.OutcomeAllow, 0, nil, nil, 12*time.Minute)
+		if _, err := tx.Exec(ctx, "UPDATE decisions SET scoring_latency_us = $1 WHERE purchase_id = $2", ms*1000, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sum, err := readSummary(ctx, db.New(tx), window, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.P95ScoringLatencyUs == nil || *sum.P95ScoringLatencyUs != 19000 || sum.BlockedValueMinor != "18446744073709551614" {
+		t.Fatalf("unexpected p95 or blocked value: %+v", sum)
+	}
+	if sum.Outcomes != (Outcomes{Allow: 20, Review: 1, Block: 2, Total: 23}) || sum.ReviewQueue != 0 {
+		t.Fatalf("unexpected outcomes or queue: %+v", sum)
+	}
+	series := sum.DecisionSeries
+	if series.BucketSeconds != 60 || len(series.Buckets) != 16 {
+		t.Fatalf("unexpected bucket size or count: %+v", series)
+	}
+	for i, got := range series.Buckets {
+		want := DecisionBucket{Start: now.Add(time.Duration(i-15) * time.Minute)}
+		switch i {
+		case 0, 15:
+			want.Block = 1
+		case 3:
+			want.Allow, want.Review = 20, 1
+		}
+		if got != want {
+			t.Errorf("bucket %d = %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+func TestAllTimeBucketWidth(t *testing.T) {
+	for _, test := range []struct{ span, want time.Duration }{
+		{48 * time.Minute, time.Minute},
+		{48*time.Minute + time.Microsecond, 5 * time.Minute},
+		{10 * 24 * time.Hour, 6 * time.Hour},
+		{200 * 24 * time.Hour, 7 * 24 * time.Hour},
+		{2000 * 24 * time.Hour, 42 * 24 * time.Hour},
+	} {
+		// An epoch-aligned start makes the expected number of buckets explicit.
+		start := time.Unix(0, 0).UTC()
+		if got := allTimeBucketWidth(start, start.Add(test.span)); got != test.want {
+			t.Errorf("%v span width = %v, want %v", test.span, got, test.want)
+		}
 	}
 }

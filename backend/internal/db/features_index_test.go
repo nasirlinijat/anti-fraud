@@ -30,6 +30,8 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 	}
 
 	at := pgtype.Timestamptz{Time: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC), Valid: true}
+	until := pgtype.Timestamptz{Time: at.Time.Add(time.Hour), Valid: true}
+	width := pgtype.Interval{Microseconds: (5 * time.Minute).Microseconds(), Valid: true}
 	device := pgtype.Text{String: "Windows", Valid: true}
 	client := pgtype.Text{String: "Windows 10", Valid: true}
 	queries := []struct {
@@ -41,10 +43,12 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CardHistory", cardHistory, []any{at, "card-1", "txn-1"}},
 		{"IssuerHistory", issuerHistory, []any{"1001", at, "txn-1"}},
 		{"FeatureCounts", featureCounts, []any{"gmail.com", device, client, client, client}},
-		{"CountOutcomes", countOutcomes, []any{at}},
-		{"TopFiredRules", topFiredRules, []any{at, int32(10)}},
+		{"DecisionOverview", decisionOverview, []any{at, until}},
+		{"BlockedValue", blockedValue, []any{at, until}},
+		{"CountDecisionBuckets", countDecisionBuckets, []any{width, at, until}},
+		{"TopFiredRules", topFiredRules, []any{at, until, int32(10)}},
 		{"CountReviewQueue", countReviewQueue, nil},
-		{"CountModelEffects", countModelEffects, []any{at}},
+		{"CountModelEffects", countModelEffects, []any{at, until}},
 		{"ListModelInputs", listModelInputs, []any{at, "txn-1", int32(5000)}},
 		{"PlayerEarlierModelScores", playerEarlierModelScores, []any{"player-1", at, "txn-1"}},
 	}
