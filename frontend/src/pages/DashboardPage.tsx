@@ -39,7 +39,7 @@ function DashboardPage() {
   const time = useTimeDisplay()
 
   const load = useCallback((signal: AbortSignal) => getStats(period, signal), [period])
-  const { stop } = usePolling(load, {
+  const { stop, retry, pending } = usePolling(load, {
     intervalMs: REFRESH_MS,
     onSuccess: (result) => {
       setStats(result)
@@ -70,8 +70,17 @@ function DashboardPage() {
           ))}
         </div>
       </div>
-      {error && <ErrorState polite>{error} Retrying every {REFRESH_MS / 1000} seconds.</ErrorState>}
-      {!shown && !error && <LoadingSkeleton label="Loading dashboard…" />}
+      {error && (
+        <ErrorState polite onRetry={retry} pending={pending}>
+          {error} {shown && 'Showing the last successful update for this period. '}Retrying automatically.
+        </ErrorState>
+      )}
+      {!shown && (!error || pending) && (
+        <>
+          <LoadingSkeleton shape="metrics" label="Loading dashboard…" />
+          <LoadingSkeleton shape="chart" label="Loading decisions over time…" />
+        </>
+      )}
       {shown && (
         <div className="dashboard-update">
           <p className="muted small">
@@ -123,7 +132,7 @@ function DashboardPage() {
           </div>
 
           {shown.decision_series?.buckets.length > 0 && (
-            <Suspense fallback={<LoadingSkeleton label="Loading decisions over time…" />}>
+            <Suspense fallback={<LoadingSkeleton shape="chart" label="Loading decisions over time…" />}>
               <DecisionChart series={shown.decision_series} since={shown.since} until={shown.generated_at} />
             </Suspense>
           )}
@@ -177,7 +186,7 @@ function DashboardPage() {
 
           {outcomes.total === 0 && (
             <EmptyState>
-              No decisions in this period yet. Send purchases from the Tester page, or run the simulator with{' '}
+              No decisions in this period yet. Choose another period, score a purchase in <a href="#/tester">Tester</a>, or run{' '}
               <code>make simulate</code>.
             </EmptyState>
           )}
