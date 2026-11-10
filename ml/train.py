@@ -4,10 +4,13 @@ Usage (from the ml folder):
     python train.py data/train_transaction.csv
 """
 import argparse
+import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
+import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -82,6 +85,46 @@ def lightgbm_model():
         n_jobs=-1,
         verbose=-1,
     )
+
+
+def fingerprint(seed, params, *arrays):
+    """Identifies one training run: the seed, the settings and the data."""
+    digest = hashlib.sha256(json.dumps({"seed": seed, "params": params}, sort_keys=True, default=str).encode())
+    for values in arrays:
+        digest.update(np.ascontiguousarray(np.asarray(values, dtype=float)).tobytes())
+    return digest.hexdigest()
+
+
+def fit_lightgbm(seed, x_train, y_train, x_val, y_val, checkpoint=None):
+    """Trains one LightGBM model with early stopping on validation.
+
+    With checkpoint (a file path), the finished model is saved there. A later
+    run with the same seed, settings and data loads it instead of training
+    again, so a run that was interrupted continues after its finished models.
+    """
+    model = lightgbm_model()
+    model.set_params(random_state=seed)
+    key = fingerprint(seed, model.get_params(), x_train, y_train, x_val, y_val)
+    if checkpoint is not None and Path(checkpoint).exists():
+        saved = joblib.load(checkpoint)
+        if saved["fingerprint"] == key:
+            print(f"loaded the finished model from {checkpoint}")
+            return saved["model"]
+    model.fit(
+        x_train, y_train,
+        eval_X=x_val,
+        eval_y=y_val,
+        eval_metric="average_precision",
+        callbacks=[lgb.early_stopping(200, verbose=False)],
+    )
+    if checkpoint is not None:
+        checkpoint = Path(checkpoint)
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        # Written to a second file first, so a crash never leaves half a checkpoint.
+        unfinished = checkpoint.with_name(checkpoint.name + ".tmp")
+        joblib.dump({"fingerprint": key, "model": model}, unfinished)
+        os.replace(unfinished, checkpoint)
+    return model
 
 
 def at_false_positive_rate(y, score, rate, amount=None):
@@ -199,18 +242,12 @@ def main():
 
     # The main model is the average of several models trained with different
     # random seeds; averaging smooths out each model's chance splits.
-    models = []
-    for seed in AVERAGE_SEEDS[: args.models]:
-        m = lightgbm_model()
-        m.set_params(random_state=seed)
-        m.fit(
-            x_train, y_train,
-            eval_X=x_val,
-            eval_y=y_val,
-            eval_metric="average_precision",
-            callbacks=[lgb.early_stopping(200, verbose=False)],
-        )
-        models.append(m)
+    # Every finished model is saved, so an interrupted run continues after it.
+    checkpoints = out_dir / "checkpoints" / args.version
+    models = [
+        fit_lightgbm(seed, x_train, y_train, x_val, y_val, checkpoints / f"main-seed{seed}.joblib")
+        for seed in AVERAGE_SEEDS[: args.models]
+    ]
     single_test = models[0].predict_proba(x_test)[:, 1]
     model_val = export.average_proba(models, x_val)
     model_test = export.average_proba(models, x_test)
@@ -246,13 +283,8 @@ def main():
     # easy to recognize but not new fraud.
     keep_train = keep.loc[train.index].to_numpy()
     keep_val = keep.loc[validation.index].to_numpy()
-    first = lightgbm_model()
-    first.fit(
-        x_train[keep_train], y_train[keep_train],
-        eval_X=x_val[keep_val],
-        eval_y=y_val[keep_val],
-        eval_metric="average_precision",
-        callbacks=[lgb.early_stopping(200, verbose=False)],
+    first = fit_lightgbm(
+        SEED, x_train[keep_train], y_train[keep_train], x_val[keep_val], y_val[keep_val], checkpoints / "first.joblib"
     )
     first_val = first.predict_proba(x_val)[:, 1]
     first_test = first.predict_proba(x_test)[:, 1]

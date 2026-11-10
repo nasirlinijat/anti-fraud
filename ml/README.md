@@ -2,7 +2,7 @@
 
 Trains the fraud model on the IEEE-CIS dataset. Python is used only offline; the Go service loads the exported model.
 
-The service loads **`lgbm-ieee-v5-combined`** by default. [Current results](#current-results) describes how it performs; [History of changes](#history-of-changes) keeps the results of earlier versions.
+The service loads **`lgbm-ieee-v5-combined`** by default. [Current results](#current-results) describes how it performs; [History of changes](#history-of-changes) keeps the results of earlier versions. A second model, **`lgbm-game-v1`**, is trained on the simulator's game traffic, see [Game model](#game-model-simulated-traffic).
 
 ## Setup
 
@@ -121,6 +121,55 @@ The report keeps both baselines (`logistic_regression` and `logistic_regression_
 
 Most model variants in [History of changes](#history-of-changes) were compared on the test month, so the test month is no longer a fully unbiased estimate, and gains of a few thousandths of PR-AUC are within noise for about 3,000 frauds. Moving these comparisons to validation folds is tracked in AF-94.
 
+## Game model (simulated traffic)
+
+IEEE-CIS is card data from 2017 with no game signals. On the simulator's game traffic the IEEE-CIS model flags 0.09% of purchases and catches 1% of the fraud, so it adds almost nothing to what the demo shows. `lgbm-game-v1` is trained on the simulator's own traffic with the same 50 features and the same LightGBM settings. **Every number in this section is for simulated traffic. It says how well the model learns the simulator's scenarios, not how it would do on real fraud;** the real-data result is the IEEE-CIS model above.
+
+Generate labelled traffic (from `backend`). `-dump` writes the purchases with their scenario and fraud label to a file and calls no API:
+
+```bash
+go run ./cmd/simulator -dump ../ml/data/game/world1.jsonl -count 600000 -players 6000 -seed 11 -start 2026-01-01T00:00:00Z -run w1
+go run ./cmd/simulator -dump ../ml/data/game/world2.jsonl -count 150000 -players 2500 -seed 23 -start 2026-01-01T00:00:00Z -run w2
+```
+
+Train (from `ml`):
+
+```bash
+.venv/bin/python train_game.py data/game/world1.jsonl --second-world data/game/world2.jsonl
+```
+
+It writes `backend/models/lgbm-game-v1.json`, its golden rows and its report. The first world covers 125 days: days 0-13 only build history, training uses days 14-84, validation days 90-104 (early stopping and thresholds) and test days 105-124. The second world has other players and another seed and is only scored. To run the service with this model, set `MODEL_PATH=models/lgbm-game-v1.json`. Which model the service loads by default is a team decision; this change does not switch it.
+
+Training saves every finished model in `output/checkpoints/<version>/`. If a run is interrupted, start the same command again: finished models are loaded and only the missing ones are trained. A checkpoint is used only for the same seed, settings and data. `train.py` does the same.
+
+Results with thresholds chosen on validation (`flag_at` 0.527689 at a 0.5% review rate, `clear_below` 0.186039):
+
+| Simulated traffic | Purchases | Flagged | Precision | Fraud caught |
+|---|---|---|---|---|
+| Test days of the first world, `lgbm-game-v1` | 93,922 | 9.7% | 95.5% | 95.1% |
+| Second world, `lgbm-game-v1` | 81,962 | 9.7% | 95.7% | 95.1% |
+| Test days of the first world, `lgbm-ieee-v5-combined` with its own thresholds | 93,922 | 0.09% | 100% | 1.0% |
+
+Share of each scenario flagged on the test days:
+
+| Fraud scenario | Flagged | Legitimate scenario | Flagged |
+|---|---|---|---|
+| Card testing | 100% | Normal | 0.0% |
+| New account spend | 100% | Burst buyer | 0.0% |
+| Stolen card | 100% | Internet cafe | 0.0% |
+| Account takeover | 94% | Traveler | 0.0% |
+| Low and slow | 48% | New phone | 1.3% |
+| | | New casual player | 18% |
+| | | Returning player | 36% |
+
+Limits that the numbers above hide:
+
+- The simulator is easy. About 10% of its purchases are fraud, and the logistic regression baseline already reaches ROC-AUC 0.995 on the test days (LightGBM 0.999).
+- Scenario players always start with an old account and no purchase history, and the model uses that: it flags a third of returning players, who look the same as low and slow fraud.
+- Checking how much of the result comes from such tells (leave one scenario out, a realistic fraud share) is tracked in AF-98.
+
+Replay through the service (2026-11-10, first 10,000 purchases of the second world on an empty database, see the next section): the live score equals the Python score for every purchase (largest difference 2.2e-16) with the same flag decisions, and latency p50 / p95 / p99 of 8.0 / 12.3 / 20.3 ms. On those purchases the rules alone stopped 43% of the fraud at 99.8% precision; the rules with the model stopped 92% at 61% precision. Precision is lower than in the table because the database starts empty: every regular player's first purchases have no history, and 6.4% of normal purchases were flagged. The model also cleared 7 of 92 account takeover purchases that the rules had sent to review. Both effects belong to AF-98.
+
 ## Replay through the score API
 
 `replay.py` sends IEEE-CIS purchases to a running backend through `POST /score`, in time order and in the API format, and compares the live decisions with Python. Fraud labels never reach the service; they stay in the script and in the report.
@@ -152,7 +201,13 @@ Then, from `ml`:
 .venv/bin/python replay.py data/train_transaction.csv --url http://localhost:8082 --api-key replay-key
 ```
 
-By default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 10000` for a quick check. A full run sends about 170,000 purchases and takes about 40 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts` in that database.
+A simulator dump is replayed the same way, from its first purchase, with the model trained on it; the report then also shows, per scenario, how many purchases the rules alone and the rules with the model stopped:
+
+```bash
+.venv/bin/python replay.py --requests data/game/world2.jsonl --limit 10000 --model ../backend/models/lgbm-game-v1.json --url http://localhost:8082 --api-key replay-key --out output/replay-game
+```
+
+For IEEE-CIS, by default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 10000` for a quick check. A full run sends about 170,000 purchases and takes about 40 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts` in that database.
 
 It writes to `output/replay/`:
 
@@ -206,7 +261,7 @@ Trains one model per feature set (base, base plus each group, all groups, all mi
 .venv/bin/python -m pytest tests
 ```
 
-The tests use synthetic purchases in `testdata/`, so they run without the dataset. They check exact feature values, that adding later purchases never changes earlier features, the window boundaries, the time split, the baseline's handling of missing values and the model export. After changing a feature, regenerate the expected values with `python make_fixture.py` and check the differences.
+The tests use synthetic purchases in `testdata/`, so they run without the dataset. They check exact feature values, that adding later purchases never changes earlier features, the window boundaries, the time split, the baseline's handling of missing values, loading a simulator dump, the training checkpoints and the model export. After changing a feature, regenerate the expected values with `python make_fixture.py` and check the differences.
 
 ## Features
 

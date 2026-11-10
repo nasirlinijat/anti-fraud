@@ -1,4 +1,5 @@
-// Command simulator sends seeded demo purchases to the score API.
+// Command simulator sends seeded demo purchases to the score API, or writes
+// them with their fraud labels to a file for model training.
 package main
 
 import (
@@ -33,15 +34,18 @@ func main() {
 	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of events that start a special scenario (legitimate or fraud), from 0 to 1")
 	flag.IntVar(&cfg.Players, "players", cfg.Players, "number of regular players")
 	flag.DurationVar(&cfg.MeanGap, "gap", cfg.MeanGap, "mean simulated time between traffic events")
+	dump := flag.String("dump", "", "write the purchases with their fraud labels to this JSON Lines file instead of sending them")
 	flag.Parse()
 
-	if *apiKey == "" {
+	if *apiKey == "" && *dump == "" {
 		log.Fatal("API key is missing: set API_KEY or pass -api-key")
 	}
 	live := *count == 0
 	switch {
 	case *count < 0:
 		log.Fatalf("count must not be negative, got %d", *count)
+	case live && *dump != "":
+		log.Fatal("-dump needs a positive -count")
 	case live:
 		if *start != "" {
 			log.Fatal("-start can only be used with a positive -count")
@@ -79,6 +83,13 @@ func main() {
 			log.Fatalf("generate purchases: %v", err)
 		}
 	}
+	if *dump != "" {
+		if err := writeDump(*dump, purchases); err != nil {
+			log.Fatalf("write %s: %v", *dump, err)
+		}
+		log.Printf("wrote %d purchases to %s (seed %d, run %s)", len(purchases), *dump, cfg.Seed, cfg.Run)
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -104,6 +115,18 @@ func main() {
 	if runFailed || sum.Failed > 0 {
 		os.Exit(1)
 	}
+}
+
+func writeDump(path string, purchases []simulator.Purchase) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := simulator.WriteJSONL(f, purchases); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func printSummary(sum simulator.Summary) {

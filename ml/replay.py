@@ -11,6 +11,10 @@ every purchase already saved:
 Usage (from the ml folder):
     python replay.py data/train_transaction.csv --api-key local-dev-key
 
+Simulated game traffic written by the simulator's -dump option is replayed
+the same way, with the model trained on it:
+    python replay.py --requests data/game/world1.jsonl --limit 10000 --model ../backend/models/lgbm-game-v1.json --api-key local-dev-key
+
 Fraud labels never reach the service: they stay in this script and in the
 report it writes.
 """
@@ -161,16 +165,42 @@ def score_quality(is_fraud, score):
     }
 
 
-def build_report(rows, args, policy):
+def dumped_requests(path, transaction_ids):
+    """Reads the score requests of a simulator dump, in the given order."""
+    requests = {}
+    with open(path, encoding="utf-8") as lines:
+        for line in lines:
+            request = json.loads(line)["request"]
+            requests[request["transaction_id"]] = request
+    return [requests[transaction_id] for transaction_id in transaction_ids]
+
+
+def scenario_outcomes(rows):
+    """Per simulated scenario: the share of purchases the rules alone and the
+    rules with the model send to review or block."""
+    summary = []
+    for pattern, part in rows.groupby("pattern", sort=True):
+        rules = rule_outcome(part["rule_score"].to_numpy())
+        summary.append({
+            "scenario": pattern,
+            "fraud": bool(part["is_fraud"].max()),
+            "purchases": int(len(part)),
+            "rules_only_stopped": round(float(np.isin(rules, ["review", "block"]).mean()), 4),
+            "rules_and_model_stopped": round(float(part["outcome"].isin(["review", "block"]).mean()), 4),
+        })
+    return summary
+
+
+def build_report(rows, args, policy, test_first_day=TEST_FIRST_DAY):
     diff = (rows["live_score"] - rows["python_score"]).abs()
-    test = rows[rows["day"] >= TEST_FIRST_DAY]
+    test = rows[rows["day"] >= test_first_day]
     test_first = test[test["first_fraud_only"]]
     y = test["is_fraud"].to_numpy()
     model_only = np.where(test["python_score"] >= policy["flag_at"], "review", "allow")
     has_both_labels = len(set(y)) == 2
     return {
         "replayed_days": f"{int(rows['day'].min())}-{int(rows['day'].max())}",
-        "history_days_before_test": TEST_FIRST_DAY - args.from_day,
+        "history_days_before_test": test_first_day - args.from_day,
         "purchases": int(len(rows)),
         "test_month_purchases": int(len(test)),
         "test_month_fraud_rate": round(float(y.mean()), 4) if len(y) else None,
@@ -200,7 +230,8 @@ def build_report(rows, args, policy):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("csv")
+    parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
+    parser.add_argument("--requests", help="replay a simulator dump (JSON Lines) instead of IEEE-CIS")
     parser.add_argument("--url", default="http://localhost:8080")
     parser.add_argument("--api-key", required=True)
     parser.add_argument("--from-day", type=int, default=TEST_FIRST_DAY - features.WARM_UP_DAYS,
@@ -212,8 +243,15 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    data = features.load(args.csv)
-    data = data[data["day"] >= args.from_day].reset_index(drop=True)
+    if bool(args.csv) == bool(args.requests):
+        parser.error("give either the IEEE-CIS CSV or --requests")
+    if args.requests:
+        # A dump is replayed from its first purchase, and all of it is measured.
+        args.from_day = 0
+        data = features.load_requests(args.requests)
+    else:
+        data = features.load(args.csv)
+        data = data[data["day"] >= args.from_day].reset_index(drop=True)
     if args.limit:
         data = data.head(args.limit)
     print(f"replaying {len(data)} purchases from day {args.from_day} to {args.url}")
@@ -239,7 +277,8 @@ def main():
         python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
 
     started = time.time()
-    live = send(requests_from(data), Client(args.url, args.api_key))
+    requests = dumped_requests(args.requests, data["TransactionID"]) if args.requests else requests_from(data)
+    live = send(requests, Client(args.url, args.api_key))
     print(f"sent {len(live)} purchases in {(time.time() - started) / 60:.1f} min")
 
     rows = pd.DataFrame({
@@ -249,12 +288,16 @@ def main():
         "first_fraud_only": train.first_fraud_only(built).to_numpy(),
         "python_score": python_score,
     })
+    if args.requests:
+        rows["pattern"] = data["pattern"].to_numpy()
     rows = pd.concat([rows, live], axis=1)
     rows.to_csv(out_dir / "replay_rows.csv", index=False)
     # Labels stay outside the service; train.py --inputs joins them with the export.
     rows[["transaction_id", "is_fraud"]].to_csv(out_dir / "labels.csv", index=False)
 
-    report = build_report(rows, args, policy)
+    report = build_report(rows, args, policy, test_first_day=0 if args.requests else TEST_FIRST_DAY)
+    if args.requests:
+        report["scenarios"] = scenario_outcomes(rows)
     (out_dir / "replay_report.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
 

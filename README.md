@@ -92,6 +92,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
+| `-dump` | none | Write the purchases with their scenario and fraud label to this JSON Lines file instead of sending them. Needs a positive count and no API key. Used to train the game model, see `ml/README.md` |
 
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
