@@ -21,7 +21,9 @@ type QueueItem struct {
 	EventTime     time.Time
 	AmountMinor   int64
 	PlayerID      string
-	RuleScore     int
+	// DeviceID is nil when the purchase carried no device ID.
+	DeviceID  *string
+	RuleScore int
 	// ModelScore is nil when the purchase was scored without a model.
 	ModelScore *float64
 	// ModelVersion is the version of the model that gave ModelScore.
@@ -33,8 +35,6 @@ type QueueItem struct {
 // CaseItem is a purchase marked for review, with the evidence behind the decision.
 type CaseItem struct {
 	QueueItem
-	// DeviceID is nil when the purchase carried no device ID.
-	DeviceID *string
 	// RulesetVersion is the ruleset version that scored the purchase.
 	RulesetVersion int
 }
@@ -127,7 +127,7 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 
 	items := make([]QueueItem, 0, len(rows))
 	for _, r := range rows {
-		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
 			r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
 		if err != nil {
 			return nil, err
@@ -147,21 +147,16 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 	if err != nil {
 		return CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
 	}
-	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
 		r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
 	if err != nil {
 		return CaseItem{}, err
 	}
-	reviewCase := CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}
-	if r.DeviceID.Valid {
-		device := r.DeviceID.String
-		reviewCase.DeviceID = &device
-	}
-	return reviewCase, nil
+	return CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}, nil
 }
 
 func newQueueItem(
-	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string,
+	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string, deviceID pgtype.Text,
 	ruleScore int32, modelScore pgtype.Float8, modelVersion pgtype.Text, firedRules []byte, decidedAt pgtype.Timestamptz,
 ) (QueueItem, error) {
 	var fired []scoring.FiredRule
@@ -177,6 +172,10 @@ func newQueueItem(
 		RuleScore:     int(ruleScore),
 		FiredRules:    fired,
 		DecidedAt:     decidedAt.Time.UTC(),
+	}
+	if deviceID.Valid {
+		device := deviceID.String
+		item.DeviceID = &device
 	}
 	if modelScore.Valid {
 		score := modelScore.Float64

@@ -26,7 +26,7 @@ INSERT INTO decisions (
 );
 
 -- name: ListReviewQueue :many
-SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id

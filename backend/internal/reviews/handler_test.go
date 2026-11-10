@@ -151,7 +151,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	if first.PurchaseID != "9007199254740993" || first.AmountMinor != "9223372036854775807" ||
 		first.EventTime.Format(time.RFC3339Nano) != "2026-11-09T05:59:00.123456Z" ||
 		first.QueuedAt.Format(time.RFC3339Nano) != "2026-11-09T06:00:00.123456Z" ||
-		first.RuleScore != 60 || first.PlayerID != "player" || first.TransactionID != "first" ||
+		first.RuleScore != 60 || first.PlayerID != "player" || first.DeviceID != nil || first.TransactionID != "first" ||
 		first.ModelScore != nil || first.ModelVersion != nil || first.FiredRules == nil || len(first.FiredRules) != 0 {
 		t.Fatalf("unexpected first review: %+v", first)
 	}
@@ -246,7 +246,7 @@ func TestCaseShowsDeviceID(t *testing.T) {
 	for name, want := range map[string]*string{"with device": &device, "without device": nil} {
 		t.Run(name, func(t *testing.T) {
 			store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
-				return CaseItem{QueueItem: QueueItem{PurchaseID: id}, DeviceID: want, RulesetVersion: 1}, nil
+				return CaseItem{QueueItem: QueueItem{PurchaseID: id, DeviceID: want}, RulesetVersion: 1}, nil
 			})
 			var body map[string]any
 			w := requestCase(t, store, "/reviews/7", queueTestKey)

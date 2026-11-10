@@ -12,6 +12,8 @@ import (
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
@@ -235,5 +237,51 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 	approve := withDevice("block-approve", "device-approve")
 	if rec := decide(approve, `{"decision":"approve","block_device":true}`); rec.Code != http.StatusBadRequest || blocked("device-approve") {
 		t.Fatalf("approval with the option = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-approve"))
+	}
+}
+
+// TestRejectedDeviceBlocksNextScoredPurchase rejects a review with the device
+// option and then scores a new purchase from that device: it is blocked, with
+// no restart or cache in between.
+func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t))
+	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), score.NewStore(tx)), serviceTestKey)
+
+	scoreFrom := func(txnID, device string) string {
+		t.Helper()
+		body := `{"transaction_id":"` + txnID + `","event_time":"2026-11-09T10:00:00Z","amount_minor":1999,"player_id":"score-player","card_token":"score-card","device_id":"` + device + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
+		req.Header.Set(platform.APIKeyHeader, serviceTestKey)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("score %s: status %d body %s", txnID, rec.Code, rec.Body)
+		}
+		return rec.Body.String()
+	}
+
+	const device = "device-e2e-reject"
+	if got := scoreFrom("e2e-before", device); !strings.Contains(got, `"outcome":"allow"`) {
+		t.Fatalf("before the rejection: %s, want allow", got)
+	}
+
+	id := insertDecision(t, tx, "e2e-review", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
+	if _, err := tx.Exec(ctx, `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
+		t.Fatalf("set device ID: %v", err)
+	}
+	rec := reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", queueTestKey,
+		`{"decision":"reject","block_device":true}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("reject: status %d body %s", rec.Code, rec.Body)
+	}
+
+	if got := scoreFrom("e2e-after", device); !strings.Contains(got, `"outcome":"block"`) {
+		t.Fatalf("after the rejection: %s, want block", got)
+	}
+	if got := scoreFrom("e2e-other-device", "device-unrelated"); !strings.Contains(got, `"outcome":"allow"`) {
+		t.Fatalf("a different device: %s, want allow", got)
 	}
 }

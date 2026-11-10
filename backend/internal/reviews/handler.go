@@ -69,6 +69,7 @@ type reviewResponse struct {
 	QueuedAt      time.Time           `json:"queued_at"`
 	AmountMinor   string              `json:"amount_minor"`
 	PlayerID      string              `json:"player_id"`
+	DeviceID      *string             `json:"device_id"`
 	RuleScore     int                 `json:"rule_score"`
 	ModelScore    *float64            `json:"model_score"`
 	ModelVersion  *string             `json:"model_version"`
@@ -77,8 +78,7 @@ type reviewResponse struct {
 
 type caseResponse struct {
 	reviewResponse
-	DeviceID       *string `json:"device_id"`
-	RulesetVersion int     `json:"ruleset_version"`
+	RulesetVersion int `json:"ruleset_version"`
 }
 
 type queueResponse struct {
@@ -131,7 +131,6 @@ func serveCase(w http.ResponseWriter, r *http.Request, store caseReader) {
 	}
 	platform.WriteJSON(w, http.StatusOK, caseResponse{
 		reviewResponse: newReviewResponse(item.QueueItem),
-		DeviceID:       item.DeviceID,
 		RulesetVersion: item.RulesetVersion,
 	})
 }
@@ -148,6 +147,7 @@ func newReviewResponse(row QueueItem) reviewResponse {
 		QueuedAt:      row.DecidedAt.UTC(),
 		AmountMinor:   strconv.FormatInt(row.AmountMinor, 10),
 		PlayerID:      row.PlayerID,
+		DeviceID:      row.DeviceID,
 		RuleScore:     row.RuleScore,
 		ModelScore:    row.ModelScore,
 		ModelVersion:  row.ModelVersion,

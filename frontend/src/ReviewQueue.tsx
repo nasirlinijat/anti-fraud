@@ -4,6 +4,7 @@ type Review = {
   purchase_id: string
   transaction_id: string
   player_id: string
+  device_id: string | null
   amount_minor: string
   event_time: string
   queued_at: string
@@ -493,10 +494,10 @@ function ReviewQueue() {
               {confirmation?.decision === 'approve' ? 'Approve' : 'Reject'} this purchase?
             </h3>
             <p>Transaction {confirmation?.item.transaction_id}. This decision is final.</p>
-            {confirmation?.decision === 'reject' && (
+            {confirmation?.decision === 'reject' && confirmation.item.device_id !== null && (
               <label className="review-block-device">
                 <input type="checkbox" checked={blockDevice} onChange={event => setBlockDevice(event.target.checked)} />
-                {' '}Also block this purchase&apos;s device, if it has one
+                {' '}Also block this purchase&apos;s device ({confirmation.item.device_id})
               </label>
             )}
             <form method="dialog" className="review-actions">
