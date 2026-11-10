@@ -693,7 +693,9 @@ components:
           format: date-time
           description: >-
             When the purchase happened, in RFC 3339 with a time zone. It is
-            converted to UTC.
+            converted to UTC. It must not be more than 5 minutes after the
+            server's current time; past times are allowed, so recorded
+            traffic can be replayed.
           example: "2026-11-08T10:00:00Z"
         amount_minor:
           type: integer

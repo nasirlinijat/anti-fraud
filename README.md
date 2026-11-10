@@ -102,7 +102,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | Option | Default | Meaning |
 |---|---|---|
 | `-seed` | 1 | Random seed. The same seed and start give the same purchases |
-| `-start` | now | Event time of the first purchase, in RFC 3339 |
+| `-start` | the last purchase happens now | Event time of the first purchase, in RFC 3339. The score API rejects event times more than 5 minutes in the future, so a later start fails |
 | `-count` | 500 | Number of purchases to send |
 | `-rate` | 20 | Purchases sent per second, 0 for as fast as possible |
 | `-suspicious` | 0.1 | Share of traffic events that start a suspicious pattern |

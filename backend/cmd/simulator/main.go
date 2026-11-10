@@ -26,7 +26,7 @@ func main() {
 	apiKey := flag.String("api-key", os.Getenv("API_KEY"), "API key for POST /score (default $API_KEY)")
 	count := flag.Int("count", 500, "number of purchases to send")
 	rate := flag.Float64("rate", 20, "purchases sent per second, 0 for as fast as possible")
-	start := flag.String("start", "", "event time of the first purchase in RFC 3339 (default now)")
+	start := flag.String("start", "", "event time of the first purchase in RFC 3339 (default: the last purchase happens now)")
 	run := flag.String("run", "", "prefix of all generated IDs (default built from seed and start)")
 	flag.Uint64Var(&cfg.Seed, "seed", cfg.Seed, "random seed; the same seed and start give the same purchases")
 	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of traffic events that are suspicious, from 0 to 1")
@@ -37,13 +37,20 @@ func main() {
 	if *apiKey == "" {
 		log.Fatal("API key is missing: set API_KEY or pass -api-key")
 	}
-	cfg.Start = time.Now().UTC().Truncate(time.Second)
 	if *start != "" {
 		t, err := time.Parse(time.RFC3339, *start)
 		if err != nil {
 			log.Fatalf("start must be RFC 3339, for example 2026-11-09T10:00:00Z: %v", err)
 		}
 		cfg.Start = t.UTC()
+	} else {
+		// The score API rejects event times more than a few minutes ahead, so
+		// the generated traffic ends now instead of starting now.
+		var err error
+		cfg.Start, err = simulator.StartEndingAt(cfg, *count, time.Now().UTC().Truncate(time.Second))
+		if err != nil {
+			log.Fatalf("generate purchases: %v", err)
+		}
 	}
 	cfg.Run = *run
 	if cfg.Run == "" {
