@@ -27,6 +27,10 @@ func (m *fakeModel) Predict(x []float64) (float64, error) {
 	return m.score, m.err
 }
 
+const fakeModelVersion = "fake-model-v1"
+
+func (m *fakeModel) Version() string { return fakeModelVersion }
+
 func (m *fakeModel) Features() []string {
 	if m.features != nil {
 		return m.features
@@ -90,9 +94,15 @@ func TestModelChangesOutcome(t *testing.T) {
 			if got.ModelScore == nil || *got.ModelScore != tt.score {
 				t.Errorf("response model_score = %v, want %v", got.ModelScore, tt.score)
 			}
+			if got.ModelVersion == nil || *got.ModelVersion != fakeModelVersion {
+				t.Errorf("response model_version = %v, want %s", got.ModelVersion, fakeModelVersion)
+			}
 			d := purchases.decisions[0]
 			if d.Result.Outcome != tt.want || d.ModelScore == nil || *d.ModelScore != tt.score {
 				t.Errorf("saved decision outcome %s, model score %v; want %s, %v", d.Result.Outcome, d.ModelScore, tt.want, tt.score)
+			}
+			if d.ModelVersion == nil || *d.ModelVersion != fakeModelVersion {
+				t.Errorf("saved model version = %v, want %s", d.ModelVersion, fakeModelVersion)
 			}
 		})
 	}

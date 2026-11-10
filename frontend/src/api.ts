@@ -14,6 +14,7 @@ export interface ScoreResponse {
   fired_rules: FiredRule[]
   ruleset_version: number
   model_score: number | null
+  model_version: string | null
 }
 
 export interface ErrorResponse {

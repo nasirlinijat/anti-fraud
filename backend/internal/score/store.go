@@ -59,6 +59,9 @@ type Decision struct {
 	// ModelScoreUnblended is the main model's own score, before blending and
 	// before combining with other models.
 	ModelScoreUnblended *float64
+	// ModelVersion is the version of the model that gave ModelScore. It is nil
+	// when no model is loaded.
+	ModelVersion *string
 	// Latency is how long scoring took, from the start of the request until
 	// the decision was ready to save. It is saved in microseconds.
 	Latency time.Duration
@@ -218,6 +221,7 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 		ModelScore:          float8(d.ModelScore),
 		ModelScoreUnblended: float8(d.ModelScoreUnblended),
 		ScoringLatencyUs:    pgtype.Int8{Int64: d.Latency.Microseconds(), Valid: true},
+		ModelVersion:        text(d.ModelVersion),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)

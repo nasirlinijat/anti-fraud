@@ -284,6 +284,8 @@ function ResultView({ result }: { result: ScoreResponse }) {
         <dd>{result.score}</dd>
         <dt>Model score</dt>
         <dd>{result.model_score === null ? 'no model, rules only' : result.model_score.toFixed(4)}</dd>
+        <dt>Model version</dt>
+        <dd>{result.model_version ?? 'none'}</dd>
         <dt>Ruleset</dt>
         <dd>version {result.ruleset_version}</dd>
         <dt>Transaction</dt>

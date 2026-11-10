@@ -9,6 +9,7 @@ type Review = {
   queued_at: string
   rule_score: number
   model_score: number | null
+  model_version: string | null
   fired_rules: { name: string; points: number }[]
 }
 
@@ -54,6 +55,7 @@ function ReviewTable({ items }: { items: Review[] }) {
             <th scope="col">Queued time (UTC)</th>
             <th scope="col">Rule score</th>
             <th scope="col">Model score</th>
+            <th scope="col">Model version</th>
             <th scope="col">Fired rules</th>
           </tr>
         </thead>
@@ -67,6 +69,7 @@ function ReviewTable({ items }: { items: Review[] }) {
               <td><time dateTime={item.queued_at}>{timestamp.format(new Date(item.queued_at))}</time></td>
               <td>{item.rule_score}</td>
               <td>{item.model_score ?? 'Unavailable'}</td>
+              <td>{item.model_version ?? 'None'}</td>
               <td>
                 {item.fired_rules.length === 0 ? 'None' : (
                   <ul>

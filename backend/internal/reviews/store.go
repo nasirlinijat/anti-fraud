@@ -21,8 +21,10 @@ type QueueItem struct {
 	RuleScore     int
 	// ModelScore is nil when the purchase was scored without a model.
 	ModelScore *float64
-	FiredRules []scoring.FiredRule
-	DecidedAt  time.Time
+	// ModelVersion is the version of the model that gave ModelScore.
+	ModelVersion *string
+	FiredRules   []scoring.FiredRule
+	DecidedAt    time.Time
 }
 
 // Store reads the review queue.
@@ -74,6 +76,10 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 		if r.ModelScore.Valid {
 			score := r.ModelScore.Float64
 			item.ModelScore = &score
+		}
+		if r.ModelVersion.Valid {
+			version := r.ModelVersion.String
+			item.ModelVersion = &version
 		}
 		items = append(items, item)
 	}

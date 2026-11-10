@@ -37,10 +37,10 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended, scoring_latency_us
+    model_score_unblended, scoring_latency_us, model_version
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9
+    $8, $9, $10
 )
 `
 
@@ -54,6 +54,7 @@ type InsertDecisionParams struct {
 	ModelScore          pgtype.Float8
 	ModelScoreUnblended pgtype.Float8
 	ScoringLatencyUs    pgtype.Int8
+	ModelVersion        pgtype.Text
 }
 
 func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) error {
@@ -67,6 +68,7 @@ func (q *Queries) InsertDecision(ctx context.Context, arg InsertDecisionParams) 
 		arg.ModelScore,
 		arg.ModelScoreUnblended,
 		arg.ScoringLatencyUs,
+		arg.ModelVersion,
 	)
 	return err
 }
@@ -153,7 +155,7 @@ func (q *Queries) InsertPurchase(ctx context.Context, arg InsertPurchaseParams) 
 
 const listReviewQueue = `-- name: ListReviewQueue :many
 SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
-       d.rule_score, d.model_score, d.fired_rules, d.decided_at
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'
@@ -181,6 +183,7 @@ type ListReviewQueueRow struct {
 	PlayerID      string
 	RuleScore     int32
 	ModelScore    pgtype.Float8
+	ModelVersion  pgtype.Text
 	FiredRules    []byte
 	DecidedAt     pgtype.Timestamptz
 }
@@ -202,6 +205,7 @@ func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams
 			&i.PlayerID,
 			&i.RuleScore,
 			&i.ModelScore,
+			&i.ModelVersion,
 			&i.FiredRules,
 			&i.DecidedAt,
 		); err != nil {

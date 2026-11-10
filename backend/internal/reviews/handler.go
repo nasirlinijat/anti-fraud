@@ -41,6 +41,7 @@ type reviewResponse struct {
 	PlayerID      string              `json:"player_id"`
 	RuleScore     int                 `json:"rule_score"`
 	ModelScore    *float64            `json:"model_score"`
+	ModelVersion  *string             `json:"model_version"`
 	FiredRules    []scoring.FiredRule `json:"fired_rules"`
 }
 
@@ -84,6 +85,7 @@ func serveQueue(w http.ResponseWriter, r *http.Request, store queueReader) {
 			PlayerID:      row.PlayerID,
 			RuleScore:     row.RuleScore,
 			ModelScore:    row.ModelScore,
+			ModelVersion:  row.ModelVersion,
 			FiredRules:    firedRules,
 		})
 	}

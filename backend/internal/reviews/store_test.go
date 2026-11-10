@@ -47,18 +47,22 @@ func insertDecision(t *testing.T, tx pgx.Tx, txnID, outcome string, decidedAt ti
 		t.Fatalf("insert purchase %s: %v", txnID, err)
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO decisions (purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score, decided_at)
-		VALUES ($1, 1, $2, 60, $3, '{}', $4, $5)`, id, outcome, firedRules, modelScore, decidedAt)
+		INSERT INTO decisions (purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score, model_version, decided_at)
+		VALUES ($1, 1, $2, 60, $3, '{}', $4, CASE WHEN $4::float8 IS NULL THEN NULL ELSE $6 END, $5)`,
+		id, outcome, firedRules, modelScore, decidedAt, testModelVersion)
 	if err != nil {
 		t.Fatalf("insert decision for %s: %v", txnID, err)
 	}
 	return id
 }
 
+const testModelVersion = "lgbm-test"
+
 func TestQueueReturnsReviewsOldestFirst(t *testing.T) {
 	tx := testTx(t)
 	at := func(minute int) time.Time { return time.Date(2000, 1, 1, 9, minute, 0, 0, time.UTC) }
 	score := 0.7
+	version := testModelVersion
 
 	later := insertDecision(t, tx, "q-later", "review", at(30), nil, `[]`)
 	insertDecision(t, tx, "q-allow", "allow", at(5), nil, `[]`)
@@ -80,6 +84,7 @@ func TestQueueReturnsReviewsOldestFirst(t *testing.T) {
 			PlayerID:      "player-q-earlier",
 			RuleScore:     60,
 			ModelScore:    &score,
+			ModelVersion:  &version,
 			FiredRules: []scoring.FiredRule{
 				{Name: scoring.RuleHighAmount, Points: 30},
 				{Name: scoring.RuleCardVelocity, Points: 40},
