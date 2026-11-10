@@ -262,6 +262,61 @@ legend {
 .skeleton-lines span:nth-child(2) { inline-size: 75%; }
 .skeleton-lines span:nth-child(3) { inline-size: 50%; }
 
+.skeleton-metrics {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.skeleton-metrics .tile {
+  min-block-size: 5rem;
+}
+
+.skeleton-chart-frame {
+  block-size: 260px;
+  margin-block-start: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.skeleton-table-body .skeleton-lines {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding-block-end: 0.5rem;
+  border-block-end: 1px solid var(--border);
+}
+
+.skeleton-table-body .skeleton-lines span {
+  inline-size: 100%;
+  border-radius: 4px;
+}
+
+.skeleton-table-body .skeleton-lines:first-child span {
+  block-size: 1rem;
+}
+
+.skeleton-form .skeleton-lines {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.skeleton-form .skeleton-lines span {
+  block-size: 1.75rem;
+  border-radius: 4px;
+}
+
+.skeleton-case .skeleton-content {
+  display: grid;
+  grid-template-columns: minmax(5rem, 1fr) 2fr;
+  gap: 1rem;
+}
+
+.skeleton-result .skeleton-lines:first-child span:first-child {
+  inline-size: 7rem;
+  max-inline-size: 100%;
+  block-size: 1.5rem;
+}
+
 .outcome {
   display: inline-block;
   padding: 0.25rem 0.75rem;

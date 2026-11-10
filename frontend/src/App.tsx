@@ -28,6 +28,8 @@ function App() {
   const [path, setPath] = useState(currentPath)
 
   usePolling(checkReadiness, {
+    intervalMs: 10_000,
+    waitAfterCompletion: true,
     onSuccess: () => setStatus('ready'),
     onError: () => setStatus('unavailable'),
   })

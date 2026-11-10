@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { score, type ErrorResponse, type ScoreResponse } from '../api'
+import { score, type ScoreResponse, type ScoreResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge } from '../Display'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
@@ -155,33 +155,48 @@ function TesterPage() {
   const [values, setValues] = useState<Values>(() => withRequired(presets.Normal()))
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<ScoreResponse | null>(null)
-  const [error, setError] = useState<ErrorResponse | null>(null)
+  const [failure, setFailure] = useState<Extract<ScoreResult, { ok: false }> | null>(null)
+  const [retryPurchase, setRetryPurchase] = useState<Record<string, unknown> | null>(null)
 
-  const set = (name: string, value: string) => setValues((v) => ({ ...v, [name]: value }))
+  const set = (name: string, value: string) => {
+    setRetryPurchase(null)
+    setValues(current => ({ ...current, [name]: value }))
+  }
 
   const applyPreset = (name: string) => {
     setValues(withRequired(presets[name]()))
     setResult(null)
-    setError(null)
+    setFailure(null)
+    setRetryPurchase(null)
   }
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
+  async function scorePurchase(purchase: Record<string, unknown>) {
+    if (sending) return
     setSending(true)
-    const res = await score(toRequest(values))
+    setResult(null)
+    setFailure(null)
+    setRetryPurchase(null)
+    const res = await score(purchase)
     setSending(false)
     if (res.ok) {
       setResult(res.response)
-      setError(null)
       // The next submit gets a new ID, because a transaction can be scored only once.
-      set('transaction_id', newTransactionId())
+      setValues(current => ({ ...current, transaction_id: newTransactionId() }))
     } else {
-      setResult(null)
-      setError(res.error)
+      setFailure(res)
+      const { status } = res
+      if (status === 0 || status === 408 || status === 429 || status >= 500 || (status >= 200 && status < 300)) {
+        setRetryPurchase(purchase)
+      }
     }
   }
 
-  const fieldErrors = error?.fields ?? {}
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    void scorePurchase(toRequest(values))
+  }
+
+  const fieldErrors = failure?.error.fields ?? {}
 
   return (
     <div className="tester">
@@ -192,7 +207,7 @@ function TesterPage() {
         </p>
         <div className="presets" role="group" aria-label="Fill the form with an example">
           {Object.keys(presets).map((name) => (
-            <button key={name} type="button" className="secondary" onClick={() => applyPreset(name)}>
+            <button key={name} type="button" className="secondary" disabled={sending} onClick={() => applyPreset(name)}>
               {name}
             </button>
           ))}
@@ -200,7 +215,7 @@ function TesterPage() {
 
         <form onSubmit={submit} noValidate>
           {groups.map((group) => (
-            <fieldset key={group.title}>
+            <fieldset key={group.title} disabled={sending}>
               <legend>{group.title}</legend>
               <div className="fields">
                 {group.fields.map((field) => {
@@ -256,12 +271,13 @@ function TesterPage() {
 
       <section className="result">
         <h2>Result</h2>
-        {!result && !error && (sending
-          ? <LoadingSkeleton label="Scoring purchase…" />
-          : <EmptyState>Send a purchase to see its decision.</EmptyState>)}
-        {error && (
-          <ErrorState>
-            <strong>{error.error}</strong>
+        {!result && !failure && (sending
+          ? <LoadingSkeleton shape="result" label="Scoring purchase…" />
+          : <EmptyState>Choose Normal or fill out the form, then select Score purchase to see the decision.</EmptyState>)}
+        {failure && (
+          <ErrorState onRetry={retryPurchase ? () => void scorePurchase(retryPurchase) : undefined}>
+            <strong>{failure.error.error}</strong>
+            {failure.status === 409 && <p>Use a new transaction ID for a separate test.</p>}
             {Object.keys(fieldErrors).length > 0 && (
               <ul>
                 {Object.entries(fieldErrors).map(([name, problem]) => (

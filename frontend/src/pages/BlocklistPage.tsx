@@ -35,11 +35,12 @@ function BlocklistPage() {
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<ErrorResponse | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
   const time = useTimeDisplay()
 
-  const { refresh } = usePolling(listBlocklist, {
+  const { refresh, retry, pending } = usePolling(listBlocklist, {
     onSuccess: (list) => {
       setEntries(list)
       setLoadError(null)
@@ -49,6 +50,7 @@ function BlocklistPage() {
 
   const add = async (e: FormEvent) => {
     e.preventDefault()
+    if (saving) return
     setSaving(true)
     setNotice(null)
     const res = await addBlocklistEntry({ type, value, reason })
@@ -65,13 +67,17 @@ function BlocklistPage() {
   }
 
   const remove = async (entry: BlocklistEntry) => {
+    if (removing !== null) return
     if (!window.confirm(`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value} from the blocklist?`)) {
       return
     }
     setRemoving(entry.id)
+    setRemoveError(null)
+    setNotice(null)
     const res = await removeBlocklistEntry(entry.id)
     setRemoving(null)
-    setNotice(res.ok ? `${typeNames[entry.type]} ${entry.value} is no longer blocked.` : res.error.error)
+    if (res.ok) setNotice(`${typeNames[entry.type]} ${entry.value} is no longer blocked.`)
+    else setRemoveError(res.error.error)
     refresh()
   }
 
@@ -90,7 +96,7 @@ function BlocklistPage() {
         <div className="fields">
           <div className={fields.type ? 'field invalid' : 'field'}>
             <label htmlFor="entry-type">Type</label>
-            <select id="entry-type" value={type} onChange={(e) => setType(e.target.value as EntryType)}>
+            <select id="entry-type" value={type} disabled={saving} onChange={(e) => setType(e.target.value as EntryType)}>
               {entryTypes.map((t) => (
                 <option key={t} value={t}>
                   {typeNames[t]}
@@ -105,6 +111,7 @@ function BlocklistPage() {
             </label>
             <input
               id="entry-value"
+              disabled={saving}
               value={value}
               placeholder={placeholders[type]}
               onChange={(e) => setValue(e.target.value)}
@@ -123,6 +130,7 @@ function BlocklistPage() {
             </label>
             <input
               id="entry-reason"
+              disabled={saving}
               value={reason}
               placeholder="Why is it blocked? For example: chargeback on 2026-11-08"
               onChange={(e) => setReason(e.target.value)}
@@ -136,10 +144,11 @@ function BlocklistPage() {
             )}
           </div>
         </div>
-        {formError && Object.keys(fields).length === 0 && (
-          <p className="error-text" role="alert">
+        {formError && (
+          <ErrorState onRetry={!loadError && Object.keys(fields).length === 0 ? retry : undefined}
+            retryLabel="Refresh entries" pending={pending}>
             {formError.error}
-          </p>
+          </ErrorState>
         )}
         <button type="submit" disabled={saving}>
           {saving ? 'Adding…' : 'Add to blocklist'}
@@ -152,9 +161,14 @@ function BlocklistPage() {
 
       <section>
         <h3>Entries{entries ? ` (${entries.length})` : ''}</h3>
-        {loadError && <ErrorState>{loadError}</ErrorState>}
-        {!entries && !loadError && <LoadingSkeleton label="Loading blocklist…" />}
-        {entries && entries.length === 0 && <EmptyState>The blocklist is empty.</EmptyState>}
+        {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
+        {removeError && (
+          <ErrorState onRetry={loadError ? undefined : retry} retryLabel="Refresh entries" pending={pending}>
+            {removeError}
+          </ErrorState>
+        )}
+        {!entries && (!loadError || pending) && <LoadingSkeleton shape="table" label="Loading blocklist…" />}
+        {entries && entries.length === 0 && <EmptyState>The blocklist is empty. Use Add an entry above to block a value.</EmptyState>}
         {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
         {entries && entries.length > 0 && (
           <table>
@@ -182,7 +196,7 @@ function BlocklistPage() {
                     <button
                       type="button"
                       className="secondary"
-                      disabled={removing === entry.id}
+                      disabled={removing !== null}
                       onClick={() => remove(entry)}
                       aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}
                     >

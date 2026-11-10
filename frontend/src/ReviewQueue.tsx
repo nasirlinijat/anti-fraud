@@ -96,7 +96,7 @@ function ReviewTable({ items, pending, time, onOpen, onDecision }: {
 type CaseState =
   | { status: 'loading' }
   | { status: 'not-found' }
-  | { status: 'failed' }
+  | { status: 'failed'; message: string }
   | { status: 'loaded'; review: ReviewCase }
 
 function CaseView({ apiKey, purchaseId, time, onBack, onKeyRejected }: {
@@ -104,16 +104,18 @@ function CaseView({ apiKey, purchaseId, time, onBack, onKeyRejected }: {
   purchaseId: string
   time: TimeDisplay
   onBack: () => void
-  onKeyRejected: () => void
+  onKeyRejected: (message: string) => void
 }) {
   const [state, setState] = useState<CaseState>({ status: 'loading' })
   const load = useCallback((signal: AbortSignal) => getReviewCase(apiKey, purchaseId, signal), [apiKey, purchaseId])
-  const { refresh } = usePolling(load, {
+  const { retry, pending } = usePolling(load, {
     onSuccess: (review) => setState({ status: 'loaded', review }),
     onError: (error) => {
       const status = error instanceof ApiError ? error.status : undefined
-      if (status === 401) onKeyRejected()
-      else setState({ status: status === 404 ? 'not-found' : 'failed' })
+      const message = error instanceof Error ? error.message : 'Could not load this review case.'
+      if (status === 401) onKeyRejected(message)
+      else if (status === 404) setState({ status: 'not-found' })
+      else setState({ status: 'failed', message })
     },
   })
 
@@ -121,17 +123,12 @@ function CaseView({ apiKey, purchaseId, time, onBack, onKeyRejected }: {
     <article className="review-case" aria-labelledby="case-heading">
       <button type="button" className="review-back" onClick={onBack}>Back to the queue</button>
       <h3 id="case-heading">Review case</h3>
-      {state.status === 'loading' && <LoadingSkeleton label="Loading review case…" />}
+      {(state.status === 'loading' || pending) && <LoadingSkeleton shape="case" label="Loading review case…" />}
       {state.status === 'not-found' && (
-        <EmptyState announce>This purchase is not under review. It may have been decided, or the ID is wrong.</EmptyState>
+        <EmptyState announce>This purchase is no longer available for review. Go back to the queue to pick another.</EmptyState>
       )}
       {state.status === 'failed' && (
-        <ErrorState retryLabel="Try again" onRetry={() => {
-          setState({ status: 'loading' })
-          refresh()
-        }}>
-          Could not load this review case.
-        </ErrorState>
+        <ErrorState onRetry={retry} pending={pending}>{state.message}</ErrorState>
       )}
       {state.status === 'loaded' && <CaseDetails review={state.review} time={time} />}
     </article>
@@ -190,14 +187,13 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
 
 function ReviewQueue() {
   const [apiKey, setApiKey] = useState<string | null>(null)
-  const [keyRejected, setKeyRejected] = useState(false)
+  const [keyError, setKeyError] = useState<string | null>(null)
   const [cursors, setCursors] = useState<(string | null)[]>([null])
   const [page, setPage] = useState<QueuePage | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [openCase, setOpenCase] = useState<string | null>(null)
-  const [accessUnavailable, setAccessUnavailable] = useState(false)
   const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
-  const [feedback, setFeedback] = useState('')
+  const [feedback, setFeedback] = useState<{ text: string; failed?: boolean } | null>(null)
   const [blockDevice, setBlockDevice] = useState(false)
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
   const time = useTimeDisplay()
@@ -222,7 +218,7 @@ function ReviewQueue() {
     if (apiKey === null) return null
     return (signal: AbortSignal) => listReviews(apiKey, cursor, signal)
   }, [apiKey, cursor])
-  const { stop, refresh } = usePolling(loadQueue, {
+  const { stop, refresh, retry, pending: queuePending } = usePolling(loadQueue, {
     intervalMs: REFRESH_MS,
     waitAfterCompletion: true,
     onSuccess: (result) => {
@@ -235,47 +231,45 @@ function ReviewQueue() {
       }
       if (reconciled) setPending(new Set(requests.current.keys()))
       setPage(result)
-      setLoadFailed(false)
-      setAccessUnavailable(false)
+      setLoadError(null)
     },
     onError: (error) => {
-      const status = error instanceof ApiError ? error.status : undefined
-      if (status === 401) {
-        rejectKey()
+      const message = error instanceof Error ? error.message : 'Could not load the review queue.'
+      if (error instanceof ApiError && error.status === 401) {
+        rejectKey(message)
         return
       }
-      if (status === 503) setAccessUnavailable(true)
-      setLoadFailed(true)
+      setLoadError(message)
     },
   })
 
-  const rejectKey = useCallback(() => {
+  const rejectKey = useCallback((message: string) => {
     stop()
     cancelDecisions()
     setPending(new Set())
     setApiKey(null)
-    setKeyRejected(true)
+    setKeyError(message)
     setPage(null)
     setCursors([null])
     setOpenCase(null)
     setConfirmation(null)
-    setFeedback('')
+    setFeedback(null)
+    setLoadError(null)
   }, [cancelDecisions, stop])
 
   function openQueue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const key = new FormData(event.currentTarget).get('apiKey')
     if (typeof key !== 'string') return
-    setKeyRejected(false)
-    setLoadFailed(false)
-    setAccessUnavailable(false)
+    setKeyError(null)
+    setLoadError(null)
     setApiKey(key.trim())
   }
 
   function goTo(next: (string | null)[]) {
     stop()
     setPage(null)
-    setLoadFailed(false)
+    setLoadError(null)
     setCursors(next)
   }
 
@@ -292,31 +286,30 @@ function ReviewQueue() {
     const controller = new AbortController()
     requests.current.set(id, controller)
     setPending(new Set(requests.current.keys()))
-    setFeedback('')
+    setFeedback(null)
     const isCurrent = () => requests.current.get(id) === controller
     let needsReconciliation = false
     try {
       const deviceBlocked = await submitReviewDecision(apiKey, id, decision, blockDevice, controller.signal)
       if (!isCurrent()) return
       removeDecidedPurchase(id)
-      setFeedback(`${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.`)
+      setFeedback({ text: `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.` })
     } catch (error) {
       if (!isCurrent()) return
       const status = error instanceof ApiError ? error.status : undefined
+      const message = error instanceof Error ? error.message : 'Could not save the decision.'
       if (status === 401) {
-        rejectKey()
-      } else if (status === 503) {
-        setFeedback('Review access is unavailable. Check the backend configuration.')
+        rejectKey(message)
       } else if (status === 404) {
-        setFeedback(`${item.transaction_id} was not found. The queue is refreshing.`)
+        setFeedback({ text: `Could not find ${item.transaction_id}. ${message}`, failed: true })
       } else if (status === 409) {
         removeDecidedPurchase(id)
-        setFeedback(`${item.transaction_id} is no longer pending review.`)
+        setFeedback({ text: `${item.transaction_id} is no longer pending review. ${message}` })
       } else if (status !== undefined && status < 500 && error instanceof ApiError && error.kind === 'http') {
-        setFeedback(`Could not save a decision for ${item.transaction_id}.`)
+        setFeedback({ text: `Could not save a decision for ${item.transaction_id}. ${message}`, failed: true })
       } else {
         needsReconciliation = true
-        setFeedback(`Could not confirm the decision for ${item.transaction_id}. You can retry if it is still listed after the queue refreshes.`)
+        setFeedback({ text: `Could not confirm the decision for ${item.transaction_id}. ${message} Check whether it is still pending after the queue refreshes.`, failed: true })
       }
     } finally {
       if (isCurrent()) {
@@ -347,15 +340,15 @@ function ReviewQueue() {
         <form className="review-key-form" method="post" onSubmit={openQueue}>
           <label htmlFor="review-api-key">Analyst key</label>
           <p id="review-key-hint">Enter your individual review key.</p>
-          {keyRejected && <p id="review-key-error" role="alert">The analyst key was rejected. Enter a valid key.</p>}
+          {keyError && <p id="review-key-error" role="alert">The analyst key was rejected. Enter a valid key. {keyError}</p>}
           <input
             id="review-api-key"
             name="apiKey"
             type="password"
             autoComplete="off"
-            autoFocus={keyRejected}
-            aria-describedby={keyRejected ? 'review-key-hint review-key-error' : 'review-key-hint'}
-            aria-invalid={keyRejected || undefined}
+            autoFocus={keyError !== null}
+            aria-describedby={keyError ? 'review-key-hint review-key-error' : 'review-key-hint'}
+            aria-invalid={keyError !== null || undefined}
             required
           />
           <button type="submit">Open queue</button>
@@ -364,19 +357,24 @@ function ReviewQueue() {
         <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} time={time} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
       ) : (
         <>
-          <p role="status">{feedback}</p>
-          {loadFailed && (
-            <ErrorState polite>
-              {accessUnavailable ? 'Review access is unavailable. Check the backend configuration.' :
-                page ? 'Refresh failed. The queue shown may be out of date.' : 'Could not load this page.'}
-              {' Retrying automatically.'}
+          <p role="status">{feedback && !feedback.failed ? feedback.text : ''}</p>
+          {feedback?.failed && (
+            <ErrorState polite onRetry={loadError ? undefined : retry} pending={queuePending}>{feedback.text}</ErrorState>
+          )}
+          {loadError && (
+            <ErrorState polite onRetry={retry} pending={queuePending}>
+              {loadError} {page && 'Showing the last successful update for this page. '}Retrying automatically.
             </ErrorState>
           )}
-          {page === null && !loadFailed && <LoadingSkeleton label="Loading review queue…" />}
+          {page === null && (!loadError || queuePending) && <LoadingSkeleton shape="table" label="Loading review queue…" />}
           {page && (page.items.length > 0 ? (
             <ReviewTable items={page.items} pending={pending} time={time} onOpen={setOpenCase} onDecision={chooseDecision} />
           ) : (
-            <EmptyState>{cursor === null ? 'No purchases are waiting for review.' : 'No purchases on this page.'}</EmptyState>
+            <EmptyState>
+              {cursor === null ? (
+                <>No purchases are waiting for review. Score a purchase in <a href="#/tester">Tester</a> or run <code>make simulate</code> to generate traffic.</>
+              ) : 'No purchases on this page. Choose Previous to see the earlier page.'}
+            </EmptyState>
           ))}
           <nav className="review-pages" aria-label="Review queue pages">
             <button type="button" aria-disabled={!hasPrevious} onClick={() => {

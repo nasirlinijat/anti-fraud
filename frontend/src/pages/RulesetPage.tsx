@@ -90,9 +90,25 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
   const [version, setVersion] = useState(initial.version)
   const [draft, setDraft] = useState(() => toDraft(initial))
   const [saving, setSaving] = useState(false)
+  const [checkingActive, setCheckingActive] = useState(false)
+  const [checkError, setCheckError] = useState<string | null>(null)
   const [error, setError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState('')
   const fields = error?.fields ?? {}
+
+  usePolling(checkingActive ? getActiveRuleset : null, {
+    onSuccess: (active) => {
+      setVersion(active.version)
+      setError(null)
+      setCheckError(null)
+      setNotice(`Active version is ${active.version}. Your draft is still available.`)
+      setCheckingActive(false)
+    },
+    onError: (failure) => {
+      setCheckError(failure instanceof Error ? failure.message : 'Could not check the active version.')
+      setCheckingActive(false)
+    },
+  })
 
   const updateRule = (name: string, rule: RuleDraft) => {
     setDraft((current) => ({ ...current, rules: { ...current.rules, [name]: rule } }))
@@ -100,8 +116,9 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (saving) return
+    if (saving || checkingActive) return
     setNotice('')
+    setCheckError(null)
     const errors: FieldErrors = {}
     const config = toConfig(draft, errors)
     if (Object.keys(errors).length) {
@@ -193,11 +210,14 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
           )
         })}
         {error && (
-          <p className="alert" role="alert">
-            {fields.rules ?? (Object.keys(fields).length ? 'Check the highlighted fields.' : error.error)}
-          </p>
+          <ErrorState retryLabel="Check active version" pending={checkingActive}
+            onRetry={Object.keys(fields).length === 0 ? () => setCheckingActive(true) : undefined}>
+            {error.error}
+            {fields.rules && <p>{fields.rules}</p>}
+            {checkError && <p>Could not check the active version. {checkError}</p>}
+          </ErrorState>
         )}
-        <button type="submit" disabled={saving}>{saving ? 'Publishing…' : 'Publish new version'}</button>
+        <button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</button>
       </form>
       <p className="muted" role="status">{notice}</p>
     </>
@@ -208,7 +228,7 @@ function RulesetPage() {
   const [active, setActive] = useState<Ruleset | null>(null)
   const [loadError, setLoadError] = useState('')
 
-  const { refresh } = usePolling(getActiveRuleset, {
+  const { retry, pending } = usePolling(getActiveRuleset, {
     onSuccess: (ruleset) => {
       setActive(ruleset)
       setLoadError('')
@@ -221,9 +241,9 @@ function RulesetPage() {
       <h2>Rulesets</h2>
       <p className="muted">Publish a new ruleset to change how future purchases are scored.</p>
       {active && <RulesetForm initial={active} />}
-      {!active && !loadError && <LoadingSkeleton label="Loading the active ruleset…" />}
+      {!active && (!loadError || pending) && <LoadingSkeleton shape="form" label="Loading the active ruleset…" />}
       {loadError && (
-        <ErrorState onRetry={() => { setLoadError(''); refresh() }}>{loadError}</ErrorState>
+        <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>
       )}
     </section>
   )
