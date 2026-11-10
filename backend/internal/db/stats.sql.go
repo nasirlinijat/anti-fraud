@@ -11,6 +11,78 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const blockedValue = `-- name: BlockedValue :one
+SELECT coalesce(sum(p.amount_minor), 0)::text AS amount_minor
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'block'
+  AND d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz
+`
+
+type BlockedValueParams struct {
+	Since pgtype.Timestamptz
+	Until pgtype.Timestamptz
+}
+
+func (q *Queries) BlockedValue(ctx context.Context, arg BlockedValueParams) (string, error) {
+	row := q.db.QueryRow(ctx, blockedValue, arg.Since, arg.Until)
+	var amount_minor string
+	err := row.Scan(&amount_minor)
+	return amount_minor, err
+}
+
+const countDecisionBuckets = `-- name: CountDecisionBuckets :many
+SELECT
+    date_bin($1::interval, decided_at, TIMESTAMPTZ '1970-01-01 00:00:00+00')::timestamptz AS bucket_start,
+    count(*) FILTER (WHERE outcome = 'allow') AS allowed,
+    count(*) FILTER (WHERE outcome = 'review') AS reviewed,
+    count(*) FILTER (WHERE outcome = 'block') AS blocked
+FROM decisions
+WHERE decided_at >= $2::timestamptz
+  AND decided_at < $3::timestamptz
+GROUP BY bucket_start
+ORDER BY bucket_start
+`
+
+type CountDecisionBucketsParams struct {
+	BucketWidth pgtype.Interval
+	Since       pgtype.Timestamptz
+	Until       pgtype.Timestamptz
+}
+
+type CountDecisionBucketsRow struct {
+	BucketStart pgtype.Timestamptz
+	Allowed     int64
+	Reviewed    int64
+	Blocked     int64
+}
+
+func (q *Queries) CountDecisionBuckets(ctx context.Context, arg CountDecisionBucketsParams) ([]CountDecisionBucketsRow, error) {
+	rows, err := q.db.Query(ctx, countDecisionBuckets, arg.BucketWidth, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountDecisionBucketsRow
+	for rows.Next() {
+		var i CountDecisionBucketsRow
+		if err := rows.Scan(
+			&i.BucketStart,
+			&i.Allowed,
+			&i.Reviewed,
+			&i.Blocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countModelEffects = `-- name: CountModelEffects :one
 SELECT
     count(d.model_score) AS scored,
@@ -19,7 +91,13 @@ SELECT
 FROM decisions d
 JOIN rulesets r ON r.version = d.ruleset_version
 WHERE d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz
 `
+
+type CountModelEffectsParams struct {
+	Since pgtype.Timestamptz
+	Until pgtype.Timestamptz
+}
 
 type CountModelEffectsRow struct {
 	Scored  int64
@@ -30,44 +108,11 @@ type CountModelEffectsRow struct {
 // Counts, since the given time, the decisions scored by the model, the allowed
 // purchases the model sent to review, and the reviews it cleared. The rule-only
 // outcome comes from the rule score and the ruleset thresholds.
-func (q *Queries) CountModelEffects(ctx context.Context, since pgtype.Timestamptz) (CountModelEffectsRow, error) {
-	row := q.db.QueryRow(ctx, countModelEffects, since)
+func (q *Queries) CountModelEffects(ctx context.Context, arg CountModelEffectsParams) (CountModelEffectsRow, error) {
+	row := q.db.QueryRow(ctx, countModelEffects, arg.Since, arg.Until)
 	var i CountModelEffectsRow
 	err := row.Scan(&i.Scored, &i.Flagged, &i.Cleared)
 	return i, err
-}
-
-const countOutcomes = `-- name: CountOutcomes :many
-SELECT outcome, count(*) AS decisions
-FROM decisions
-WHERE decided_at >= $1::timestamptz
-GROUP BY outcome
-`
-
-type CountOutcomesRow struct {
-	Outcome   string
-	Decisions int64
-}
-
-// Counts the decisions made since the given time by outcome.
-func (q *Queries) CountOutcomes(ctx context.Context, since pgtype.Timestamptz) ([]CountOutcomesRow, error) {
-	rows, err := q.db.Query(ctx, countOutcomes, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CountOutcomesRow
-	for rows.Next() {
-		var i CountOutcomesRow
-		if err := rows.Scan(&i.Outcome, &i.Decisions); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const countReviewQueue = `-- name: CountReviewQueue :one
@@ -85,6 +130,50 @@ func (q *Queries) CountReviewQueue(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const decisionOverview = `-- name: DecisionOverview :one
+SELECT
+    count(*) FILTER (WHERE outcome = 'allow') AS allowed,
+    count(*) FILTER (WHERE outcome = 'review') AS reviewed,
+    count(*) FILTER (WHERE outcome = 'block') AS blocked,
+    count(*) AS total,
+    count(scoring_latency_us) AS latency_samples,
+    coalesce(percentile_disc(0.95) WITHIN GROUP (ORDER BY scoring_latency_us), 0)::bigint AS p95_latency_us,
+    coalesce(min(decided_at), $1::timestamptz)::timestamptz AS first_decision_at
+FROM decisions
+WHERE decided_at >= $1::timestamptz
+  AND decided_at < $2::timestamptz
+`
+
+type DecisionOverviewParams struct {
+	Since pgtype.Timestamptz
+	Until pgtype.Timestamptz
+}
+
+type DecisionOverviewRow struct {
+	Allowed         int64
+	Reviewed        int64
+	Blocked         int64
+	Total           int64
+	LatencySamples  int64
+	P95LatencyUs    int64
+	FirstDecisionAt pgtype.Timestamptz
+}
+
+func (q *Queries) DecisionOverview(ctx context.Context, arg DecisionOverviewParams) (DecisionOverviewRow, error) {
+	row := q.db.QueryRow(ctx, decisionOverview, arg.Since, arg.Until)
+	var i DecisionOverviewRow
+	err := row.Scan(
+		&i.Allowed,
+		&i.Reviewed,
+		&i.Blocked,
+		&i.Total,
+		&i.LatencySamples,
+		&i.P95LatencyUs,
+		&i.FirstDecisionAt,
+	)
+	return i, err
+}
+
 const topFiredRules = `-- name: TopFiredRules :many
 SELECT
     rule.name::text AS name,
@@ -93,13 +182,15 @@ SELECT
 FROM decisions d
 CROSS JOIN LATERAL jsonb_to_recordset(d.fired_rules) AS rule(name text, points integer)
 WHERE d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz
 GROUP BY rule.name
 ORDER BY fired DESC, name
-LIMIT $2
+LIMIT $3
 `
 
 type TopFiredRulesParams struct {
 	Since    pgtype.Timestamptz
+	Until    pgtype.Timestamptz
 	MaxRules int32
 }
 
@@ -111,7 +202,7 @@ type TopFiredRulesRow struct {
 
 // Lists the rules that fired most often in decisions made since the given time.
 func (q *Queries) TopFiredRules(ctx context.Context, arg TopFiredRulesParams) ([]TopFiredRulesRow, error) {
-	rows, err := q.db.Query(ctx, topFiredRules, arg.Since, arg.MaxRules)
+	rows, err := q.db.Query(ctx, topFiredRules, arg.Since, arg.Until, arg.MaxRules)
 	if err != nil {
 		return nil, err
 	}

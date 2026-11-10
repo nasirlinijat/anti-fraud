@@ -238,8 +238,9 @@ paths:
       operationId: getStats
       summary: Decision statistics
       description: |
-        Counts the decisions made in a recent period by outcome, lists the
-        rules that fired most often, and shows what the fraud model changed.
+        Counts decisions by outcome and time bucket, reports p95 scoring latency
+        and blocked purchase value, lists the most fired rules, and shows what
+        the fraud model changed.
         The review queue size is always the current one, whatever the period.
       security:
         - ApiKeyAuth: []
@@ -1126,7 +1127,7 @@ components:
     StatsResponse:
       type: object
       description: Decision statistics for a period.
-      required: [period, since, generated_at, outcomes, top_rules, review_queue, model]
+      required: [period, since, generated_at, outcomes, top_rules, review_queue, model, p95_scoring_latency_us, blocked_value_minor, decision_series]
       properties:
         period:
           type: string
@@ -1138,6 +1139,7 @@ components:
         generated_at:
           type: string
           format: date-time
+          description: Exclusive upper bound for the decision statistics.
         outcomes:
           type: object
           required: [allow, review, block, total]
@@ -1159,7 +1161,7 @@ components:
         review_queue:
           type: integer
           minimum: 0
-          description: Purchases with the outcome review, all time.
+          description: Purchases still awaiting review, all time.
         model:
           type: object
           required: [scored, flagged, cleared]
@@ -1167,6 +1169,37 @@ components:
             scored: { type: integer, minimum: 0, description: Decisions with a model score. }
             flagged: { type: integer, minimum: 0, description: Purchases the rules allowed and the model sent to review. }
             cleared: { type: integer, minimum: 0, description: Purchases the rules sent to review and the model allowed. }
+        p95_scoring_latency_us:
+          type: integer
+          nullable: true
+          format: int64
+          minimum: 0
+          description: Discrete 95th percentile of recorded scoring latencies in microseconds. Null when the period has no recorded latency samples.
+          example: 1250
+        blocked_value_minor:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Exact sum of purchase amounts in minor units for scoring decisions with outcome block. The decimal string preserves large totals.
+          example: "450000"
+        decision_series:
+          type: object
+          required: [bucket_seconds, buckets]
+          properties:
+            bucket_seconds:
+              type: integer
+              minimum: 1
+              description: Bucket width in seconds. The 15m, 1h, 24h, and 7d periods use 60, 300, 3600, and 21600 seconds respectively. The all-time period adapts to the history and returns at most 48 buckets.
+            buckets:
+              type: array
+              description: UTC buckets in ascending order, including zero-count gaps. Counts cover only the part of each bucket inside the selected window. The array is empty when there are no decisions.
+              items:
+                type: object
+                required: [start, allow, review, block]
+                properties:
+                  start: { type: string, format: date-time, description: UTC start of the bucket. }
+                  allow: { type: integer, minimum: 0 }
+                  review: { type: integer, minimum: 0 }
+                  block: { type: integer, minimum: 0 }
 
     BlocklistEntry:
       type: object

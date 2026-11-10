@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
 type rejectUnexpectedReviewAccess struct{}
@@ -95,15 +96,26 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	store := NewStore(tx)
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, store, testAnalystKeys(t))
-	summary := func() stats.Summary {
+	q := db.New(tx)
+	since := pgtype.Timestamptz{Time: at, Valid: true}
+	until := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	snapshot := func() (int64, db.DecisionOverviewRow, db.CountModelEffectsRow) {
 		t.Helper()
-		result, err := stats.NewStore(tx).Summary(ctx, at, 10)
+		queue, err := q.CountReviewQueue(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return result
+		outcomes, err := q.DecisionOverview(ctx, db.DecisionOverviewParams{Since: since, Until: until})
+		if err != nil {
+			t.Fatal(err)
+		}
+		model, err := q.CountModelEffects(ctx, db.CountModelEffectsParams{Since: since, Until: until})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return queue, outcomes, model
 	}
-	before := summary()
+	beforeQueue, beforeOutcomes, beforeModel := snapshot()
 	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
 	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusOK {
 		t.Fatalf("pending case = %d %s", rec.Code, rec.Body)
@@ -152,9 +164,10 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 			t.Fatalf("resolved purchase %s remained in queue", item.PurchaseID)
 		}
 	}
-	after := summary()
-	if after.ReviewQueue != before.ReviewQueue-2 || after.Outcomes != before.Outcomes || after.Model != before.Model {
-		t.Fatalf("before = %+v, after = %+v", before, after)
+	afterQueue, afterOutcomes, afterModel := snapshot()
+	if afterQueue != beforeQueue-2 || afterOutcomes != beforeOutcomes || afterModel != beforeModel {
+		t.Fatalf("unexpected stats after resolution: queue %d → %d, outcomes %+v → %+v, model %+v → %+v",
+			beforeQueue, afterQueue, beforeOutcomes, afterOutcomes, beforeModel, afterModel)
 	}
 	var modelVersion, originalOutcome, originalResolution string
 	var modelScore float64

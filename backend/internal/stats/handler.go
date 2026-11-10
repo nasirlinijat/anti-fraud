@@ -9,13 +9,12 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
-// Periods are the periods the dashboard can show, by name.
-var Periods = map[string]time.Duration{
-	"15m": 15 * time.Minute,
-	"1h":  time.Hour,
-	"24h": 24 * time.Hour,
-	"7d":  7 * 24 * time.Hour,
-	"all": 0,
+var periods = map[string]struct{ length, bucketWidth time.Duration }{
+	"15m": {15 * time.Minute, time.Minute},
+	"1h":  {time.Hour, 5 * time.Minute},
+	"24h": {24 * time.Hour, time.Hour},
+	"7d":  {7 * 24 * time.Hour, 6 * time.Hour},
+	"all": {},
 }
 
 const (
@@ -25,7 +24,14 @@ const (
 
 // Source provides the statistics.
 type Source interface {
-	Summary(ctx context.Context, since time.Time, maxRules int) (Summary, error)
+	Summary(ctx context.Context, window Window, maxRules int) (Summary, error)
+}
+
+// Window covers decisions from Since (inclusive) to Until (exclusive).
+type Window struct {
+	Since, Until time.Time
+	// BucketWidth is zero when the store should choose a width for all time.
+	BucketWidth time.Duration
 }
 
 // Handler serves GET /stats.
@@ -55,7 +61,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if period == "" {
 		period = defaultPeriod
 	}
-	length, ok := Periods[period]
+	settings, ok := periods[period]
 	if !ok {
 		platform.WriteJSON(w, http.StatusBadRequest, platform.ErrorResponse{
 			Error:  "invalid request",
@@ -64,13 +70,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := h.now().UTC().Truncate(time.Second)
+	now := h.now().UTC().Truncate(time.Microsecond)
 	since := time.Unix(0, 0).UTC()
-	if length > 0 {
-		since = now.Add(-length)
+	if settings.length > 0 {
+		since = now.Add(-settings.length)
 	}
 
-	sum, err := h.source.Summary(r.Context(), since, maxRules)
+	sum, err := h.source.Summary(r.Context(), Window{Since: since, Until: now, BucketWidth: settings.bucketWidth}, maxRules)
 	if err != nil {
 		log.Printf("stats for period %s: %v", period, err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")

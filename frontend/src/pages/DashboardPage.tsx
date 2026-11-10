@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { getStats, periods, type Period, type Stats } from '../api'
+
+const DecisionChart = lazy(() => import('./DecisionChart'))
 
 const REFRESH_MS = 5000
 
@@ -19,6 +21,7 @@ const ruleNames: Record<string, string> = {
 }
 
 const number = new Intl.NumberFormat()
+const latency = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 })
 
 function share(part: number, total: number): string {
   return total > 0 ? `${((part / total) * 100).toFixed(1)}%` : '–'
@@ -31,21 +34,26 @@ function DashboardPage() {
 
   // Poll every few seconds. A failed refresh keeps the last data on screen.
   useEffect(() => {
-    let active = true
-    const load = () =>
-      getStats(period)
+    const controller = new AbortController()
+    let pending = false
+    const load = () => {
+      if (pending) return
+      pending = true
+      void getStats(period, controller.signal)
         .then((s) => {
-          if (!active) return
+          if (controller.signal.aborted) return
           setStats(s)
           setError(null)
         })
         .catch((e: unknown) => {
-          if (active) setError(e instanceof Error ? e.message : 'The statistics cannot be loaded.')
+          if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'The statistics cannot be loaded.')
         })
+        .finally(() => { pending = false })
+    }
     load()
     const timer = window.setInterval(load, REFRESH_MS)
     return () => {
-      active = false
+      controller.abort()
       window.clearInterval(timer)
     }
   }, [period])
@@ -60,7 +68,12 @@ function DashboardPage() {
         <h2>Dashboard</h2>
         <div className="periods" role="group" aria-label="Period">
           {periods.map((p) => (
-            <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => setPeriod(p)}>
+            <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => {
+              if (p !== period) {
+                setError(null)
+                setPeriod(p)
+              }
+            }}>
               {periodNames[p]}
             </button>
           ))}
@@ -89,12 +102,24 @@ function DashboardPage() {
             <div className="tile tile-review">
               <span className="tile-label">Sent to review</span>
               <span className="tile-value">{number.format(outcomes.review)}</span>
-              <span className="tile-note">{share(outcomes.review, outcomes.total)}</span>
+              <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
             </div>
             <div className="tile tile-block">
               <span className="tile-label">Blocked</span>
               <span className="tile-value">{number.format(outcomes.block)}</span>
-              <span className="tile-note">{share(outcomes.block, outcomes.total)}</span>
+              <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
+            </div>
+            <div className="tile">
+              <span className="tile-label">p95 scoring latency</span>
+              <span className="tile-value">
+                {shown.p95_scoring_latency_us == null ? '–' : `${latency.format(shown.p95_scoring_latency_us / 1000)} ms`}
+              </span>
+            </div>
+            <div className="tile">
+              <span className="tile-label">Blocked value (minor units)</span>
+              <span className="tile-value tile-money">
+                {shown.blocked_value_minor == null ? '–' : number.format(BigInt(shown.blocked_value_minor))}
+              </span>
             </div>
             <div className="tile">
               <span className="tile-label">Review queue now</span>
@@ -102,6 +127,12 @@ function DashboardPage() {
               <span className="tile-note">all time, waiting for an analyst</span>
             </div>
           </div>
+
+          {shown.decision_series?.buckets.length > 0 && (
+            <Suspense fallback={<p className="muted">Loading decisions over time…</p>}>
+              <DecisionChart series={shown.decision_series} since={shown.since} until={shown.generated_at} />
+            </Suspense>
+          )}
 
           <div className="panels">
             <section className="panel">

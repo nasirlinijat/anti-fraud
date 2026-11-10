@@ -164,7 +164,7 @@ The development server forwards API requests to the backend, so the browser need
 
 | Page | What it does |
 |---|---|
-| Dashboard (`#/dashboard`) | Decisions in the last 15 minutes, hour, day, week or all time: allowed, reviewed and blocked counts with their shares, the current review queue size, the most fired rules, and how many purchases the model sent to review or cleared. It reads `GET /stats` and refreshes every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
+| Dashboard (`#/dashboard`) | Shows counts and rates by outcome, p95 scoring latency, blocked value in minor units, and a stacked decision timeline with a table view. Choose the last 15 minutes, hour, day, week, or all time. The dashboard also shows the current review queue, most fired rules, and model effects. It reads `GET /stats` every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
 | Review queue (`#/reviews`) | Enter your analyst key to browse and approve or reject purchases awaiting review. The current page refreshes every five seconds. |

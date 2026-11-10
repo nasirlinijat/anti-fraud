@@ -26,6 +26,11 @@ export interface ErrorResponse {
 export const periods = ['15m', '1h', '24h', '7d', 'all'] as const
 export type Period = (typeof periods)[number]
 
+export interface DecisionSeries {
+  bucket_seconds: number
+  buckets: { start: string; allow: number; review: number; block: number }[]
+}
+
 export interface Stats {
   period: Period
   since: string
@@ -34,11 +39,14 @@ export interface Stats {
   top_rules: { name: string; fired: number; points: number }[]
   review_queue: number
   model: { scored: number; flagged: number; cleared: number }
+  p95_scoring_latency_us: number | null
+  blocked_value_minor: string
+  decision_series: DecisionSeries
 }
 
 // getStats reads the dashboard statistics for a period. The proxy adds the API key.
-export async function getStats(period: Period): Promise<Stats> {
-  const res = await fetch(`/stats?period=${period}`)
+export async function getStats(period: Period, signal?: AbortSignal): Promise<Stats> {
+  const res = await fetch(`/stats?period=${period}`, { signal })
   if (!res.ok) {
     throw new Error(`The backend answered with status ${res.status}.`)
   }
