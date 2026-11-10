@@ -119,6 +119,11 @@ def main():
         help="cost of reviewing one purchase, in the purchase currency; when set, "
              "flag_at maximizes fraud money caught minus review cost instead of using --review-rate",
     )
+    parser.add_argument(
+        "--target-precision", type=float,
+        help="share of flagged purchases that must be fraud on validation; when set, flag_at is the "
+             "lowest threshold that reaches it instead of using --review-rate or --review-cost",
+    )
     args = parser.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(exist_ok=True)
@@ -193,7 +198,7 @@ def main():
     }
 
     thresholds = export.choose_thresholds(
-        y_val, model_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost
+        y_val, model_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost, args.target_precision
     )
     report["policy"] = {
         **thresholds,
@@ -251,7 +256,7 @@ def main():
     combined_val = np.maximum(export.percentile(tables[0], main_val), export.percentile(tables[1], first_val))
     combined_test = np.maximum(export.percentile(tables[0], main_test), export.percentile(tables[1], first_test))
     combined_thresholds = export.choose_thresholds(
-        y_val, combined_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost
+        y_val, combined_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost, args.target_precision
     )
     combined_thresholds["player_blend_weight"] = args.player_blend
     first_purchase = test["player_txn_count"].to_numpy() == 0
@@ -269,6 +274,7 @@ def main():
         "test_first_fraud_only_unblended": evaluate(y_test[test_keep], unblended_test[test_keep], test_amount[test_keep]),
         "test": evaluate(y_test, combined_test, test_amount),
         "test_first_fraud_only": evaluate(y_test[test_keep], combined_test[test_keep], test_amount[test_keep]),
+        "precision_targets": export.precision_targets(y_val, combined_val, y_test, combined_test, test_amount),
         "policy": {
             **combined_thresholds,
             "validation_effect": export.policy_effect(y_val, combined_val, combined_thresholds, val_amount),
@@ -283,7 +289,7 @@ def main():
 
     print(json.dumps({name: report[name]["test"] for name in ("logistic_regression", "lightgbm")}, indent=2))
     print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
-    print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "policy")}, indent=2))
+    print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "precision_targets", "policy")}, indent=2))
     print(f"models written to {model_path} and {combined_path}")
     print(f"done in {time.time() - started:.0f}s")
 

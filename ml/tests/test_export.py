@@ -79,6 +79,47 @@ def test_choose_thresholds_by_money_or_rate():
     assert 0 <= effect["flagged_fraud_money_caught"] <= 1
 
 
+def test_flag_by_precision_picks_the_lowest_cut_that_reaches_the_target():
+    y = np.array([1, 1, 0, 1, 0, 0, 1])
+    score = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3])
+    # Precision after each cut: 1, 1, 0.67, 0.75, 0.6, 0.5, 0.57.
+    assert export.flag_by_precision(y, score, 0.75) == 0.6
+    assert export.flag_by_precision(y, score, 0.55) == 0.3
+    assert export.flag_by_precision(y, score, 1.0) == 0.8
+
+
+def test_flag_by_precision_flags_nothing_when_the_target_is_out_of_reach():
+    y = np.array([0, 1])
+    score = np.array([0.9, 0.2])
+    assert export.flag_by_precision(y, score, 0.9) > 0.9
+
+
+def test_flag_by_precision_keeps_equal_scores_together():
+    y = np.array([1, 0, 0])
+    score = np.array([0.8, 0.8, 0.3])
+    assert export.flag_by_precision(y, score, 0.6) > 0.8
+    assert export.flag_by_precision(y, score, 0.5) == 0.8
+
+
+def test_choose_thresholds_by_precision():
+    rng = np.random.default_rng(2)
+    y = (rng.random(5000) < 0.05).astype(int)
+    score = np.clip(rng.normal(0.2 + 0.4 * y, 0.15), 0, 1)
+    thresholds = export.choose_thresholds(y, score, 0.01, 0.02, target_precision=0.8)
+    assert thresholds["flag_by"] == "precision" and thresholds["target_precision"] == 0.8
+    assert export.policy_effect(y, score, thresholds)["flagged_precision"] >= 0.8
+
+
+def test_precision_targets_report_test_effect():
+    rng = np.random.default_rng(3)
+    y = (rng.random(4000) < 0.05).astype(int)
+    score = np.clip(rng.normal(0.2 + 0.4 * y, 0.15), 0, 1)
+    rows = export.precision_targets(y[:2000], score[:2000], y[2000:], score[2000:], rng.uniform(1, 200, 2000))
+    assert [row["target_precision"] for row in rows] == export.PRECISION_TARGETS
+    caught = [row["test_fraud_caught"] for row in rows]
+    assert caught == sorted(caught, reverse=True)
+
+
 def test_percentile_counts_the_table_strictly_below():
     table = np.array([0.1, 0.1, 0.2, 0.5])
     assert export.percentile(table, np.array([0.05, 0.1, 0.2, 0.3, 0.9])).tolist() == [0, 0, 0.5, 0.75, 1]
