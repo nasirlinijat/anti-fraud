@@ -41,6 +41,15 @@ WHERE d.outcome = 'review'
 ORDER BY d.decided_at, d.purchase_id
 LIMIT sqlc.arg(page_limit);
 
+-- name: GetReviewCase :one
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
+       d.ruleset_version, d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.purchase_id = sqlc.arg(purchase_id)
+  AND d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id);
+
 -- name: CountCardPurchasesLastHour :one
 -- Counts purchases with the card in the hour before the given time. Purchases
 -- at exactly that time are already saved, so they come earlier and are counted.
@@ -48,8 +57,8 @@ SELECT count(*)
 FROM purchases
 WHERE card_token = sqlc.arg(card_token)
   AND event_time > sqlc.arg(event_time)::timestamptz - interval '1 hour'
-  AND event_time <= sqlc.arg(event_time)::timestamptz;
-
+  AND event_time <= sqlc.arg(event_time)::timestamptz;
+
 -- name: PlayerEarlierModelScores :one
 -- Counts and sums the unblended model scores of the player's purchases that
 -- come before the given one in (event_time, transaction_id) order.

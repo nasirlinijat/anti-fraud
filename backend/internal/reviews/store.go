@@ -3,9 +3,11 @@ package reviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -26,6 +28,16 @@ type QueueItem struct {
 	FiredRules   []scoring.FiredRule
 	DecidedAt    time.Time
 }
+
+// CaseItem is a purchase marked for review, with the evidence behind the decision.
+type CaseItem struct {
+	QueueItem
+	// RulesetVersion is the ruleset version that scored the purchase.
+	RulesetVersion int
+}
+
+// ErrNotFound means no purchase under review has the given ID.
+var ErrNotFound = errors.New("review case not found")
 
 // Store reads the review queue.
 type Store struct {
@@ -71,29 +83,59 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 
 	items := make([]QueueItem, 0, len(rows))
 	for _, r := range rows {
-		var fired []scoring.FiredRule
-		if err := json.Unmarshal(r.FiredRules, &fired); err != nil {
-			return nil, fmt.Errorf("decode fired rules of purchase %d: %w", r.PurchaseID, err)
-		}
-		item := QueueItem{
-			PurchaseID:    r.PurchaseID,
-			TransactionID: r.TransactionID,
-			EventTime:     r.EventTime.Time.UTC(),
-			AmountMinor:   r.AmountMinor,
-			PlayerID:      r.PlayerID,
-			RuleScore:     int(r.RuleScore),
-			FiredRules:    fired,
-			DecidedAt:     r.DecidedAt.Time.UTC(),
-		}
-		if r.ModelScore.Valid {
-			score := r.ModelScore.Float64
-			item.ModelScore = &score
-		}
-		if r.ModelVersion.Valid {
-			version := r.ModelVersion.String
-			item.ModelVersion = &version
+		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+			r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+// Case returns the purchase with the given ID if it is under review. It
+// returns ErrNotFound if there is none.
+func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
+	r, err := s.q.GetReviewCase(ctx, purchaseID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CaseItem{}, ErrNotFound
+	}
+	if err != nil {
+		return CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
+	}
+	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID,
+		r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
+	if err != nil {
+		return CaseItem{}, err
+	}
+	return CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}, nil
+}
+
+func newQueueItem(
+	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string,
+	ruleScore int32, modelScore pgtype.Float8, modelVersion pgtype.Text, firedRules []byte, decidedAt pgtype.Timestamptz,
+) (QueueItem, error) {
+	var fired []scoring.FiredRule
+	if err := json.Unmarshal(firedRules, &fired); err != nil {
+		return QueueItem{}, fmt.Errorf("decode fired rules of purchase %d: %w", purchaseID, err)
+	}
+	item := QueueItem{
+		PurchaseID:    purchaseID,
+		TransactionID: transactionID,
+		EventTime:     eventTime.Time.UTC(),
+		AmountMinor:   amountMinor,
+		PlayerID:      playerID,
+		RuleScore:     int(ruleScore),
+		FiredRules:    fired,
+		DecidedAt:     decidedAt.Time.UTC(),
+	}
+	if modelScore.Valid {
+		score := modelScore.Float64
+		item.ModelScore = &score
+	}
+	if modelVersion.Valid {
+		version := modelVersion.String
+		item.ModelVersion = &version
+	}
+	return item, nil
 }

@@ -20,6 +20,10 @@ func (rejectUnexpectedReviewAccess) queue(context.Context, int, *queueCursor) ([
 	panic("unexpected queue read")
 }
 
+func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (CaseItem, error) {
+	panic("unexpected case read")
+}
+
 func (rejectUnexpectedReviewAccess) resolve(context.Context, int64, string, string) (resolution, error) {
 	panic("unexpected resolution write")
 }
@@ -37,12 +41,14 @@ func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest
 func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, platform.AnalystKeys{})
-	for method, path := range map[string]string{
-		http.MethodGet: "/reviews", http.MethodPost: "/reviews/1/decision",
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/reviews"},
+		{http.MethodGet, "/reviews/1"},
+		{http.MethodPost, "/reviews/1/decision"},
 	} {
-		rec := reviewRequest(mux, method, path, queueTestKey, `{"decision":"approve"}`)
+		rec := reviewRequest(mux, route.method, route.path, queueTestKey, `{"decision":"approve"}`)
 		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("%s response = %d %s", method, rec.Code, rec.Body)
+			t.Fatalf("%s %s response = %d %s", route.method, route.path, rec.Code, rec.Body)
 		}
 	}
 }
@@ -95,6 +101,10 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 		return result
 	}
 	before := summary()
+	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
+	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusOK {
+		t.Fatalf("pending case = %d %s", rec.Code, rec.Body)
+	}
 	submit := func(id int64, key, decision string) *httptest.ResponseRecorder {
 		return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", key,
 			`{"decision":"`+decision+`"}`)
@@ -123,6 +133,9 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	}
 	if rec := submit(first, secondAnalystTestKey, "reject"); rec.Code != http.StatusConflict {
 		t.Fatalf("second decision = %d %s", rec.Code, rec.Body)
+	}
+	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("resolved case = %d %s", rec.Code, rec.Body)
 	}
 	if rec := submit(allowed, queueTestKey, "reject"); rec.Code != http.StatusConflict {
 		t.Fatalf("non-review decision = %d %s", rec.Code, rec.Body)

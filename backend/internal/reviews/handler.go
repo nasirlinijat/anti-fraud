@@ -21,15 +21,23 @@ type queueReader interface {
 	queue(context.Context, int, *queueCursor) ([]QueueItem, error)
 }
 
+type caseReader interface {
+	Case(context.Context, int64) (CaseItem, error)
+}
+
 type reviewStore interface {
 	queueReader
+	caseReader
 	resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error)
 }
 
-// RegisterRoutes exposes the review queue and its decisions to authenticated analysts.
+// RegisterRoutes exposes the queue, case evidence, and decisions to authenticated analysts.
 func RegisterRoutes(mux *http.ServeMux, store reviewStore, keys platform.AnalystKeys) {
 	mux.HandleFunc("GET /reviews", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
 		serveQueue(w, r, store)
+	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
+		serveCase(w, r, store)
 	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, analystID string) {
 		serveResolution(w, r, store, analystID)
@@ -67,6 +75,11 @@ type reviewResponse struct {
 	FiredRules    []scoring.FiredRule `json:"fired_rules"`
 }
 
+type caseResponse struct {
+	reviewResponse
+	RulesetVersion int `json:"ruleset_version"`
+}
+
 type queueResponse struct {
 	Items      []reviewResponse `json:"items"`
 	NextCursor *string          `json:"next_cursor"`
@@ -94,24 +107,50 @@ func serveQueue(w http.ResponseWriter, r *http.Request, store queueReader) {
 	}
 	items := make([]reviewResponse, 0, len(rows))
 	for _, row := range rows {
-		firedRules := row.FiredRules
-		if firedRules == nil {
-			firedRules = []scoring.FiredRule{}
-		}
-		items = append(items, reviewResponse{
-			PurchaseID:    strconv.FormatInt(row.PurchaseID, 10),
-			TransactionID: row.TransactionID,
-			EventTime:     row.EventTime.UTC(),
-			QueuedAt:      row.DecidedAt.UTC(),
-			AmountMinor:   strconv.FormatInt(row.AmountMinor, 10),
-			PlayerID:      row.PlayerID,
-			RuleScore:     row.RuleScore,
-			ModelScore:    row.ModelScore,
-			ModelVersion:  row.ModelVersion,
-			FiredRules:    firedRules,
-		})
+		items = append(items, newReviewResponse(row))
 	}
 	platform.WriteJSON(w, http.StatusOK, queueResponse{Items: items, NextCursor: nextCursor})
+}
+
+func serveCase(w http.ResponseWriter, r *http.Request, store caseReader) {
+	purchaseID, err := strconv.ParseInt(r.PathValue("purchase_id"), 10, 64)
+	if err != nil || purchaseID <= 0 {
+		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
+		return
+	}
+	item, err := store.Case(r.Context(), purchaseID)
+	if errors.Is(err, ErrNotFound) {
+		platform.WriteError(w, http.StatusNotFound, "review case not found")
+		return
+	}
+	if err != nil {
+		log.Printf("read review case: %v", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, caseResponse{
+		reviewResponse: newReviewResponse(item.QueueItem),
+		RulesetVersion: item.RulesetVersion,
+	})
+}
+
+func newReviewResponse(row QueueItem) reviewResponse {
+	firedRules := row.FiredRules
+	if firedRules == nil {
+		firedRules = []scoring.FiredRule{}
+	}
+	return reviewResponse{
+		PurchaseID:    strconv.FormatInt(row.PurchaseID, 10),
+		TransactionID: row.TransactionID,
+		EventTime:     row.EventTime.UTC(),
+		QueuedAt:      row.DecidedAt.UTC(),
+		AmountMinor:   strconv.FormatInt(row.AmountMinor, 10),
+		PlayerID:      row.PlayerID,
+		RuleScore:     row.RuleScore,
+		ModelScore:    row.ModelScore,
+		ModelVersion:  row.ModelVersion,
+		FiredRules:    firedRules,
+	}
 }
 
 func encodeCursor(cursor queueCursor) string {

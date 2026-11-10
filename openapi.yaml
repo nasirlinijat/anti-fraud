@@ -575,6 +575,64 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}:
+    get:
+      tags: [Reviews]
+      operationId: getReviewCase
+      summary: Get the evidence behind a purchase awaiting review
+      description: >-
+        Returns one purchase marked for review with its rule score, fired rules
+        and points, the version of the ruleset that scored it, and the model
+        score when one was recorded.
+      security:
+        - AnalystKeyAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The purchase ID from the review queue.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+      responses:
+        "200":
+          description: The review case.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewCase"
+        "400":
+          description: The purchase ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The X-API-Key header is missing or contains an invalid analyst key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No purchase under review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The review case could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /rulesets/active:
     get:
       tags: [Rulesets]
@@ -728,6 +786,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FiredRule"
+
+    ReviewCase:
+      allOf:
+        - $ref: "#/components/schemas/ReviewItem"
+        - type: object
+          required: [ruleset_version]
+          properties:
+            ruleset_version:
+              type: integer
+              format: int32
+              description: The ruleset version that scored the purchase.
+              example: 2
 
     Ruleset:
       allOf:

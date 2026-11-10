@@ -34,6 +34,49 @@ func (q *Queries) CountCardPurchasesLastHour(ctx context.Context, arg CountCardP
 	return count, err
 }
 
+const getReviewCase = `-- name: GetReviewCase :one
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
+       d.ruleset_version, d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.purchase_id = $1
+  AND d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+`
+
+type GetReviewCaseRow struct {
+	PurchaseID     int64
+	TransactionID  string
+	EventTime      pgtype.Timestamptz
+	AmountMinor    int64
+	PlayerID       string
+	RulesetVersion int32
+	RuleScore      int32
+	ModelScore     pgtype.Float8
+	ModelVersion   pgtype.Text
+	FiredRules     []byte
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) GetReviewCase(ctx context.Context, purchaseID int64) (GetReviewCaseRow, error) {
+	row := q.db.QueryRow(ctx, getReviewCase, purchaseID)
+	var i GetReviewCaseRow
+	err := row.Scan(
+		&i.PurchaseID,
+		&i.TransactionID,
+		&i.EventTime,
+		&i.AmountMinor,
+		&i.PlayerID,
+		&i.RulesetVersion,
+		&i.RuleScore,
+		&i.ModelScore,
+		&i.ModelVersion,
+		&i.FiredRules,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const insertDecision = `-- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,

@@ -13,6 +13,10 @@ type Review = {
   fired_rules: { name: string; points: number }[]
 }
 
+type ReviewCase = Review & {
+  ruleset_version: number
+}
+
 type QueuePage = {
   items: Review[]
   next_cursor: string | null
@@ -28,9 +32,10 @@ const timestamp = new Intl.DateTimeFormat(undefined, {
 })
 const amount = new Intl.NumberFormat()
 
-function ReviewTable({ items, pending, onDecision }: {
+function ReviewTable({ items, pending, onOpen, onDecision }: {
   items: Review[]
   pending: ReadonlySet<string>
+  onOpen: (purchaseId: string) => void
   onDecision: (item: Review, decision: Decision) => void
 }) {
   function scrollTable(event: KeyboardEvent<HTMLDivElement>) {
@@ -70,7 +75,11 @@ function ReviewTable({ items, pending, onDecision }: {
         <tbody>
           {items.map((item) => (
             <tr key={item.purchase_id} data-purchase-id={item.purchase_id}>
-              <th scope="row">{item.transaction_id}</th>
+              <th scope="row">
+                <button type="button" className="review-open" onClick={() => onOpen(item.purchase_id)}>
+                  {item.transaction_id}
+                </button>
+              </th>
               <td>{item.player_id}</td>
               <td>{amount.format(BigInt(item.amount_minor))}</td>
               <td><time dateTime={item.event_time}>{timestamp.format(new Date(item.event_time))}</time></td>
@@ -105,12 +114,136 @@ function ReviewTable({ items, pending, onDecision }: {
   )
 }
 
+type CaseState =
+  | { status: 'loading' }
+  | { status: 'not-found' }
+  | { status: 'failed' }
+  | { status: 'loaded'; review: ReviewCase }
+
+function CaseView({ apiKey, purchaseId, onBack, onKeyRejected }: {
+  apiKey: string
+  purchaseId: string
+  onBack: () => void
+  onKeyRejected: () => void
+}) {
+  const [state, setState] = useState<CaseState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const deadline = window.setTimeout(() => controller.abort(), 10_000)
+    let stopped = false
+
+    async function load() {
+      try {
+        const response = await fetch(`/reviews/${encodeURIComponent(purchaseId)}`, {
+          headers: { 'X-API-Key': apiKey },
+          signal: controller.signal,
+        })
+        if (stopped) return
+        if (response.status === 401) {
+          onKeyRejected()
+          return
+        }
+        if (response.status === 404) {
+          setState({ status: 'not-found' })
+          return
+        }
+        if (!response.ok) throw new Error('Could not load the review case')
+        const review: ReviewCase = await response.json()
+        if (!stopped) setState({ status: 'loaded', review })
+      } catch {
+        if (!stopped) setState({ status: 'failed' })
+      } finally {
+        window.clearTimeout(deadline)
+      }
+    }
+
+    void load()
+    return () => {
+      stopped = true
+      window.clearTimeout(deadline)
+      controller.abort()
+    }
+  }, [apiKey, purchaseId, attempt, onKeyRejected])
+
+  return (
+    <article className="review-case" aria-labelledby="case-heading">
+      <button type="button" className="review-back" onClick={onBack}>Back to the queue</button>
+      <h3 id="case-heading">Review case</h3>
+      {state.status === 'loading' && <p>Loading review case…</p>}
+      {state.status === 'not-found' && (
+        <p role="status">This purchase is not under review. It may have been decided, or the ID is wrong.</p>
+      )}
+      {state.status === 'failed' && (
+        <p role="alert">
+          Could not load this review case.{' '}
+          <button type="button" onClick={() => {
+            setState({ status: 'loading' })
+            setAttempt(attempt + 1)
+          }}>
+            Try again
+          </button>
+        </p>
+      )}
+      {state.status === 'loaded' && <CaseDetails review={state.review} />}
+    </article>
+  )
+}
+
+function CaseDetails({ review }: { review: ReviewCase }) {
+  return (
+    <>
+      <dl className="review-facts">
+        <dt>Transaction</dt>
+        <dd>{review.transaction_id}</dd>
+        <dt>Player</dt>
+        <dd>{review.player_id}</dd>
+        <dt>Amount (minor units)</dt>
+        <dd>{amount.format(BigInt(review.amount_minor))}</dd>
+        <dt>Purchase time (UTC)</dt>
+        <dd><time dateTime={review.event_time}>{timestamp.format(new Date(review.event_time))}</time></dd>
+        <dt>Queued time (UTC)</dt>
+        <dd><time dateTime={review.queued_at}>{timestamp.format(new Date(review.queued_at))}</time></dd>
+        <dt>Ruleset version</dt>
+        <dd>{review.ruleset_version}</dd>
+        <dt>Rule score</dt>
+        <dd>{review.rule_score}</dd>
+        <dt>Model score</dt>
+        <dd>{review.model_score ?? 'Unavailable'}</dd>
+        <dt>Model version</dt>
+        <dd>{review.model_version ?? 'None'}</dd>
+      </dl>
+      <h4>Fired rules</h4>
+      {review.fired_rules.length === 0 ? <p>No rules fired.</p> : (
+        <table className="review-table review-rules">
+          <thead>
+            <tr>
+              <th scope="col">Rule</th>
+              <th scope="col">Points</th>
+            </tr>
+          </thead>
+          <tbody>
+            {review.fired_rules.map((rule) => (
+              <tr key={rule.name}>
+                <th scope="row">{rule.name}</th>
+                <td>{rule.points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  )
+}
+
 function ReviewQueue() {
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [keyRejected, setKeyRejected] = useState(false)
   const [cursors, setCursors] = useState<(string | null)[]>([null])
   const [page, setPage] = useState<QueuePage | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [openCase, setOpenCase] = useState<string | null>(null)
   const [accessUnavailable, setAccessUnavailable] = useState(false)
   const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
   const [feedback, setFeedback] = useState('')
@@ -142,6 +275,7 @@ function ReviewQueue() {
     setKeyRejected(true)
     setPage(null)
     setCursors([null])
+    setOpenCase(null)
     setConfirmation(null)
     setFeedback('')
   }, [cancelDecisions])
@@ -307,6 +441,8 @@ function ReviewQueue() {
           />
           <button type="submit">Open queue</button>
         </form>
+      ) : openCase !== null ? (
+        <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
       ) : (
         <>
           <p role="status">{feedback}</p>
@@ -319,7 +455,7 @@ function ReviewQueue() {
           )}
           {page === null && !loadFailed && <p>Loading review queue…</p>}
           {page && (page.items.length > 0 ? (
-            <ReviewTable items={page.items} pending={pending} onDecision={chooseDecision} />
+            <ReviewTable items={page.items} pending={pending} onOpen={setOpenCase} onDecision={chooseDecision} />
           ) : (
             <p>{cursor === null ? 'No purchases are waiting for review.' : 'No purchases on this page.'}</p>
           ))}
