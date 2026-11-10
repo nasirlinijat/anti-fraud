@@ -35,7 +35,7 @@ type fakeReviewReads struct {
 	caseReader
 }
 
-func (fakeReviewReads) resolve(context.Context, int64, string, string) (resolution, error) {
+func (fakeReviewReads) resolve(context.Context, int64, string, string, bool) (resolution, error) {
 	panic("unexpected decision request")
 }
 
@@ -249,7 +249,7 @@ func TestCaseShowsDeviceID(t *testing.T) {
 				return CaseItem{QueueItem: QueueItem{PurchaseID: id}, DeviceID: want, RulesetVersion: 1}, nil
 			})
 			var body map[string]any
-			w := requestCase(store, "/reviews/7", queueTestKey)
+			w := requestCase(t, store, "/reviews/7", queueTestKey)
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
 				t.Fatalf("status = %d, err = %v, body = %s", w.Code, err, w.Body)
 			}

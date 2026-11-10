@@ -250,6 +250,7 @@ function ReviewQueue() {
   const [accessUnavailable, setAccessUnavailable] = useState(false)
   const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
   const [feedback, setFeedback] = useState('')
+  const [blockDevice, setBlockDevice] = useState(false)
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
   const [refreshVersion, setRefreshVersion] = useState(0)
   const pollVersion = useRef(0)
@@ -361,7 +362,9 @@ function ReviewQueue() {
   }
 
   function chooseDecision(item: Review, decision: Decision) {
-    if (!requests.current.has(item.purchase_id)) setConfirmation({ item, decision })
+    if (requests.current.has(item.purchase_id)) return
+    setBlockDevice(false)
+    setConfirmation({ item, decision })
   }
 
   async function saveDecision({ item, decision }: ReviewAction) {
@@ -379,7 +382,7 @@ function ReviewQueue() {
       const response = await fetch(`/reviews/${encodeURIComponent(id)}/decision`, {
         method: 'POST',
         headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify(decision === 'reject' && blockDevice ? { decision, block_device: true } : { decision }),
         signal: controller.signal,
       })
       if (!isCurrent()) return
@@ -402,8 +405,12 @@ function ReviewQueue() {
         ...current,
         items: current.items.filter(row => row.purchase_id !== id),
       })
+      let deviceBlocked = false
+      if (response.status === 201) {
+        deviceBlocked = ((await response.json().catch(() => null)) as { device_blocked?: boolean } | null)?.device_blocked === true
+      }
       setFeedback(response.status === 201
-        ? `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}.`
+        ? `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.`
         : `${item.transaction_id} is no longer pending review.`)
     } catch {
       if (!isCurrent()) return
@@ -486,6 +493,12 @@ function ReviewQueue() {
               {confirmation?.decision === 'approve' ? 'Approve' : 'Reject'} this purchase?
             </h3>
             <p>Transaction {confirmation?.item.transaction_id}. This decision is final.</p>
+            {confirmation?.decision === 'reject' && (
+              <label className="review-block-device">
+                <input type="checkbox" checked={blockDevice} onChange={event => setBlockDevice(event.target.checked)} />
+                {' '}Also block this purchase&apos;s device, if it has one
+              </label>
+            )}
             <form method="dialog" className="review-actions">
               <button value="cancel" className="secondary" autoFocus>Cancel</button>
               <button value="confirm">{confirmation?.decision === 'approve' ? 'Approve' : 'Reject'}</button>

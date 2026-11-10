@@ -529,6 +529,15 @@ paths:
                 decision:
                   type: string
                   enum: [approve, reject]
+                block_device:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the device of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. A purchase without a device, or a device that is
+                    already blocked, is rejected without a new entry. A decision
+                    that conflicts with an earlier one saves nothing.
       responses:
         "201":
           description: The analyst decision was saved.
@@ -714,7 +723,7 @@ components:
   schemas:
     ReviewResolution:
       type: object
-      required: [purchase_id, decision, analyst_id, resolved_at]
+      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked]
       properties:
         purchase_id:
           type: string
@@ -729,6 +738,9 @@ components:
           type: string
           format: date-time
           description: Time when the database recorded the decision, in UTC.
+        device_blocked:
+          type: boolean
+          description: True when this rejection added the device of the purchase to the blocklist.
 
     ReviewPage:
       type: object

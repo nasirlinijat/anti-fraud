@@ -28,7 +28,7 @@ type caseReader interface {
 type reviewStore interface {
 	queueReader
 	caseReader
-	resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error)
+	resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (resolution, error)
 }
 
 // RegisterRoutes exposes the queue, case evidence, and decisions to authenticated analysts.

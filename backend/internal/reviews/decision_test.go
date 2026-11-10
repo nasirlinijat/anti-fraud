@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
@@ -24,7 +25,7 @@ func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (CaseItem, erro
 	panic("unexpected case read")
 }
 
-func (rejectUnexpectedReviewAccess) resolve(context.Context, int64, string, string) (resolution, error) {
+func (rejectUnexpectedReviewAccess) resolve(context.Context, int64, string, string, bool) (resolution, error) {
 	panic("unexpected resolution write")
 }
 
@@ -163,5 +164,76 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 		modelScore != score || originalResolution != "approve" {
 		t.Fatalf("saved score or resolution was changed: %q %q %v %q, err = %v",
 			modelVersion, originalOutcome, modelScore, originalResolution, err)
+	}
+}
+
+func TestRejectCanBlockTheDevice(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	at := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	withDevice := func(txnID, device string) int64 {
+		t.Helper()
+		id := insertDecision(t, tx, txnID, "review", at, nil, `[]`)
+		if _, err := tx.Exec(ctx, `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
+			t.Fatalf("set device ID: %v", err)
+		}
+		return id
+	}
+	blocked := func(device string) bool {
+		t.Helper()
+		_, found, err := blocklist.NewStore(tx).Match(ctx, blocklist.Subject{CardToken: "none", PlayerID: "none", DeviceID: &device})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t))
+	decide := func(id int64, body string) *httptest.ResponseRecorder {
+		return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", queueTestKey, body)
+	}
+	const reject = `{"decision":"reject","block_device":true}`
+
+	// A rejection without the option leaves the device alone.
+	plain := withDevice("block-plain", "device-plain")
+	if rec := decide(plain, `{"decision":"reject"}`); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) || blocked("device-plain") {
+		t.Fatalf("plain rejection = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-plain"))
+	}
+
+	// With the option, the rejection and the entry are saved together, and the next purchase from the device is blocked.
+	first := withDevice("block-first", "device-bad")
+	if rec := decide(first, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":true`) || !blocked("device-bad") {
+		t.Fatalf("rejection with the option = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-bad"))
+	}
+
+	// A device that is already blocked adds no second entry, and the rejection still succeeds.
+	again := withDevice("block-again", "device-bad")
+	if rec := decide(again, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) {
+		t.Fatalf("rejection of an already blocked device = %d %s", rec.Code, rec.Body)
+	}
+	var entries int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM blocklist_entries WHERE entry_type = 'device' AND value = 'device-bad'`).Scan(&entries); err != nil || entries != 1 {
+		t.Fatalf("entries for the device = %d, err = %v, want 1", entries, err)
+	}
+
+	// A conflicting decision creates no entry.
+	decided := withDevice("block-decided", "device-conflict")
+	if rec := decide(decided, `{"decision":"approve"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("approve = %d %s", rec.Code, rec.Body)
+	}
+	if rec := decide(decided, reject); rec.Code != http.StatusConflict || blocked("device-conflict") {
+		t.Fatalf("conflicting rejection = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-conflict"))
+	}
+
+	// A purchase without a device is rejected and nothing is blocked.
+	noDevice := insertDecision(t, tx, "block-no-device", "review", at, nil, `[]`)
+	if rec := decide(noDevice, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) {
+		t.Fatalf("rejection without a device = %d %s", rec.Code, rec.Body)
+	}
+
+	// The option only makes sense for a rejection.
+	approve := withDevice("block-approve", "device-approve")
+	if rec := decide(approve, `{"decision":"approve","block_device":true}`); rec.Code != http.StatusBadRequest || blocked("device-approve") {
+		t.Fatalf("approval with the option = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-approve"))
 	}
 }

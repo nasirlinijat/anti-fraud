@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -41,17 +42,35 @@ type CaseItem struct {
 // ErrNotFound means no purchase under review has the given ID.
 var ErrNotFound = errors.New("review case not found")
 
-// Store reads the review queue.
+// DB is a connection that can also start a transaction. Both a pool and a
+// transaction qualify, so tests can run the store inside a rolled-back one.
+type DB interface {
+	db.DBTX
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+// Store reads the review queue and saves review decisions.
 type Store struct {
-	q *db.Queries
+	conn DB
+	q    *db.Queries
 }
 
-func NewStore(conn db.DBTX) *Store {
-	return &Store{q: db.New(conn)}
+func NewStore(conn DB) *Store {
+	return &Store{conn: conn, q: db.New(conn)}
 }
 
-func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analystID string) (resolution, error) {
-	row, err := s.q.ResolveReview(ctx, db.ResolveReviewParams{
+// resolve saves the decision. When the decision is a saved rejection and
+// blockDevice is set, it also blocklists the purchase's device in the same
+// transaction. Any other outcome adds no blocklist entry, and a device that is
+// already blocked is left as it is.
+func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (resolution, error) {
+	tx, err := s.conn.Begin(ctx)
+	if err != nil {
+		return resolution{}, fmt.Errorf("begin review decision: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row, err := db.New(tx).ResolveReview(ctx, db.ResolveReviewParams{
 		TargetPurchaseID: purchaseID,
 		Decision:         decision,
 		AnalystID:        analystID,
@@ -59,7 +78,30 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 	if err != nil {
 		return resolution{}, fmt.Errorf("resolve review: %w", err)
 	}
-	return resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}, nil
+	result := resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}
+
+	if row.Status == "saved" && decision == "reject" && blockDevice {
+		device, err := db.New(tx).GetPurchaseDeviceID(ctx, purchaseID)
+		if err != nil {
+			return resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
+		}
+		if device.Valid {
+			_, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{
+				Type:   blocklist.TypeDevice,
+				Value:  device.String,
+				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
+			})
+			if err != nil {
+				return resolution{}, err
+			}
+			result.deviceBlocked = added
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return resolution{}, fmt.Errorf("commit review decision: %w", err)
+	}
+	return result, nil
 }
 
 // Queue returns up to limit purchases marked for review, the earliest decided first.
