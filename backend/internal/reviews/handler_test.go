@@ -79,6 +79,7 @@ func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
 
 func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	zero := 0.0
+	version := "lgbm-ieee-v5-combined"
 	at := time.Date(2026, 11, 9, 10, 0, 0, 123456000, time.FixedZone("UTC+4", 4*60*60))
 	store := queueFunc(func(_ context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
 		if limit != 101 {
@@ -96,7 +97,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 				EventTime: at.Add(-time.Minute), DecidedAt: at, AmountMinor: 9223372036854775807, RuleScore: 60,
 			},
 			{
-				PurchaseID: 9007199254740994, TransactionID: "second", ModelScore: &zero,
+				PurchaseID: 9007199254740994, TransactionID: "second", ModelScore: &zero, ModelVersion: &version,
 				EventTime: at, DecidedAt: at, FiredRules: []scoring.FiredRule{{Name: scoring.RuleHighAmount, Points: 30}},
 			},
 		}, nil
@@ -111,11 +112,11 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 		first.EventTime.Format(time.RFC3339Nano) != "2026-11-09T05:59:00.123456Z" ||
 		first.QueuedAt.Format(time.RFC3339Nano) != "2026-11-09T06:00:00.123456Z" ||
 		first.RuleScore != 60 || first.PlayerID != "player" || first.TransactionID != "first" ||
-		first.ModelScore != nil || first.FiredRules == nil || len(first.FiredRules) != 0 {
+		first.ModelScore != nil || first.ModelVersion != nil || first.FiredRules == nil || len(first.FiredRules) != 0 {
 		t.Fatalf("unexpected first review: %+v", first)
 	}
 	second := page.Items[1]
-	if second.ModelScore == nil || *second.ModelScore != 0 ||
+	if second.ModelScore == nil || *second.ModelScore != 0 || second.ModelVersion == nil || *second.ModelVersion != version ||
 		len(second.FiredRules) != 1 || second.FiredRules[0].Name != scoring.RuleHighAmount || second.FiredRules[0].Points != 30 {
 		t.Fatalf("unexpected second review: %+v", second)
 	}

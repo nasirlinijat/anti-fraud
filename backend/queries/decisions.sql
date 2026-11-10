@@ -19,15 +19,15 @@ RETURNING id;
 -- name: InsertDecision :exec
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended, scoring_latency_us
+    model_score_unblended, scoring_latency_us, model_version
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9
+    $8, $9, $10
 );
 
 -- name: ListReviewQueue :many
 SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id,
-       d.rule_score, d.model_score, d.fired_rules, d.decided_at
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
 WHERE d.outcome = 'review'

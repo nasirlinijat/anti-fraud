@@ -49,6 +49,7 @@ type Purchases interface {
 type Model interface {
 	Predict(x []float64) (float64, error)
 	Features() []string
+	Version() string
 }
 
 // combination is a model made of several models, such as *lgbm.Combined. The
@@ -128,6 +129,7 @@ type scoreResponse struct {
 	FiredRules     []scoring.FiredRule `json:"fired_rules"`
 	RulesetVersion int                 `json:"ruleset_version"`
 	ModelScore     *float64            `json:"model_score"`
+	ModelVersion   *string             `json:"model_version"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -174,13 +176,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	modelInputs := features.Map(vector)
 
 	var modelScore, unblended *float64
+	var modelVersion *string
 	if h.model != nil {
 		final, own, err := h.modelScore(r.Context(), p, vector)
 		if err != nil {
 			h.internalError(w, p, err)
 			return
 		}
-		modelScore, unblended = &final, &own
+		version := h.model.Version()
+		modelScore, unblended, modelVersion = &final, &own, &version
 	}
 
 	var result scoring.Result
@@ -218,6 +222,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModelInputs:         modelInputs,
 		ModelScore:          modelScore,
 		ModelScoreUnblended: unblended,
+		ModelVersion:        modelVersion,
 		Latency:             time.Since(started),
 		FeatureHistory:      history,
 	})
@@ -240,6 +245,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		FiredRules:     result.FiredRules,
 		RulesetVersion: rs.Version,
 		ModelScore:     modelScore,
+		ModelVersion:   modelVersion,
 	})
 }
 

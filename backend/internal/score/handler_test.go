@@ -549,13 +549,17 @@ func TestScoreWithPostgres(t *testing.T) {
 	var outcome string
 	var score int
 	var latency int64
+	var modelVersion *string
 	err := tx.QueryRow(context.Background(), `
-		SELECT d.outcome, d.rule_score, d.scoring_latency_us FROM decisions d JOIN purchases p ON p.id = d.purchase_id
-		WHERE p.transaction_id = 'pg-5'`).Scan(&outcome, &score, &latency)
+		SELECT d.outcome, d.rule_score, d.scoring_latency_us, d.model_version FROM decisions d JOIN purchases p ON p.id = d.purchase_id
+		WHERE p.transaction_id = 'pg-5'`).Scan(&outcome, &score, &latency, &modelVersion)
 	if err != nil || outcome != "allow" || score != 40 {
 		t.Errorf("saved decision = (%s, %d, %v), want (allow, 40)", outcome, score, err)
 	}
 	if latency <= 0 {
 		t.Errorf("saved scoring latency = %d µs, want a positive value", latency)
+	}
+	if modelVersion != nil || got.ModelVersion != nil {
+		t.Errorf("model version = %v saved, %v returned; want none without a model", modelVersion, got.ModelVersion)
 	}
 }
