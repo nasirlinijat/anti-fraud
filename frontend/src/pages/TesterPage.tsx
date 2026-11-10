@@ -301,6 +301,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
           <thead>
             <tr>
               <th scope="col">Rule</th>
+              <th scope="col">Why it fired</th>
               <th scope="col" className="num">
                 Points
               </th>
@@ -312,6 +313,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
                 <td>
                   <code>{rule.name}</code>
                 </td>
+                <td>{rule.message}</td>
                 <td className="num">{rule.points}</td>
               </tr>
             ))}

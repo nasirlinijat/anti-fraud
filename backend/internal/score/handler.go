@@ -153,7 +153,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A blocklist match blocks the purchase before the rules run.
-	_, blocked, err := h.blocklist.Match(ctx, blocklist.Subject{
+	entry, blocked, err := h.blocklist.Match(ctx, blocklist.Subject{
 		CardToken: p.CardToken,
 		PlayerID:  p.PlayerID,
 		DeviceID:  p.DeviceID,
@@ -189,7 +189,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var result scoring.Result
 	if blocked {
-		result = scoring.Result{Outcome: scoring.OutcomeBlock}
+		result = scoring.Result{Outcome: scoring.OutcomeBlock, FiredRules: []scoring.FiredRule{scoring.BlocklistMatch(string(entry.Type))}}
 	} else {
 		cardUses, err := h.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
 		if err != nil {

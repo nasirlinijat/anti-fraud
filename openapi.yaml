@@ -1096,21 +1096,32 @@ components:
       required:
         - name
         - points
+        - message
       properties:
         name:
           type: string
-          enum: [high_amount, card_velocity, new_account, country_mismatch]
+          enum: [high_amount, card_velocity, new_account, country_mismatch, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
             the last hour. new_account fires when the account is newer than
             its limit in hours. country_mismatch fires when the card country
-            differs from the IP country.
+            differs from the IP country. blocklist is the entry of a purchase
+            blocked because its card, device, player or IP address is on the
+            blocklist. It adds no points.
           example: card_velocity
         points:
           type: integer
           description: Points the rule added to the score.
           example: 40
+        message:
+          type: string
+          description: >-
+            A sentence that states the value that made the rule fire and its
+            limit. For a blocklist entry it names the type of the matched
+            entry, never its value. Decisions saved before messages existed
+            return the rule name.
+          example: Card used 5 times in 60 minutes (limit 5)
 
     StatsResponse:
       type: object

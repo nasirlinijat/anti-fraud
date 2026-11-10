@@ -36,10 +36,13 @@ type Ruleset struct {
 	Rules           map[RuleName]RuleConfig
 }
 
-// FiredRule is a rule that fired and the points it added.
+// FiredRule is a rule that fired and the points it added. Message is a
+// sentence an analyst can read. Decisions saved before messages existed have
+// none.
 type FiredRule struct {
-	Name   RuleName `json:"name"`
-	Points int      `json:"points"`
+	Name    RuleName `json:"name"`
+	Points  int      `json:"points"`
+	Message string   `json:"message"`
 }
 
 // Result is the scoring decision for one purchase.
@@ -59,7 +62,7 @@ func Evaluate(in Input, rs Ruleset) Result {
 		}
 		if r.check(in, cfg.Limit) {
 			res.Score += cfg.Weight
-			res.FiredRules = append(res.FiredRules, FiredRule{Name: r.name, Points: cfg.Weight})
+			res.FiredRules = append(res.FiredRules, FiredRule{Name: r.name, Points: cfg.Weight, Message: r.message(in, cfg.Limit)})
 		}
 	}
 	res.Outcome = decide(res.Score, rs)

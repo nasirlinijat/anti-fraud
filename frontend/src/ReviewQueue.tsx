@@ -11,7 +11,7 @@ type Review = {
   rule_score: number
   model_score: number | null
   model_version: string | null
-  fired_rules: { name: string; points: number }[]
+  fired_rules: { name: string; points: number; message: string }[]
 }
 
 type ReviewCase = Review & {
@@ -93,7 +93,7 @@ function ReviewTable({ items, pending, onOpen, onDecision }: {
                 {item.fired_rules.length === 0 ? 'None' : (
                   <ul>
                     {item.fired_rules.map((rule) => (
-                      <li key={rule.name}>{rule.name} ({rule.points} points)</li>
+                      <li key={rule.name}>{rule.message} ({rule.points} points)</li>
                     ))}
                   </ul>
                 )}
@@ -224,6 +224,7 @@ function CaseDetails({ review }: { review: ReviewCase }) {
           <thead>
             <tr>
               <th scope="col">Rule</th>
+              <th scope="col">Why it fired</th>
               <th scope="col">Points</th>
             </tr>
           </thead>
@@ -231,6 +232,7 @@ function CaseDetails({ review }: { review: ReviewCase }) {
             {review.fired_rules.map((rule) => (
               <tr key={rule.name}>
                 <th scope="row">{rule.name}</th>
+                <td>{rule.message}</td>
                 <td>{rule.points}</td>
               </tr>
             ))}
