@@ -171,6 +171,25 @@ func TestCaseWithoutModelScore(t *testing.T) {
 	}
 }
 
+func TestCaseReturnsDeviceID(t *testing.T) {
+	tx := testTx(t)
+	withDevice := insertDecision(t, tx, "c-device", "review", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)
+	withoutDevice := insertDecision(t, tx, "c-no-device", "review", time.Date(2000, 1, 1, 9, 1, 0, 0, time.UTC), nil, `[]`)
+	if _, err := tx.Exec(context.Background(), `UPDATE purchases SET device_id = 'device-7' WHERE id = $1`, withDevice); err != nil {
+		t.Fatalf("set device ID: %v", err)
+	}
+
+	store := NewStore(tx)
+	got, err := store.Case(context.Background(), withDevice)
+	if err != nil || got.DeviceID == nil || *got.DeviceID != "device-7" {
+		t.Errorf("Case(with device) = %+v, %v; want device-7", got.DeviceID, err)
+	}
+	got, err = store.Case(context.Background(), withoutDevice)
+	if err != nil || got.DeviceID != nil {
+		t.Errorf("Case(without device) = %+v, %v; want nil", got.DeviceID, err)
+	}
+}
+
 func TestCaseNotFound(t *testing.T) {
 	tx := testTx(t)
 	allowed := insertDecision(t, tx, "c-allow", "allow", time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC), nil, `[]`)

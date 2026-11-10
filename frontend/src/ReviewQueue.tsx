@@ -14,6 +14,7 @@ type Review = {
 }
 
 type ReviewCase = Review & {
+  device_id: string | null
   ruleset_version: number
 }
 
@@ -199,6 +200,8 @@ function CaseDetails({ review }: { review: ReviewCase }) {
         <dd>{review.transaction_id}</dd>
         <dt>Player</dt>
         <dd>{review.player_id}</dd>
+        <dt>Device</dt>
+        <dd>{review.device_id ?? 'None'}</dd>
         <dt>Amount (minor units)</dt>
         <dd>{amount.format(BigInt(review.amount_minor))}</dd>
         <dt>Purchase time (UTC)</dt>

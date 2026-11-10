@@ -32,6 +32,8 @@ type QueueItem struct {
 // CaseItem is a purchase marked for review, with the evidence behind the decision.
 type CaseItem struct {
 	QueueItem
+	// DeviceID is nil when the purchase carried no device ID.
+	DeviceID *string
 	// RulesetVersion is the ruleset version that scored the purchase.
 	RulesetVersion int
 }
@@ -108,7 +110,12 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 	if err != nil {
 		return CaseItem{}, err
 	}
-	return CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}, nil
+	reviewCase := CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}
+	if r.DeviceID.Valid {
+		device := r.DeviceID.String
+		reviewCase.DeviceID = &device
+	}
+	return reviewCase, nil
 }
 
 func newQueueItem(

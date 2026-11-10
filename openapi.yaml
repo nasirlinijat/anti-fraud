@@ -791,8 +791,13 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version]
+          required: [device_id, ruleset_version]
           properties:
+            device_id:
+              type: string
+              nullable: true
+              description: The device ID of the purchase. It is null when the purchase carried none.
+              example: device-7
             ruleset_version:
               type: integer
               format: int32

@@ -85,6 +85,32 @@ func (q *Queries) InsertBlocklistEntry(ctx context.Context, arg InsertBlocklistE
 	return i, err
 }
 
+const insertBlocklistEntryIfAbsent = `-- name: InsertBlocklistEntryIfAbsent :one
+INSERT INTO blocklist_entries (entry_type, value, reason)
+VALUES ($1, $2, $3)
+ON CONFLICT (entry_type, value) DO NOTHING
+RETURNING id, created_at
+`
+
+type InsertBlocklistEntryIfAbsentParams struct {
+	EntryType string
+	Value     string
+	Reason    string
+}
+
+type InsertBlocklistEntryIfAbsentRow struct {
+	ID        int64
+	CreatedAt pgtype.Timestamptz
+}
+
+// Returns no row when the type and value are already on the blocklist.
+func (q *Queries) InsertBlocklistEntryIfAbsent(ctx context.Context, arg InsertBlocklistEntryIfAbsentParams) (InsertBlocklistEntryIfAbsentRow, error) {
+	row := q.db.QueryRow(ctx, insertBlocklistEntryIfAbsent, arg.EntryType, arg.Value, arg.Reason)
+	var i InsertBlocklistEntryIfAbsentRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
 const listBlocklistEntries = `-- name: ListBlocklistEntries :many
 SELECT id, entry_type, value, reason, created_at
 FROM blocklist_entries

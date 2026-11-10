@@ -77,7 +77,8 @@ type reviewResponse struct {
 
 type caseResponse struct {
 	reviewResponse
-	RulesetVersion int `json:"ruleset_version"`
+	DeviceID       *string `json:"device_id"`
+	RulesetVersion int     `json:"ruleset_version"`
 }
 
 type queueResponse struct {
@@ -130,6 +131,7 @@ func serveCase(w http.ResponseWriter, r *http.Request, store caseReader) {
 	}
 	platform.WriteJSON(w, http.StatusOK, caseResponse{
 		reviewResponse: newReviewResponse(item.QueueItem),
+		DeviceID:       item.DeviceID,
 		RulesetVersion: item.RulesetVersion,
 	})
 }

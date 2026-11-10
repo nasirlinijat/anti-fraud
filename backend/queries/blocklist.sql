@@ -21,5 +21,12 @@ INSERT INTO blocklist_entries (entry_type, value, reason)
 VALUES (sqlc.arg(entry_type), sqlc.arg(value), sqlc.arg(reason))
 RETURNING id, created_at;
 
+-- name: InsertBlocklistEntryIfAbsent :one
+-- Returns no row when the type and value are already on the blocklist.
+INSERT INTO blocklist_entries (entry_type, value, reason)
+VALUES (sqlc.arg(entry_type), sqlc.arg(value), sqlc.arg(reason))
+ON CONFLICT (entry_type, value) DO NOTHING
+RETURNING id, created_at;
+
 -- name: DeleteBlocklistEntry :execrows
 DELETE FROM blocklist_entries WHERE id = sqlc.arg(id);

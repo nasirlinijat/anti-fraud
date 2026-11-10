@@ -241,6 +241,26 @@ func TestCaseSerializesEvidence(t *testing.T) {
 	}
 }
 
+func TestCaseShowsDeviceID(t *testing.T) {
+	device := "device-1"
+	for name, want := range map[string]*string{"with device": &device, "without device": nil} {
+		t.Run(name, func(t *testing.T) {
+			store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
+				return CaseItem{QueueItem: QueueItem{PurchaseID: id}, DeviceID: want, RulesetVersion: 1}, nil
+			})
+			var body map[string]any
+			w := requestCase(store, "/reviews/7", queueTestKey)
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusOK {
+				t.Fatalf("status = %d, err = %v, body = %s", w.Code, err, w.Body)
+			}
+			got, present := body["device_id"]
+			if !present || (want == nil && got != nil) || (want != nil && got != *want) {
+				t.Fatalf("device_id = %v (present %v), want %v", got, present, want)
+			}
+		})
+	}
+}
+
 func TestCaseWithoutModelScoreOrRules(t *testing.T) {
 	store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
 		return CaseItem{QueueItem: QueueItem{PurchaseID: id, TransactionID: "txn"}, RulesetVersion: 1}, nil
