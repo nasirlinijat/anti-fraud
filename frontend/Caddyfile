@@ -1,0 +1,33 @@
+{
+	admin off
+}
+
+:8080 {
+	@foreignHost not host localhost 127.0.0.1
+	@foreignOrigin {
+		header Origin *
+		not header Origin "http://{http.request.hostport}"
+	}
+	@crossSiteWrite {
+		method POST DELETE
+		header_regexp Sec-Fetch-Site ^(cross-site|same-site)$
+	}
+	@service path /score /stats /blocklist /blocklist/* /rulesets /rulesets/*
+	@pass path /health /ready /reviews /reviews/*
+
+	route {
+		# Restrict the local console before adding credentials upstream.
+		respond @foreignHost 403
+		respond @foreignOrigin 403
+		respond @crossSiteWrite 403
+
+		reverse_proxy @service backend:{$BACKEND_PORT} {
+			header_up X-API-Key {env.API_KEY}
+			header_down -X-API-Key
+		}
+		# Review requests carry the analyst's own key.
+		reverse_proxy @pass backend:{$BACKEND_PORT}
+		root * /srv
+		file_server
+	}
+}

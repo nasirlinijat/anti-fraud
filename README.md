@@ -2,74 +2,41 @@
 
 A real-time fraud scoring and review console for in-game purchases.
 
-## Prerequisites
+## Docker setup
 
-| Tool | Version |
-|---|---|
-| Git | Any recent version |
-| Docker with the Compose plugin | Docker Engine running, Compose v2 |
-| GNU Make | Any recent version |
-| Go | 1.26.5 or newer |
-| Node.js | 26 or newer, with npm |
+From the repository root, use Docker with the Compose plugin to run the console.
 
-Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for the frontend. The other commands run in Docker.
-
-## Setup
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/nasirlinijat/anti-fraud.git
-   cd anti-fraud
-   ```
-
-2. Create your local environment file. The default values work as they are:
+1. Create the local environment file:
 
    ```bash
    cp .env.example .env
    ```
 
-3. Start PostgreSQL and the backend:
+2. Build and start the stack. Compose applies pending database migrations before starting the backend:
 
    ```bash
-   make up
+   docker compose up -d --build --wait
    ```
 
-4. Apply the database migrations:
+3. Open [the console](http://127.0.0.1:3000). Select **Tester**, fill in the normal purchase example, and submit it to see the score. Open **Dashboard** to see the saved decision. Configure an individual analyst key to use **Review queue**.
+
+4. Stop the stack and keep the database data:
 
    ```bash
-   make migrate
+   docker compose down
    ```
 
-5. Check that the backend can reach the database:
+Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to score, stats, blocklist, and ruleset requests. Review requests use the analyst key entered in the console.
 
-   ```bash
-   curl http://localhost:8080/ready
-   ```
+## Development commands
 
-   The response should be `{"status":"ready"}`.
+The Make targets require GNU Make. Install Go 1.26.5 or newer to run the backend, tests, or simulator on the host.
 
-6. Score a purchase. The API key is `API_KEY` from `.env`:
-
-   ```bash
-   curl -X POST http://localhost:8080/score \
-     -H "X-API-Key: local-dev-key" \
-     -d '{"transaction_id":"demo-1","event_time":"2026-11-08T10:00:00Z","amount_minor":1999,"player_id":"player-1","card_token":"card-1"}'
-   ```
-
-   The response contains the outcome (`allow`, `review`, or `block`), the rule score, and the rules that fired.
-
-7. Stop everything when you are done. Your database data is kept:
-
-   ```bash
-   make down
-   ```
-
-## Commands
+To develop the backend on the host, run `make migrate` to prepare the database, then `make run`. The API is available at `http://127.0.0.1:8080` by default.
 
 | Command | What it does |
 |---|---|
-| `make up` | Builds and starts PostgreSQL and the backend in Docker |
+| `make up` | Builds and starts the Docker stack, including migrations and the console |
 | `make down` | Stops the containers and keeps the database data |
 | `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
 | `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
@@ -81,7 +48,7 @@ Go is needed for `make run`, `make test`, and `make lint`. Node.js is needed for
 
 ## Demo Traffic
 
-The simulator sends generated purchases to `POST /score` in the same format as real clients. Start the backend with `make up` or `make run`, apply the migrations, then run:
+The simulator sends generated purchases to `POST /score` in the same format as real clients. With Go and GNU Make installed and the backend running, run:
 
 ```bash
 make simulate
@@ -157,16 +124,16 @@ Then open http://localhost:8090 and stop the server with Ctrl+C. To use another 
 
 When a documented API request or response changes, update `openapi.yaml` in the same pull request.
 
-## Frontend
+## Frontend development
 
-The frontend is a React and TypeScript app in `frontend/`, built with [Vite](https://vite.dev).
+The frontend is a React and TypeScript app in `frontend/`, built with [Vite](https://vite.dev). Install Node.js 26 or newer with npm for local development.
 
-1. Start the backend with `make up` or `make run`.
+1. Start the API and its dependencies with `docker compose up -d --build backend`, or use the host backend workflow above.
 2. Install the dependencies once:
 
    ```bash
    cd frontend
-   npm install
+   npm ci
    ```
 
 3. Start the development server:
@@ -179,6 +146,14 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
+| Command | What it does |
+|---|---|
+| `npm run dev` | Starts the development server with hot reload |
+| `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
+| `npm run build` | Type checks and builds the production files into `frontend/dist/` |
+
+## Console pages
+
 | Page | What it does |
 |---|---|
 | Dashboard (`#/dashboard`) | Decisions in the last 15 minutes, hour, day, week or all time: allowed, reviewed and blocked counts with their shares, the current review queue size, the most fired rules, and how many purchases the model sent to review or cleared. It reads `GET /stats` and refreshes every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
@@ -187,23 +162,21 @@ The development server forwards API requests to the backend, so the browser need
 | Review queue (`#/reviews`) | Enter your analyst key to browse and approve or reject purchases awaiting review. The current page refreshes every five seconds. |
 | Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version and shows its version number. |
 
-The tester is a local development tool: it only works through the development server, which holds the API key.
-
-| Command | What it does |
-|---|---|
-| `npm run dev` | Starts the development server with hot reload |
-| `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
-| `npm run build` | Type checks and builds the production files into `frontend/dist/` |
-
 ### Review access
 
-Run `make migrate` before starting the updated review API. Generate a distinct key for each analyst with `openssl rand -hex 32`. Set `REVIEW_ANALYST_KEYS` in your local `.env` and restart the backend. Replace the placeholders with generated keys and give each analyst their own key.
+Generate a distinct key for each analyst with Docker:
+
+```bash
+docker run --rm node:26-bookworm-slim node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Replace the placeholders in `REVIEW_ANALYST_KEYS` in your local `.env` and give each analyst their own key.
 
 ```dotenv
 REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"analyst_id":"analyst-two","key":"<generated-key-two>"}]
 ```
 
-Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
+Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
 ## Database Queries
 
@@ -234,5 +207,6 @@ sqlc reads the table definitions from `backend/migrations/`, so a query on a new
 | `set POSTGRES_USER in .env`, or a similar message | Run `cp .env.example .env` |
 | `set API_KEY in .env`, or `API_KEY is not set` | Add `API_KEY=local-dev-key` to your `.env`, as in `.env.example` |
 | `make run` reports that the port is already in use | Run `make down` to stop the backend container started by `make up` |
-| Port `5432` or `8080` is used by another program | Change `POSTGRES_PORT` or `PORT` in `.env`, and update the port in `DATABASE_URL` to match `POSTGRES_PORT` |
-| You want an empty database | Run `docker compose down -v`, which deletes the local database data, then `make up` and `make migrate` |
+| Port `3000`, `5432`, or `8080` is used by another program | Change `FRONTEND_PORT`, `POSTGRES_PORT`, or `PORT` in `.env`. For the host backend, also update `DATABASE_URL` to match `POSTGRES_PORT` |
+| Compose startup fails | Check `docker compose ps -a` and `docker compose logs migrate backend frontend` |
+| You want an empty database | Run `docker compose down -v`, which deletes the local database data, then `docker compose up -d --build --wait` |
