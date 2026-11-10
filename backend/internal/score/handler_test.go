@@ -259,6 +259,7 @@ func TestScoreRejectsInvalidRequests(t *testing.T) {
 		{"invalid IP address", with(`"amount_minor": 1999, "ip_address": "300.1.1.1"`), "ip_address", ""},
 		{"negative distance", with(`"amount_minor": 1999, "billing_distance": -1`), "billing_distance", ""},
 		{"account created after event", with(`"amount_minor": 1999, "account_created_at": "2026-11-08T11:00:00Z"`), "account_created_at", ""},
+		{"event time far in the future", strings.Replace(minimalBody, `2026-11-08T10:00:00Z`, `2099-01-01T00:00:00Z`, 1), "event_time", ""},
 		{"malformed JSON", `{"transaction_id": `, "", "not valid JSON"},
 		{"empty body", ``, "", "empty"},
 		{"array body", `[]`, "", "JSON object"},
@@ -284,6 +285,42 @@ func TestScoreRejectsInvalidRequests(t *testing.T) {
 				t.Error("an invalid purchase was saved")
 			}
 		})
+	}
+}
+
+func TestEventTimeMayBeAtMostFiveMinutesAhead(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		at    time.Time
+		valid bool
+	}{
+		{"exactly at the limit", now.Add(maxClockSkew), true},
+		{"just past the limit", now.Add(maxClockSkew + time.Nanosecond), false},
+		{"now", now, true},
+		{"years in the past, as in a replay", time.Date(2017, 12, 2, 0, 0, 0, 0, time.UTC), true},
+		{"limit in another time zone", now.Add(maxClockSkew).In(time.FixedZone("UTC+4", 4*3600)), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := scoreRequest{TransactionID: "txn-1", EventTime: tt.at, AmountMinor: 1999, PlayerID: "player-1", CardToken: "card-1"}
+			_, fields := req.purchase(now)
+			if got := fields["event_time"] == ""; got != tt.valid {
+				t.Errorf("valid = %v, want %v; fields %v", got, tt.valid, fields)
+			}
+		})
+	}
+}
+
+func TestScoreRejectsFutureEventTimeWithMessage(t *testing.T) {
+	body := strings.Replace(minimalBody, `2026-11-08T10:00:00Z`, `2099-01-01T00:00:00Z`, 1)
+	rec := serve(t, fakeRulesets{rs: testRuleset}, &fakePurchases{}, testKey, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	got := decodeJSON[platform.ErrorResponse](t, rec)
+	if want := "must not be more than 5 minutes in the future"; got.Fields["event_time"] != want {
+		t.Errorf("event_time = %q, want %q", got.Fields["event_time"], want)
 	}
 }
 

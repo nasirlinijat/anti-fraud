@@ -150,6 +150,31 @@ func TestGenerateOrderAndIDs(t *testing.T) {
 	}
 }
 
+func TestStartEndingAtEndsTheTrafficAtTheGivenTime(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	end := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	start, err := simulator.StartEndingAt(cfg, 500, end)
+	if err != nil {
+		t.Fatalf("StartEndingAt: %v", err)
+	}
+	if !start.Before(end) {
+		t.Fatalf("start %v is not before the end %v", start, end)
+	}
+	shifted := cfg
+	shifted.Start = start
+	got := generate(t, shifted, 500)
+	if last := got[len(got)-1].Request.EventTime; !last.Equal(end) {
+		t.Fatalf("last purchase at %v, want %v", last, end)
+	}
+	original := generate(t, cfg, 500)
+	for i := range got {
+		if got[i].Request.TransactionID != original[i].Request.TransactionID ||
+			got[i].Request.EventTime.Sub(start) != original[i].Request.EventTime.Sub(cfg.Start) {
+			t.Fatalf("purchase %d differs from the run that starts at %v", i, cfg.Start)
+		}
+	}
+}
+
 func TestGenerateHonoursSuspiciousShare(t *testing.T) {
 	cfg := simulator.DefaultConfig()
 	cfg.SuspiciousShare = 0

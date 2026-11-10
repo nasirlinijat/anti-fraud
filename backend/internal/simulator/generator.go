@@ -185,6 +185,18 @@ func Generate(cfg Config, count int) ([]Purchase, error) {
 	return g.out[:count], nil
 }
 
+// StartEndingAt returns the start that makes the last of count purchases
+// happen at end. Event times only depend on the start through their distance
+// from it, so the purchases are the same as from any other start, shifted.
+func StartEndingAt(cfg Config, count int, end time.Time) (time.Time, error) {
+	cfg.Start = end
+	purchases, err := Generate(cfg, count)
+	if err != nil || len(purchases) == 0 {
+		return end, err
+	}
+	return end.Add(-purchases[len(purchases)-1].Request.EventTime.Sub(end)), nil
+}
+
 func (g *generator) sortedPrefixEndsBefore(count int, clock time.Time) bool {
 	g.sort()
 	return count > 0 && !g.out[count-1].Request.EventTime.Before(clock)

@@ -22,6 +22,11 @@ import (
 
 const maxBodyBytes = 64 << 10
 
+// maxClockSkew is how far in the future an event time may be. It allows for
+// clocks that are slightly ahead; purchases further ahead would break the
+// feature running totals, which assume purchases arrive in time order.
+const maxClockSkew = 5 * time.Minute
+
 // Rulesets provides the active ruleset.
 type Rulesets interface {
 	Active(ctx context.Context) (scoring.Ruleset, error)
@@ -60,10 +65,11 @@ type Handler struct {
 	purchases Purchases
 	model     Model
 	policy    scoring.ModelPolicy
+	now       func() time.Time
 }
 
 func NewHandler(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Handler {
-	return &Handler{rulesets: rulesets, blocklist: blocklist, purchases: purchases}
+	return &Handler{rulesets: rulesets, blocklist: blocklist, purchases: purchases, now: time.Now}
 }
 
 // UseModel makes the handler score purchases with the model and apply its
@@ -130,7 +136,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		platform.WriteJSON(w, status, resp)
 		return
 	}
-	p, fields := req.purchase()
+	p, fields := req.purchase(h.now())
 	if len(fields) > 0 {
 		platform.WriteJSON(w, http.StatusBadRequest, platform.ErrorResponse{Error: "invalid request", Fields: fields})
 		return
@@ -345,7 +351,8 @@ func typeMessage(t reflect.Type) string {
 
 // purchase validates the request and converts it to a Purchase. It returns the
 // problems found, keyed by field name. Empty optional strings count as omitted.
-func (req scoreRequest) purchase() (Purchase, map[string]string) {
+// Event times in the past are allowed, so recorded traffic can be replayed.
+func (req scoreRequest) purchase(now time.Time) (Purchase, map[string]string) {
 	fields := map[string]string{}
 	required := func(name, value string) string {
 		value = strings.TrimSpace(value)
@@ -383,6 +390,8 @@ func (req scoreRequest) purchase() (Purchase, map[string]string) {
 
 	if req.EventTime.IsZero() {
 		fields["event_time"] = "is required"
+	} else if p.EventTime.Sub(now) > maxClockSkew {
+		fields["event_time"] = fmt.Sprintf("must not be more than %d minutes in the future", int(maxClockSkew.Minutes()))
 	}
 	if req.AmountMinor <= 0 {
 		fields["amount_minor"] = "must be a positive integer in minor units"
