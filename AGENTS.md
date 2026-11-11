@@ -26,7 +26,7 @@ Purchases marked for review are decided by analysts in the review console.
 
 | Component | Technology | Location | Status |
 |---|---|---|---|
-| Backend | Go, standard library `net/http`, sqlc, pgx | `backend/` | Initialized |
+| Backend | Go, standard library `net/http`, pgx | `backend/` | Initialized |
 | Database | PostgreSQL | Docker Compose | Initialized |
 | Migrations | golang-migrate, run from its Docker image | `backend/migrations/` | Initialized |
 | Frontend | React, TypeScript, Vite | `frontend/` | Initialized |
@@ -44,7 +44,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 |---|---|
 | Backend shape | Modular monolith in Go |
 | Code layout | Package by feature, with a pure scoring core that has no SQL or HTTP |
-| Database access | SQL files compiled to typed Go code with sqlc, using the pgx driver |
+| Database access | Raw SQL run with the pgx driver, kept as constants in each feature package |
 | Schema changes | Versioned SQL migration files applied with golang-migrate |
 | Rule configuration | Versioned rulesets in the database. A stored version never changes: a change adds a new version and makes it the only active one, in one transaction |
 | Frontend | React with TypeScript |
@@ -71,7 +71,7 @@ backend/
     ├── simulator/      Demo traffic generator
     ├── lgbm/           Model loader and prediction
     ├── features/       Model inputs from the request and purchase history
-    ├── db/             sqlc-generated queries
+    ├── queryplans/     Index and load checks for the database queries
     └── platform/       Config, database pool, error helper
 ```
 
@@ -96,7 +96,7 @@ anti-fraud/
 ├── README.md                 Prerequisites and local setup
 ├── Makefile                  Development commands
 ├── openapi.yaml              Hand-written OpenAPI spec of the score API
-├── docker-compose.yml        Local PostgreSQL, backend, migration runner, sqlc, and Swagger UI
+├── docker-compose.yml        Local PostgreSQL, backend, migration runner, and Swagger UI
 ├── .env.example              Required environment variables
 ├── .agent/
 │   └── skills/               Project skills (see section 6)
@@ -104,10 +104,8 @@ anti-fraud/
 ├── backend/
 │   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
-│   ├── sqlc.yaml             sqlc configuration
 │   ├── cmd/api/main.go       HTTP server entry point
 │   ├── migrations/           Versioned SQL migrations
-│   ├── queries/              SQL queries compiled by sqlc into internal/db/
 │   └── internal/             Feature packages (see section 3.2)
 ├── frontend/                 React app built with Vite
 └── ml/                       Data preparation and model training (not started)
@@ -125,7 +123,6 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
-| `make generate` | Regenerates the database code from the SQL queries |
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
@@ -154,11 +151,11 @@ make migrate
 
 ### 5.2 Continuous Integration
 
-GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, checks that the sqlc-generated code matches the queries, runs `go vet`, applies the migrations, provisions the restricted database role, then runs `go test` with the race detector against PostgreSQL, `go mod verify`, and `go build`. The job times out after 15 minutes. The `frontend` job runs `npm ci`, `npm run check` (oxlint and the TypeScript check) and `npm run build` on Node.js 24. The `ml` job installs `ml/requirements.txt` on Python 3.14 and runs `pytest`; the tests use synthetic purchases and the exported golden rows, never the IEEE-CIS dataset. Both time out after 10 minutes. A new push to a pull request cancels the run still in progress for it.
+GitHub Actions runs on every pull request and on every push to `main`. The `backend` job checks formatting with `gofmt`, runs `go vet`, applies the migrations, provisions the restricted database role, then runs `go test` with the race detector against PostgreSQL, `go mod verify`, and `go build`. The job times out after 15 minutes. The `frontend` job runs `npm ci`, `npm run check` (oxlint and the TypeScript check) and `npm run build` on Node.js 24. The `ml` job installs `ml/requirements.txt` on Python 3.14 and runs `pytest`; the tests use synthetic purchases and the exported golden rows, never the IEEE-CIS dataset. Both time out after 10 minutes. A new push to a pull request cancels the run still in progress for it.
 
 ### 5.3 Database Queries
 
-Queries are written in `backend/queries/` and compiled to typed Go code in `backend/internal/db/` with [sqlc](https://sqlc.dev), which runs from its Docker image. Run `make generate` after changing a query or a migration, and commit the generated code. Never edit the generated files by hand.
+Queries are raw SQL run with [pgx](https://github.com/jackc/pgx). Each feature package keeps its SQL as constants next to the store code that runs it, with numbered parameters, and scans the results itself; there is no generated database code. Add queries on the scoring and dashboard paths to the index check in `backend/internal/queryplans/`.
 
 ## 6. Skills
 

@@ -21,9 +21,9 @@ type DecisionSeries struct {
 	Buckets       []DecisionBucket `json:"buckets"`
 }
 
-// countDecisionBuckets counts decisions by outcome in buckets of width $1
+// CountDecisionBucketsSQL counts decisions by outcome in buckets of width $1
 // aligned to the Unix epoch. Buckets without decisions have no row.
-const countDecisionBuckets = `
+const CountDecisionBucketsSQL = `
 SELECT
     date_bin($1::interval, decided_at, TIMESTAMPTZ '1970-01-01 00:00:00+00')::timestamptz AS bucket_start,
     count(*) FILTER (WHERE outcome = 'allow') AS allowed,
@@ -49,7 +49,7 @@ func readDecisionSeries(ctx context.Context, conn platform.DBTX, window Window, 
 		return series, nil
 	}
 
-	rows, err := conn.Query(ctx, countDecisionBuckets,
+	rows, err := conn.Query(ctx, CountDecisionBucketsSQL,
 		pgtype.Interval{Microseconds: width.Microseconds(), Valid: true}, window.Since, window.Until)
 	if err != nil {
 		return DecisionSeries{}, err
