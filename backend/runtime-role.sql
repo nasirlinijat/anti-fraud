@@ -14,6 +14,7 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM antifraud_api;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM antifraud_api;
 
 GRANT USAGE ON SCHEMA public TO antifraud_api;
+GRANT SELECT, INSERT, UPDATE ON simulation_runs TO antifraud_api;
 GRANT SELECT ON purchases, decisions, feature_counts, rulesets, ruleset_rules,
     blocklist_entries, review_resolutions TO antifraud_api;
 GRANT INSERT ON purchases, decisions, feature_counts, rulesets, ruleset_rules,

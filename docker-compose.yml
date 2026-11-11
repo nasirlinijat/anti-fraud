@@ -16,9 +16,11 @@ services:
       retries: 15
 
   backend:
+    stop_grace_period: 30s
     build: ./backend
     environment:
       PORT: ${PORT:?set PORT in .env}
+      SIMULATION_ENABLED: ${SIMULATION_ENABLED:-false}
       API_KEY: ${API_KEY:?set API_KEY in .env}
       REVIEW_ANALYST_KEYS: ${REVIEW_ANALYST_KEYS:-}
       OPERATOR_API_KEYS: ${OPERATOR_API_KEYS:-}

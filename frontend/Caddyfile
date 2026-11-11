@@ -14,9 +14,9 @@
 	}
 	@configurationWrite {
 		method POST DELETE
-		path /blocklist /blocklist/* /rulesets
+		path /blocklist /blocklist/* /rulesets /simulations /simulations/*
 	}
-	@service path /score /stats /blocklist /blocklist/* /rulesets /rulesets/*
+	@service path /simulations /simulations/* /score /stats /blocklist /blocklist/* /rulesets /rulesets/*
 	@pass path /health /ready /reviews /reviews/*
 
 	route {

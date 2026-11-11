@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
@@ -11,6 +16,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/simulations"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 )
 
@@ -54,6 +61,44 @@ func main() {
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
 
+	var manager *simulations.Manager
+	if cfg.SimulationEnabled {
+		setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		manager, err = simulations.New(setupCtx, pool, cfg.DatabaseURL, &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}})
+		cancel()
+		if err != nil {
+			log.Fatalf("initialize simulations: %v", err)
+		}
+	}
+	simulations.RegisterRoutes(mux, manager, cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
+	server := platform.NewServer(":"+cfg.Port, mux)
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-signalCtx.Done()
+		if manager != nil {
+			drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			if err := manager.Close(drain); err != nil {
+				log.Printf("drain simulation: %v", err)
+			}
+			cancel()
+		}
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			log.Printf("shutdown: %v", err)
+			_ = server.Close()
+		}
+	}()
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
-	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
+	err = server.ListenAndServe()
+	if !errors.Is(err, http.ErrServerClosed) {
+		stop()
+	}
+	<-done
+	if !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("serve: %v", err)
+	}
 }
