@@ -20,6 +20,9 @@ RAW_COLUMNS = [
 DEVICE_COLUMNS = ["DeviceType", "DeviceInfo"]
 # Client details from the identity file: operating system, browser and screen.
 CLIENT_COLUMNS = ["id_30", "id_31", "id_33"]
+# Score request fields IEEE-CIS has no column for. They are missing in the
+# dataset and present in game traffic and in the test rows.
+GAME_COLUMNS = ["ip_country", "device_id"]
 
 PRODUCT_CODES = {"W": 0, "H": 1, "C": 2, "S": 3, "R": 4}
 CARD_NETWORKS = {"visa": 0, "mastercard": 1, "american express": 2, "discover": 3}
@@ -103,10 +106,16 @@ FEATURE_GROUPS = {
         "card_issuer_code",
         "billing_region_code",
     ],
+    "game": [
+        "ip_country_differs_from_card",
+        "device_id_is_new_for_player",
+        "device_distinct_players",
+        "billing_region_is_new_for_card",
+    ],
 }
 
 ALL_FEATURES = BASE_FEATURES + [name for group in FEATURE_GROUPS.values() for name in group]
-SELECTED_GROUPS = ["device", "shared", "distance", "account", "client", "codes"]
+SELECTED_GROUPS = ["device", "shared", "distance", "account", "client", "codes", "game"]
 FEATURES = BASE_FEATURES + [name for group in SELECTED_GROUPS for name in FEATURE_GROUPS[group]]
 
 WARM_UP_DAYS = 30
@@ -114,13 +123,13 @@ WARM_UP_DAYS = 30
 
 def load(path, identity_path=None):
     path = Path(path)
-    wanted = set(RAW_COLUMNS + DEVICE_COLUMNS + CLIENT_COLUMNS)
-    df = pd.read_csv(path, usecols=lambda column: column in wanted)
+    wanted = set(RAW_COLUMNS + DEVICE_COLUMNS + CLIENT_COLUMNS + GAME_COLUMNS)
+    df = pd.read_csv(path, usecols=lambda column: column in wanted, dtype={name: str for name in GAME_COLUMNS})
     identity_path = Path(identity_path) if identity_path else path.with_name("train_identity.csv")
     if identity_path.exists() and "DeviceInfo" not in df.columns:
         identity = pd.read_csv(identity_path, usecols=["TransactionID", *DEVICE_COLUMNS, *CLIENT_COLUMNS])
         df = df.merge(identity, on="TransactionID", how="left")
-    for column in [*RAW_COLUMNS, *DEVICE_COLUMNS, *CLIENT_COLUMNS]:
+    for column in [*RAW_COLUMNS, *DEVICE_COLUMNS, *CLIENT_COLUMNS, *GAME_COLUMNS]:
         if column not in df.columns:
             df[column] = np.nan
     df["amount_minor"] = np.round(df["TransactionAmt"] * 100).astype("int64")
@@ -151,6 +160,12 @@ def add_keys(df):
         df["card1_key"] = text(df["card1"])
     if "address" not in df.columns:
         df["address"] = text(df["addr1"])
+    for column in GAME_COLUMNS:
+        if column not in df.columns:
+            df[column] = np.nan
+    if "card_country_text" not in df.columns:
+        # The card country as the score request carries it: 150.0 is sent as "150".
+        df["card_country_text"] = df["card3"].map(lambda code: None if pd.isna(code) else format(code, "g"))
     return df
 
 
@@ -185,7 +200,10 @@ def load_requests(path):
     raw = pd.DataFrame.from_records(records)
 
     def column(name):
-        return raw[name] if name in raw.columns else pd.Series(np.nan, index=raw.index, dtype=object)
+        if name not in raw.columns:
+            return pd.Series(np.nan, index=raw.index, dtype=object)
+        # The service trims text fields and reads empty text as missing.
+        return raw[name].map(lambda value: (value.strip() or None) if isinstance(value, str) else value)
 
     event_time = pd.to_datetime(raw["event_time"], utc=True)
     seconds = (event_time - event_time.min().normalize()).dt.total_seconds()
@@ -203,8 +221,13 @@ def load_requests(path):
         "dist1": pd.to_numeric(column("billing_distance"), errors="coerce"),
         # Whole days, as the service counts the account age.
         "D1": np.floor((event_time - created).dt.total_seconds() / SECONDS_PER_DAY),
-        "card1_key": column("card_issuer").astype(str),
-        "address": column("billing_region").astype(str),
+        # A missing issuer or region is one more key, as in add_keys: purchases
+        # without one share their history.
+        "card1_key": column("card_issuer").astype(str).fillna("none"),
+        "address": column("billing_region").astype(str).fillna("none"),
+        "card_country_text": column("card_country"),
+        "ip_country": column("ip_country"),
+        "device_id": column("device_id"),
     })
     for field, name in REQUEST_TEXT_COLUMNS.items():
         df[name] = column(field)
@@ -242,6 +265,24 @@ def distinct_before(df, entity, other):
 
 def first_word(column):
     return column.str.lower().str.split(" ").str[0]
+
+
+def game_features(df, player_has_history):
+    """Returns the features that need the IP country or the device ID, and the
+    card's billing regions. df already has the keys from add_keys."""
+    ip_country, card_country, device_id = df["ip_country"], df["card_country_text"], df["device_id"]
+    both_countries = ip_country.notna() & card_country.notna()
+    known_device_id = device_id.notna()
+    first_device_id_use = ~df.duplicated(["player_id", "device_id"])
+    # A missing billing region is one more region, as in card1_distinct_addresses.
+    first_region_use = ~df.duplicated(["card_id", "address"])
+    card_has_history = df.groupby("card_id", sort=False).cumcount() > 0
+    return {
+        "ip_country_differs_from_card": (ip_country != card_country).astype(float).where(both_countries),
+        "device_id_is_new_for_player": (first_device_id_use & known_device_id & player_has_history).astype(int),
+        "device_distinct_players": distinct_before(df, "device_id", "player_id").where(known_device_id),
+        "billing_region_is_new_for_card": (first_region_use & card_has_history).astype(int),
+    }
 
 
 def build(df):
@@ -342,6 +383,9 @@ def build(df):
         if name == "browser":
             first_known = first_use & known
             out["player_distinct_browsers"] = first_known.groupby(df["player_id"], sort=False).cumsum() - first_known
+
+    for name, values in game_features(df, out["player_txn_count"] > 0).items():
+        out[name] = values
 
     out = out[ALL_FEATURES].astype(float).fillna(MISSING)
     out["is_fraud"] = df["isFraud"].to_numpy()

@@ -68,8 +68,11 @@ type Handler struct {
 	blocklist Blocklist
 	purchases Purchases
 	model     Model
-	policy    scoring.ModelPolicy
-	now       func() time.Time
+	// modelFeatures is how many of the first features in features.Names the
+	// model takes.
+	modelFeatures int
+	policy        scoring.ModelPolicy
+	now           func() time.Time
 }
 
 func NewHandler(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Handler {
@@ -78,15 +81,18 @@ func NewHandler(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Ha
 
 // UseModel makes the handler score purchases with the model and apply its
 // policy to the rule outcome. Without a model the handler uses rules only. The
-// model must take the features in the order of features.Names.
+// model must take the first features of features.Names, in their order.
+// Features are only ever added at the end, so a model exported before the
+// newest features still loads and is scored without them.
 func (h *Handler) UseModel(m Model, p scoring.ModelPolicy) error {
-	if got := m.Features(); !slices.Equal(got, features.Names) {
-		return fmt.Errorf("model features %v do not match the service features %v", got, features.Names)
+	got := m.Features()
+	if len(got) == 0 || len(got) > len(features.Names) || !slices.Equal(got, features.Names[:len(got)]) {
+		return fmt.Errorf("model features %v are not the first features of the service %v", got, features.Names)
 	}
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	h.model, h.policy = m, p
+	h.model, h.modelFeatures, h.policy = m, len(got), p
 	return nil
 }
 
@@ -303,6 +309,7 @@ func writeScoreResponse(w http.ResponseWriter, transactionID string, d Decision)
 // unblended: the main model's own score, which later purchases of the player
 // average. Without blending both come from the model alone.
 func (h *Handler) modelScore(ctx context.Context, p Purchase, vector []float64) (float64, float64, error) {
+	vector = vector[:h.modelFeatures]
 	combined, isCombined := h.model.(combination)
 	if !isCombined {
 		own, err := h.model.Predict(vector)

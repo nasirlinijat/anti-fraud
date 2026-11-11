@@ -64,6 +64,10 @@ var Names = []string{
 	"player_distinct_browsers",
 	"card_issuer_code",
 	"billing_region_code",
+	"ip_country_differs_from_card",
+	"device_id_is_new_for_player",
+	"device_distinct_players",
+	"billing_region_is_new_for_card",
 }
 
 var (
@@ -82,6 +86,9 @@ var (
 
 // NoEmail is the email domain key of a purchase without one.
 const NoEmail = "none"
+
+// NoRegion is the billing region key of a purchase without one.
+const NoRegion = "none"
 
 // Input is the part of a score request the features are computed from.
 type Input struct {
@@ -103,6 +110,8 @@ type Input struct {
 	RecipientEmailDomain *string
 	DeviceType           *string
 	DeviceName           *string
+	DeviceID             *string
+	IPCountry            *string
 	AccountCreatedAt     *time.Time
 	ClientOS             *string
 	ClientBrowser        *string
@@ -115,6 +124,14 @@ func (in Input) EmailKey() string {
 		return NoEmail
 	}
 	return *in.EmailDomain
+}
+
+// RegionKey returns the billing region, or NoRegion when it is missing.
+func (in Input) RegionKey() string {
+	if in.BillingRegion == nil {
+		return NoRegion
+	}
+	return *in.BillingRegion
 }
 
 // PlayerHistory summarizes the player's earlier purchases.
@@ -130,6 +147,7 @@ type PlayerHistory struct {
 	EmailUses        int64 // earlier purchases with this email domain
 	DistinctDevices  int64 // known device names only
 	DeviceUses       int64 // earlier purchases with this device name
+	DeviceIDUses     int64 // earlier purchases with this device ID
 	OSUses           int64 // earlier purchases with this client OS
 	BrowserUses      int64 // earlier purchases with this client browser
 	ScreenUses       int64 // earlier purchases with this screen resolution
@@ -138,8 +156,10 @@ type PlayerHistory struct {
 
 // CardHistory summarizes the card's earlier purchases.
 type CardHistory struct {
+	Purchases       int64
 	Uses1h, Uses24h int64
 	Players         int64
+	RegionUses      int64 // earlier purchases with this billing region
 }
 
 // IssuerHistory summarizes the card issuer's earlier purchases.
@@ -166,9 +186,13 @@ type History struct {
 	OS      Count // purchases with this client OS; zero when it is missing
 	Browser Count // purchases with this client browser; zero when it is missing
 	Screen  Count // purchases with this screen resolution; zero when it is missing
+	// DeviceIDPlayers counts the earlier players on this device ID; zero when
+	// it is missing.
+	DeviceIDPlayers int64
 }
 
-// Vector returns the feature values in the order of Names.
+// Vector returns the feature values in the order of Names. It is long because
+// it is one flat list with a line per feature.
 func Vector(in Input, h History) []float64 {
 	p := h.Player
 	amount := float64(in.AmountMinor) / 100
@@ -236,6 +260,10 @@ func Vector(in Input, h History) []float64 {
 		float64(p.DistinctBrowsers),
 		number(in.CardIssuer),
 		number(in.BillingRegion),
+		countryDiffers(in.IPCountry, in.CardCountry),
+		flag(in.DeviceID != nil && hasHistory && p.DeviceIDUses == 0),
+		when(in.DeviceID != nil, func() float64 { return float64(h.DeviceIDPlayers) }),
+		flag(h.Card.Purchases > 0 && h.Card.RegionUses == 0),
 	}
 }
 
@@ -246,6 +274,14 @@ func Map(values []float64) map[string]float64 {
 		m[Names[i]] = v
 	}
 	return m
+}
+
+// countryDiffers compares the connection's country with the card's, as text.
+func countryDiffers(ipCountry, cardCountry *string) float64 {
+	if ipCountry == nil || cardCountry == nil {
+		return Missing
+	}
+	return flag(*ipCountry != *cardCountry)
 }
 
 // accountAge returns the whole days between account creation and the purchase.

@@ -188,6 +188,8 @@ func (p Purchase) FeatureInput() features.Input {
 		RecipientEmailDomain: p.RecipientEmailDomain,
 		DeviceType:           p.DeviceType,
 		DeviceName:           p.DeviceName,
+		DeviceID:             p.DeviceID,
+		IPCountry:            p.IPCountry,
 		AccountCreatedAt:     p.AccountCreatedAt,
 		ClientOS:             p.ClientOS,
 		ClientBrowser:        p.ClientBrowser,

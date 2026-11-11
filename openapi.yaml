@@ -957,7 +957,7 @@ components:
           description: Omit for all patterns. With normal selected, 10 percent of events start a selected special scenario. Without normal all events use selected special scenarios.
           items:
             type: string
-            enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow]
+            enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow, expat, new_big_spender, family_card, session_shopper, slow_card_testing, quiet_takeover]
     SimulationRun:
       type: object
       required: [id, settings, status, created_at, finished_at, sent, failed, allowed, reviewed, blocked, pending]

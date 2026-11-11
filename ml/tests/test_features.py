@@ -131,6 +131,55 @@ def test_issuer_and_region_codes(raw):
     assert built.loc[8, "billing_region_code"] == features.MISSING
 
 
+def test_ip_country_is_compared_with_the_card_country(raw):
+    built = build_for(raw)
+    assert built.loc[1, "ip_country_differs_from_card"] == 0
+    assert built.loc[3, "ip_country_differs_from_card"] == 1
+    # Unknown without an IP country, or without a card country.
+    assert built.loc[4, "ip_country_differs_from_card"] == features.MISSING
+    assert built.loc[8, "ip_country_differs_from_card"] == features.MISSING
+
+
+def test_device_id_features(raw):
+    built = build_for(raw)
+    # A first purchase has no earlier device to differ from.
+    assert built.loc[1, "device_id_is_new_for_player"] == 0
+    assert built.loc[2, "device_id_is_new_for_player"] == 0
+    assert built.loc[3, "device_id_is_new_for_player"] == 1
+    # The player returns to a device ID used before.
+    assert built.loc[4, "device_id_is_new_for_player"] == 0
+    assert built.loc[6, "device_id_is_new_for_player"] == 0
+    # Earlier players on the device ID, the current player included.
+    assert built.loc[1, "device_distinct_players"] == 0
+    assert built.loc[4, "device_distinct_players"] == 1
+    assert built.loc[5, "device_distinct_players"] == 1
+    assert built.loc[9, "device_distinct_players"] == 2
+    assert built.loc[11, "device_distinct_players"] == 4
+    assert built.loc[6, "device_distinct_players"] == features.MISSING
+
+
+def test_billing_region_new_for_a_card(raw):
+    built = build_for(raw)
+    # A card's first purchase has no earlier region.
+    assert built.loc[1, "billing_region_is_new_for_card"] == 0
+    assert built.loc[7, "billing_region_is_new_for_card"] == 0
+    # Another player uses the card with another region.
+    assert built.loc[9, "billing_region_is_new_for_card"] == 1
+    # A missing region is one more region: new once, then known.
+    assert built.loc[10, "billing_region_is_new_for_card"] == 1
+    assert built.loc[11, "billing_region_is_new_for_card"] == 0
+
+
+def test_ieee_columns_leave_the_game_fields_missing(tmp_path):
+    rows = pd.read_csv(TESTDATA / "transactions.csv", dtype=str).drop(columns=features.GAME_COLUMNS)
+    rows.to_csv(tmp_path / "transactions.csv", index=False)
+    built = build_for(features.load(tmp_path / "transactions.csv"))
+    assert (built["ip_country_differs_from_card"] == features.MISSING).all()
+    assert (built["device_distinct_players"] == features.MISSING).all()
+    assert (built["device_id_is_new_for_player"] == 0).all()
+    assert built.loc[9, "billing_region_is_new_for_card"] == 1
+
+
 def test_hour_of_day_is_not_a_model_input():
     assert "hour_of_day" not in features.FEATURES
 
@@ -154,13 +203,13 @@ def test_load_export_joins_labels_and_counts_days(tmp_path):
     start = pd.Timestamp("2017-12-01T00:00:00Z")
     export = expected[["TransactionID", *features.FEATURES]].rename(columns={"TransactionID": "transaction_id"})
     export.insert(1, "event_time", [(start + pd.Timedelta(seconds=int(s))).strftime("%Y-%m-%dT%H:%M:%SZ") for s in raw["TransactionDT"]])
-    export.insert(2, "player_id", ["p1"] * 4 + ["p2"] * 2 + ["p1", "p3"])
+    export.insert(2, "player_id", ["p1"] * 4 + ["p2"] * 2 + ["p1", "p3", "p4", "p5", "p5"])
     export.insert(3, "model_score", "")
     export.to_csv(tmp_path / "inputs.csv", index=False)
     pd.DataFrame({"transaction_id": [str(i) for i in range(1, 8)], "is_fraud": [0, 0, 0, 1, 0, 0, 0]}).to_csv(tmp_path / "labels.csv", index=False)
 
     data, unlabelled = features.load_export(tmp_path / "inputs.csv", tmp_path / "labels.csv", start)
-    assert unlabelled == 1
+    assert unlabelled == 4
     assert len(data) == 7 and data["is_fraud"].tolist() == [0, 0, 0, 1, 0, 0, 0]
     assert data["day"].tolist() == (raw["TransactionDT"].head(7) // features.SECONDS_PER_DAY).tolist()
     pd.testing.assert_frame_equal(data[features.FEATURES], expected[features.FEATURES].head(7).astype(float))
@@ -221,3 +270,55 @@ def test_load_requests_keeps_the_request_ids_and_labels(tmp_path):
     assert list(built["card_country"]) == [-1, -1, -1] and list(built["card_issuer_code"]) == [1500, 1500, 1500]
     assert list(built["billing_distance"]) == [-1, -1, 12.5]
     assert list(built["player_id"]) == ["p1", "p1", "p2"] and list(built["is_fraud"]) == [0, 0, 1]
+
+
+def test_game_features_from_a_simulator_dump(tmp_path):
+    home = {"player_id": "p1", "card_token": "c1", "ip_country": "AZ", "device_id": "d1"}
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, **home}),
+        ("normal", False, {"event_time": "2026-01-02T10:00:00Z", "amount_minor": 1999, **home, "device_id": "d2"}),
+        ("stolen_card", True, {"event_time": "2026-01-03T10:00:00Z", "amount_minor": 20000, "player_id": "p2",
+                               "card_token": "c1", "ip_country": "TR", "device_id": "d2", "billing_region": "420"}),
+        ("normal", False, {"event_time": "2026-01-04T10:00:00Z", "amount_minor": 500, "player_id": "p3", "card_token": "c3"}),
+    ])
+    built = features.build(features.load_requests(dump))
+
+    # The card country is text in game traffic and is compared as text.
+    assert built["ip_country_differs_from_card"].tolist() == [0, 0, 1, features.MISSING]
+    assert built["device_id_is_new_for_player"].tolist() == [0, 1, 0, 0]
+    assert built["device_distinct_players"].tolist() == [0, 0, 1, features.MISSING]
+    assert built["billing_region_is_new_for_card"].tolist() == [0, 0, 1, 0]
+
+
+def test_purchases_without_a_card_issuer_share_their_issuer_history(tmp_path):
+    purchase = {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1", "card_token": "c1",
+                "card_issuer": None, "billing_region": None}
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, purchase),
+        ("normal", False, {**purchase, "event_time": "2026-01-02T10:00:00Z", "player_id": "p2", "card_token": "c2"}),
+        ("normal", False, {**purchase, "event_time": "2026-01-03T10:00:00Z", "player_id": "p3", "card_token": "c3",
+                           "email_domain": "mail.ru"}),
+    ])
+    built = features.build(features.load_requests(dump))
+
+    assert built["card1_distinct_players"].tolist() == [0, 1, 2]
+    assert built["card1_distinct_addresses"].tolist() == [0, 1, 1]
+    assert built["card1_distinct_emails"].tolist() == [0, 1, 1]
+    assert built["card_issuer_code"].tolist() == [features.MISSING] * 3
+
+
+def test_request_text_is_trimmed_and_empty_text_is_missing(tmp_path):
+    first = {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1", "card_token": "c1",
+             "ip_country": "AZ", "device_id": "d1"}
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, first),
+        ("normal", False, {**first, "event_time": "2026-01-02T10:00:00Z", "ip_country": " AZ", "device_id": "  ",
+                           "billing_region": " 310 "}),
+    ])
+    built = features.build(features.load_requests(dump))
+
+    assert built["ip_country_differs_from_card"].tolist() == [0, 0]
+    assert built["device_id_is_new_for_player"].tolist() == [0, 0]
+    assert built["device_distinct_players"].tolist() == [0, features.MISSING]
+    assert built["billing_region_is_new_for_card"].tolist() == [0, 0]
+    assert built["billing_region_code"].tolist() == [310, 310]

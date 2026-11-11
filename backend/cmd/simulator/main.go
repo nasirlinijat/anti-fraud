@@ -34,6 +34,7 @@ func main() {
 	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of events that start a special scenario (legitimate or fraud), from 0 to 1")
 	flag.IntVar(&cfg.Players, "players", cfg.Players, "number of regular players")
 	flag.DurationVar(&cfg.MeanGap, "gap", cfg.MeanGap, "mean simulated time between traffic events")
+	flag.Float64Var(&cfg.MissingFieldShare, "missing", cfg.MissingFieldShare, "share of players whose client leaves out each group of optional fields, from 0 to 1")
 	dump := flag.String("dump", "", "write the purchases with their fraud labels to this JSON Lines file instead of sending them")
 	flag.Parse()
 

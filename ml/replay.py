@@ -78,6 +78,8 @@ def requests_from(df):
             "recipient_email_domain": code(row.R_emaildomain),
             "device_type": code(row.DeviceType),
             "device_name": code(row.DeviceInfo),
+            "device_id": code(row.device_id),
+            "ip_country": code(row.ip_country),
             "client_os": code(row.id_30),
             "client_browser": code(row.id_31),
             "screen_resolution": code(row.id_33),

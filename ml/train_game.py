@@ -101,7 +101,7 @@ def main():
     parser.add_argument("--compare", default="../backend/models/lgbm-ieee-v5-combined.json",
                         help="exported model scored on the same test days for comparison; empty to skip")
     parser.add_argument("--out", default="output")
-    parser.add_argument("--version", default="lgbm-game-v2")
+    parser.add_argument("--version", default="lgbm-game-v5")
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--models", type=int, default=5, help="number of models averaged into the model (1 to 5)")
     parser.add_argument("--review-rate", type=float, default=0.005)

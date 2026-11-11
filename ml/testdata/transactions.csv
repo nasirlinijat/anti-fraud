@@ -1,9 +1,12 @@
-TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,dist1,P_emaildomain,R_emaildomain,D1,DeviceType,DeviceInfo,id_30,id_31,id_33
-1,0,3456000,50.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080
-2,0,3456600,20.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080
-3,0,3459600,50.00,W,1001,111,150,visa,226,debit,100,87,,gmail.com,,30,desktop,Windows,Windows 10,firefox 57.0,1920x1080
-4,1,3460000,250.00,W,1001,222,150,visa,226,debit,100,87,350,yahoo.com,hotmail.com,30,mobile,iOS Device,iOS 11.2.1,mobile safari 11.0,1334x750
-5,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,,20,,,,,
-6,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,gmail.com,20,,,,chrome 62.0,
-7,0,3633000,30.00,W,1001,111,150,visa,226,debit,100,87,12,gmail.com,,32,desktop,Windows,Windows 10,chrome 63.0,1366x768
-8,0,3640000,15.50,S,3003,,,discover,,charge card,,,,,,,,,,,
+TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,dist1,P_emaildomain,R_emaildomain,D1,DeviceType,DeviceInfo,id_30,id_31,id_33,ip_country,device_id
+1,0,3456000,50.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080,150,dev-a
+2,0,3456600,20.00,W,1001,111,150,visa,226,debit,100,87,10,gmail.com,,30,desktop,Windows,Windows 10,chrome 63.0,1920x1080,150,dev-a
+3,0,3459600,50.00,W,1001,111,150,visa,226,debit,100,87,,gmail.com,,30,desktop,Windows,Windows 10,firefox 57.0,1920x1080,185,dev-b
+4,1,3460000,250.00,W,1001,222,150,visa,226,debit,100,87,350,yahoo.com,hotmail.com,30,mobile,iOS Device,iOS 11.2.1,mobile safari 11.0,1334x750,,dev-a
+5,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,,20,,,,,,185,dev-a
+6,0,3500000,99.999,H,2002,333,185,mastercard,224,credit,200,60,0,gmail.com,gmail.com,20,,,,chrome 62.0,,,
+7,0,3633000,30.00,W,1001,111,150,visa,226,debit,100,87,12,gmail.com,,32,desktop,Windows,Windows 10,chrome 63.0,1366x768,150,dev-c
+8,0,3640000,15.50,S,3003,,,discover,,charge card,,,,,,,,,,,,,
+9,0,3650000,45.00,W,1001,111,150,visa,226,debit,300,87,,gmail.com,,5,mobile,iOS Device,,,,185,dev-a
+10,0,3660000,12.00,W,1001,111,150,visa,226,debit,,87,,gmail.com,,5,desktop,Windows,,,,150,dev-a
+11,0,3661000,13.00,W,1001,111,150,visa,226,debit,,87,,gmail.com,,5,desktop,Windows,,,,150,dev-a
