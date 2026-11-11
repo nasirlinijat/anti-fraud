@@ -3,11 +3,11 @@ package stats
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 // RuleCount is how often a rule fired and the points it added in total.
@@ -61,49 +61,113 @@ func (s *Store) Summary(ctx context.Context, window Window, maxRules int) (Summa
 	var sum Summary
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
-		sum, err = readSummary(ctx, db.New(tx), window, maxRules)
+		sum, err = readSummary(ctx, tx, window, maxRules)
 		return err
 	})
 	return sum, err
 }
 
-func readSummary(ctx context.Context, q *db.Queries, window Window, maxRules int) (Summary, error) {
-	since := pgtype.Timestamptz{Time: window.Since, Valid: true}
-	until := pgtype.Timestamptz{Time: window.Until, Valid: true}
-	overview, err := q.DecisionOverview(ctx, db.DecisionOverviewParams{Since: since, Until: until})
+// decisionOverview counts the decisions in [$1, $2) by outcome and finds the
+// 95th percentile scoring latency and the first decision time ($1 when there
+// are none).
+const decisionOverview = `
+SELECT
+    count(*) FILTER (WHERE outcome = 'allow') AS allowed,
+    count(*) FILTER (WHERE outcome = 'review') AS reviewed,
+    count(*) FILTER (WHERE outcome = 'block') AS blocked,
+    count(*) AS total,
+    count(scoring_latency_us) AS latency_samples,
+    coalesce(percentile_disc(0.95) WITHIN GROUP (ORDER BY scoring_latency_us), 0)::bigint AS p95_latency_us,
+    coalesce(min(decided_at), $1::timestamptz)::timestamptz AS first_decision_at
+FROM decisions
+WHERE decided_at >= $1::timestamptz
+  AND decided_at < $2::timestamptz`
+
+// overview is a decisionOverview row.
+type overview struct {
+	Outcomes
+	latencySamples  int64
+	p95LatencyUs    int64
+	firstDecisionAt time.Time
+}
+
+// blockedValue sums blocked amounts as text, so the total cannot overflow.
+const blockedValue = `
+SELECT coalesce(sum(p.amount_minor), 0)::text AS amount_minor
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'block'
+  AND d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz`
+
+const topFiredRules = `
+SELECT
+    rule.name::text AS name,
+    count(*) AS fired,
+    sum(rule.points)::bigint AS points
+FROM decisions d
+CROSS JOIN LATERAL jsonb_to_recordset(d.fired_rules) AS rule(name text, points integer)
+WHERE d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz
+GROUP BY rule.name
+ORDER BY fired DESC, name
+LIMIT $3`
+
+const countReviewQueue = `
+SELECT count(*)
+FROM decisions d
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
+
+// countModelEffects counts scored decisions, and decisions whose outcome
+// differs from what the rule score alone gives.
+const countModelEffects = `
+SELECT
+    count(d.model_score) AS scored,
+    count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold) AS flagged,
+    count(*) FILTER (WHERE d.outcome = 'allow' AND d.rule_score >= r.review_threshold) AS cleared
+FROM decisions d
+JOIN rulesets r ON r.version = d.ruleset_version
+WHERE d.decided_at >= $1::timestamptz
+  AND d.decided_at < $2::timestamptz`
+
+func readSummary(ctx context.Context, conn platform.DBTX, window Window, maxRules int) (Summary, error) {
+	since, until := window.Since, window.Until
+	var o overview
+	err := conn.QueryRow(ctx, decisionOverview, since, until).Scan(
+		&o.Allow, &o.Review, &o.Block, &o.Total, &o.latencySamples, &o.p95LatencyUs, &o.firstDecisionAt,
+	)
 	if err != nil {
 		return Summary{}, fmt.Errorf("read decision overview: %w", err)
 	}
-	sum := Summary{
-		Outcomes: Outcomes{Allow: overview.Allowed, Review: overview.Reviewed, Block: overview.Blocked, Total: overview.Total},
-		TopRules: []RuleCount{},
+	sum := Summary{Outcomes: o.Outcomes, TopRules: []RuleCount{}}
+	if o.latencySamples > 0 {
+		sum.P95ScoringLatencyUs = &o.p95LatencyUs
 	}
-	if overview.LatencySamples > 0 {
-		sum.P95ScoringLatencyUs = &overview.P95LatencyUs
-	}
-	if sum.BlockedValueMinor, err = q.BlockedValue(ctx, db.BlockedValueParams{Since: since, Until: until}); err != nil {
+	if err := conn.QueryRow(ctx, blockedValue, since, until).Scan(&sum.BlockedValueMinor); err != nil {
 		return Summary{}, fmt.Errorf("sum blocked value: %w", err)
 	}
-	if sum.DecisionSeries, err = readDecisionSeries(ctx, q, window, overview); err != nil {
+	if sum.DecisionSeries, err = readDecisionSeries(ctx, conn, window, o); err != nil {
 		return Summary{}, fmt.Errorf("read decision buckets: %w", err)
 	}
 
-	rules, err := q.TopFiredRules(ctx, db.TopFiredRulesParams{Since: since, Until: until, MaxRules: int32(maxRules)})
+	rows, err := conn.Query(ctx, topFiredRules, since, until, int32(maxRules))
 	if err != nil {
 		return Summary{}, fmt.Errorf("count fired rules: %w", err)
 	}
-	for _, r := range rules {
-		sum.TopRules = append(sum.TopRules, RuleCount{Name: r.Name, Fired: r.Fired, Points: r.Points})
+	sum.TopRules, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (RuleCount, error) {
+		var r RuleCount
+		return r, row.Scan(&r.Name, &r.Fired, &r.Points)
+	})
+	if err != nil {
+		return Summary{}, fmt.Errorf("count fired rules: %w", err)
 	}
 
-	if sum.ReviewQueue, err = q.CountReviewQueue(ctx); err != nil {
+	if err := conn.QueryRow(ctx, countReviewQueue).Scan(&sum.ReviewQueue); err != nil {
 		return Summary{}, fmt.Errorf("count review queue: %w", err)
 	}
-
-	model, err := q.CountModelEffects(ctx, db.CountModelEffectsParams{Since: since, Until: until})
-	if err != nil {
+	if err := conn.QueryRow(ctx, countModelEffects, since, until).Scan(&sum.Model.Scored, &sum.Model.Flagged, &sum.Model.Cleared); err != nil {
 		return Summary{}, fmt.Errorf("count model effects: %w", err)
 	}
-	sum.Model = ModelEffects{Scored: model.Scored, Flagged: model.Flagged, Cleared: model.Cleared}
 	return sum, nil
 }

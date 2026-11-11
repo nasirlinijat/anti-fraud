@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 // Type is the kind of value a blocklist entry blocks.
@@ -59,59 +59,83 @@ type Subject struct {
 
 // Store reads blocklist entries from the database.
 type Store struct {
-	q *db.Queries
+	conn platform.DBTX
 }
 
-func NewStore(conn db.DBTX) *Store {
-	return &Store{q: db.New(conn)}
+func NewStore(conn platform.DBTX) *Store {
+	return &Store{conn: conn}
 }
+
+// findEntry returns one entry that matches the card, player, device, or IP
+// address. A NULL device or IP address matches nothing.
+const findEntry = `
+SELECT entry_type, value, reason
+FROM blocklist_entries
+WHERE (entry_type = 'card'   AND value = $1)
+   OR (entry_type = 'player' AND value = $2)
+   OR (entry_type = 'device' AND value = $3)
+   OR (entry_type = 'ip'     AND value = $4)
+ORDER BY id
+LIMIT 1`
 
 // Match reports whether the card, player, device, or IP address of the
 // subject is on the blocklist, and returns the matching entry.
 func (s *Store) Match(ctx context.Context, sub Subject) (Entry, bool, error) {
-	row, err := s.q.FindBlocklistEntry(ctx, db.FindBlocklistEntryParams{
-		CardToken: sub.CardToken,
-		PlayerID:  sub.PlayerID,
-		DeviceID:  optionalText(sub.DeviceID),
-		IpAddress: ipText(sub.IPAddress),
-	})
+	var e Entry
+	err := s.conn.QueryRow(ctx, findEntry,
+		sub.CardToken, sub.PlayerID, optionalText(sub.DeviceID), ipText(sub.IPAddress),
+	).Scan(&e.Type, &e.Value, &e.Reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Entry{}, false, nil
 	}
 	if err != nil {
 		return Entry{}, false, fmt.Errorf("find blocklist entry: %w", err)
 	}
-	return Entry{Type: Type(row.EntryType), Value: row.Value, Reason: row.Reason}, true, nil
+	return e, true, nil
 }
+
+const listEntries = `
+SELECT id, entry_type, value, reason, created_at
+FROM blocklist_entries
+ORDER BY created_at DESC, id DESC`
 
 // List returns all entries, the newest first.
 func (s *Store) List(ctx context.Context) ([]StoredEntry, error) {
-	rows, err := s.q.ListBlocklistEntries(ctx)
+	rows, err := s.conn.Query(ctx, listEntries)
 	if err != nil {
 		return nil, fmt.Errorf("list blocklist entries: %w", err)
 	}
-	entries := make([]StoredEntry, 0, len(rows))
-	for _, r := range rows {
-		entries = append(entries, StoredEntry{
-			ID:        r.ID,
-			Type:      Type(r.EntryType),
-			Value:     r.Value,
-			Reason:    r.Reason,
-			CreatedAt: r.CreatedAt.Time.UTC(),
-		})
+	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StoredEntry, error) {
+		var e StoredEntry
+		err := row.Scan(&e.ID, &e.Type, &e.Value, &e.Reason, &e.CreatedAt)
+		e.CreatedAt = e.CreatedAt.UTC()
+		return e, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list blocklist entries: %w", err)
 	}
 	return entries, nil
 }
 
+// insertEntry adds an entry and its audit record in one statement.
+const insertEntry = `
+WITH added AS (
+    INSERT INTO blocklist_entries (entry_type, value, reason)
+    VALUES ($1, $2, $3)
+    RETURNING id, entry_type, value, reason, created_at
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'operator', $4, 'blocklist.add', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM added
+)
+SELECT id, created_at FROM added`
+
 // Add saves an entry. It returns ErrDuplicate if the same type and value are
 // already on the blocklist. The entry applies to the next scored purchase.
 func (s *Store) Add(ctx context.Context, e Entry, operatorID string) (StoredEntry, error) {
-	row, err := s.q.InsertBlocklistEntry(ctx, db.InsertBlocklistEntryParams{
-		OperatorID: operatorID,
-		EntryType:  string(e.Type),
-		Value:      e.Value,
-		Reason:     e.Reason,
-	})
+	saved := StoredEntry{Type: e.Type, Value: e.Value, Reason: e.Reason}
+	err := s.conn.QueryRow(ctx, insertEntry, string(e.Type), e.Value, e.Reason, operatorID).Scan(&saved.ID, &saved.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -119,32 +143,60 @@ func (s *Store) Add(ctx context.Context, e Entry, operatorID string) (StoredEntr
 		}
 		return StoredEntry{}, fmt.Errorf("insert blocklist entry: %w", err)
 	}
-	return StoredEntry{ID: row.ID, Type: e.Type, Value: e.Value, Reason: e.Reason, CreatedAt: row.CreatedAt.Time.UTC()}, nil
+	saved.CreatedAt = saved.CreatedAt.UTC()
+	return saved, nil
 }
+
+// insertEntryIfAbsent returns no row when the type and value are already on
+// the blocklist.
+const insertEntryIfAbsent = `
+WITH added AS (
+    INSERT INTO blocklist_entries (entry_type, value, reason)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (entry_type, value) DO NOTHING
+    RETURNING id, entry_type, value, reason, created_at
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'analyst', $4, 'blocklist.add', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM added
+)
+SELECT id, created_at FROM added`
 
 // AddIfAbsent saves an entry unless the same type and value are already on the
 // blocklist, and reports whether it saved one. Build the store on a
 // transaction to make the insert part of that transaction.
 func (s *Store) AddIfAbsent(ctx context.Context, e Entry, analystID string) (StoredEntry, bool, error) {
-	row, err := s.q.InsertBlocklistEntryIfAbsent(ctx, db.InsertBlocklistEntryIfAbsentParams{
-		AnalystID: analystID,
-		EntryType: string(e.Type),
-		Value:     e.Value,
-		Reason:    e.Reason,
-	})
+	saved := StoredEntry{Type: e.Type, Value: e.Value, Reason: e.Reason}
+	err := s.conn.QueryRow(ctx, insertEntryIfAbsent, string(e.Type), e.Value, e.Reason, analystID).Scan(&saved.ID, &saved.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return StoredEntry{}, false, nil
 	}
 	if err != nil {
 		return StoredEntry{}, false, fmt.Errorf("insert blocklist entry if absent: %w", err)
 	}
-	return StoredEntry{ID: row.ID, Type: e.Type, Value: e.Value, Reason: e.Reason, CreatedAt: row.CreatedAt.Time.UTC()}, true, nil
+	saved.CreatedAt = saved.CreatedAt.UTC()
+	return saved, true, nil
 }
+
+// deleteEntry removes an entry and records the removal. It returns the number
+// of entries removed.
+const deleteEntry = `
+WITH removed AS (
+    DELETE FROM blocklist_entries AS entry WHERE entry.id = $1
+    RETURNING id, entry_type, value, reason
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'operator', $2, 'blocklist.remove', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM removed
+)
+SELECT count(*) FROM removed`
 
 // Remove deletes the entry with the given ID. It returns ErrNotFound if there is none.
 func (s *Store) Remove(ctx context.Context, id int64, operatorID string) error {
-	n, err := s.q.DeleteBlocklistEntry(ctx, db.DeleteBlocklistEntryParams{EntryID: id, OperatorID: operatorID})
-	if err != nil {
+	var n int64
+	if err := s.conn.QueryRow(ctx, deleteEntry, id, operatorID).Scan(&n); err != nil {
 		return fmt.Errorf("delete blocklist entry %d: %w", id, err)
 	}
 	if n == 0 {

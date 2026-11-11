@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
@@ -96,23 +94,34 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	store := NewStore(tx)
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, store, testAnalystKeys(t), false)
-	q := db.New(tx)
-	since := pgtype.Timestamptz{Time: at, Valid: true}
-	until := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
-	snapshot := func() (int64, db.DecisionOverviewRow, db.CountModelEffectsRow) {
+	until := time.Now().UTC()
+	// The dashboard counts review outcomes and model effects from decisions,
+	// so resolving a review must change only the open review count.
+	type counts struct{ allowed, reviewed, blocked, scored, flagged, cleared int64 }
+	snapshot := func() (int64, counts, counts) {
 		t.Helper()
-		queue, err := q.CountReviewQueue(ctx)
+		var queue int64
+		var c counts
+		err := tx.QueryRow(ctx, `
+			SELECT
+			    (SELECT count(*) FROM decisions d WHERE d.outcome = 'review'
+			       AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)),
+			    count(*) FILTER (WHERE d.outcome = 'allow'),
+			    count(*) FILTER (WHERE d.outcome = 'review'),
+			    count(*) FILTER (WHERE d.outcome = 'block'),
+			    count(d.model_score),
+			    count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold),
+			    count(*) FILTER (WHERE d.outcome = 'allow' AND d.rule_score >= r.review_threshold)
+			FROM decisions d
+			JOIN rulesets r ON r.version = d.ruleset_version
+			WHERE d.decided_at >= $1 AND d.decided_at < $2`, at, until,
+		).Scan(&queue, &c.allowed, &c.reviewed, &c.blocked, &c.scored, &c.flagged, &c.cleared)
 		if err != nil {
 			t.Fatal(err)
 		}
-		outcomes, err := q.DecisionOverview(ctx, db.DecisionOverviewParams{Since: since, Until: until})
-		if err != nil {
-			t.Fatal(err)
-		}
-		model, err := q.CountModelEffects(ctx, db.CountModelEffectsParams{Since: since, Until: until})
-		if err != nil {
-			t.Fatal(err)
-		}
+		outcomes, model := c, c
+		outcomes.scored, outcomes.flagged, outcomes.cleared = 0, 0, 0
+		model.allowed, model.reviewed, model.blocked = 0, 0, 0
 		return queue, outcomes, model
 	}
 	beforeQueue, beforeOutcomes, beforeModel := snapshot()

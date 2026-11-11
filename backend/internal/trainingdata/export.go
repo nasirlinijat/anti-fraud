@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/jackc/pgx/v5"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 // PageSize is how many decisions Export reads per query.
@@ -28,8 +28,7 @@ type Summary struct {
 // the given features, in (event_time, transaction_id) order. Columns:
 // transaction_id, event_time (RFC 3339, UTC), player_id, model_score (empty
 // without a model), then the features in the given order.
-func Export(ctx context.Context, conn db.DBTX, featureNames []string, w io.Writer) (Summary, error) {
-	q := db.New(conn)
+func Export(ctx context.Context, conn platform.DBTX, featureNames []string, w io.Writer) (Summary, error) {
 	out := csv.NewWriter(w)
 	header := append([]string{"transaction_id", "event_time", "player_id", "model_score"}, featureNames...)
 	if err := out.Write(header); err != nil {
@@ -37,11 +36,11 @@ func Export(ctx context.Context, conn db.DBTX, featureNames []string, w io.Write
 	}
 
 	var sum Summary
-	after := pgtype.Timestamptz{Time: time.Time{}, Valid: true}
+	var after time.Time
 	afterID := ""
 	record := make([]string, len(header))
 	for {
-		rows, err := q.ListModelInputs(ctx, db.ListModelInputsParams{AfterTime: after, AfterID: afterID, PageSize: PageSize})
+		rows, err := listModelInputs(ctx, conn, after, afterID)
 		if err != nil {
 			return sum, fmt.Errorf("list model inputs: %w", err)
 		}
@@ -55,11 +54,11 @@ func Export(ctx context.Context, conn db.DBTX, featureNames []string, w io.Write
 				continue
 			}
 			record[0] = r.TransactionID
-			record[1] = r.EventTime.Time.UTC().Format(time.RFC3339)
+			record[1] = r.EventTime.UTC().Format(time.RFC3339)
 			record[2] = r.PlayerID
 			record[3] = ""
-			if r.ModelScore.Valid {
-				record[3] = strconv.FormatFloat(r.ModelScore.Float64, 'g', -1, 64)
+			if r.ModelScore != nil {
+				record[3] = strconv.FormatFloat(*r.ModelScore, 'g', -1, 64)
 			}
 			complete := true
 			for i, name := range featureNames {
@@ -87,4 +86,33 @@ func Export(ctx context.Context, conn db.DBTX, featureNames []string, w io.Write
 	}
 	out.Flush()
 	return sum, out.Error()
+}
+
+// modelInputsPage is a page of saved decisions after the given
+// (event_time, transaction_id), in that order.
+const modelInputsPage = `
+SELECT p.transaction_id, p.event_time, p.player_id, d.model_inputs, d.model_score
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE (p.event_time, p.transaction_id) > ($1::timestamptz, $2::text)
+ORDER BY p.event_time, p.transaction_id
+LIMIT $3`
+
+type modelInputsRow struct {
+	TransactionID string
+	EventTime     time.Time
+	PlayerID      string
+	ModelInputs   []byte
+	ModelScore    *float64
+}
+
+func listModelInputs(ctx context.Context, conn platform.DBTX, after time.Time, afterID string) ([]modelInputsRow, error) {
+	rows, err := conn.Query(ctx, modelInputsPage, after, afterID, PageSize)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (modelInputsRow, error) {
+		var r modelInputsRow
+		return r, row.Scan(&r.TransactionID, &r.EventTime, &r.PlayerID, &r.ModelInputs, &r.ModelScore)
+	})
 }
