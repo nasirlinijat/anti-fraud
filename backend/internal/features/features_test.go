@@ -28,13 +28,16 @@ const (
 
 func ptr[T any](v T) *T { return &v }
 
-func TestNamesMatchModel(t *testing.T) {
+// The IEEE-CIS model was exported before the game features were added at the
+// end of Names, so it takes the features before them.
+func TestNamesStartWithTheModelFeatures(t *testing.T) {
 	model, err := lgbm.Load(modelPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := model.Features(); !reflect.DeepEqual(got, features.Names) {
-		t.Fatalf("model features = %v, want %v", got, features.Names)
+	got := model.Features()
+	if len(got) > len(features.Names) || !reflect.DeepEqual(got, features.Names[:len(got)]) {
+		t.Fatalf("model features = %v, want the first of %v", got, features.Names)
 	}
 }
 
@@ -92,6 +95,11 @@ func TestVectorWithoutHistory(t *testing.T) {
 		"screen_area":              1334 * 750,
 		"os_is_new_for_player":     0,
 		"player_distinct_browsers": 0,
+		// No IP country and no device ID in the request.
+		"ip_country_differs_from_card":   features.Missing,
+		"device_id_is_new_for_player":    0,
+		"device_distinct_players":        features.Missing,
+		"billing_region_is_new_for_card": 0,
 	}
 	if len(got) != len(features.Names) {
 		t.Fatalf("got %d features, want %d", len(got), len(features.Names))
@@ -123,6 +131,43 @@ func TestVectorRecipientEmail(t *testing.T) {
 					got["has_recipient_email"], got["recipient_email_differs"], tt.hasRecipient, tt.diff)
 			}
 		})
+	}
+}
+
+func TestVectorGameFeatures(t *testing.T) {
+	in := features.Input{AmountMinor: 100, CardCountry: ptr("AZ"), IPCountry: ptr("TR"), DeviceID: ptr("device-1")}
+	history := features.History{
+		Player:          features.PlayerHistory{Purchases: 3},
+		Card:            features.CardHistory{Purchases: 2},
+		DeviceIDPlayers: 4,
+	}
+	got := features.Map(features.Vector(in, history))
+	want := map[string]float64{
+		"ip_country_differs_from_card":   1,
+		"device_id_is_new_for_player":    1,
+		"device_distinct_players":        4,
+		"billing_region_is_new_for_card": 1,
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s = %v, want %v", name, got[name], w)
+		}
+	}
+
+	// The same country, a device ID and a billing region seen before.
+	in.IPCountry = ptr("AZ")
+	history.Player.DeviceIDUses, history.Card.RegionUses = 1, 2
+	got = features.Map(features.Vector(in, history))
+	for _, name := range []string{"ip_country_differs_from_card", "device_id_is_new_for_player", "billing_region_is_new_for_card"} {
+		if got[name] != 0 {
+			t.Errorf("%s = %v, want 0", name, got[name])
+		}
+	}
+
+	// A first purchase has no earlier device or region to differ from.
+	got = features.Map(features.Vector(in, features.History{}))
+	if got["device_id_is_new_for_player"] != 0 || got["billing_region_is_new_for_card"] != 0 || got["device_distinct_players"] != 0 {
+		t.Errorf("first purchase: %v", got)
 	}
 }
 
@@ -263,6 +308,8 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) score.Purchase {
 		RecipientEmailDomain: optional("R_emaildomain"),
 		DeviceType:           optional("DeviceType"),
 		DeviceName:           optional("DeviceInfo"),
+		DeviceID:             optional("device_id"),
+		IPCountry:            optional("ip_country"),
 		ClientOS:             optional("id_30"),
 		ClientBrowser:        optional("id_31"),
 		ScreenResolution:     optional("id_33"),

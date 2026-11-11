@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -157,11 +158,34 @@ func TestModelError(t *testing.T) {
 	}
 }
 
+// A model exported before the newest features takes only the features it was
+// trained on.
+func TestOlderModelIsScoredWithItsOwnFeatures(t *testing.T) {
+	older := features.Names[:len(features.Names)-4]
+	model := &fakeModel{score: 0.2, features: older}
+	rec := serveModel(t, model, &fakeBlocklist{}, &fakePurchases{}, minimalBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if len(model.got) != len(older) {
+		t.Fatalf("model got %d values, want its %d features", len(model.got), len(older))
+	}
+}
+
 func TestUseModelRejectsMismatch(t *testing.T) {
 	h := NewHandler(fakeRulesets{}, &fakeBlocklist{}, &fakePurchases{})
 	reordered := append([]string{features.Names[1], features.Names[0]}, features.Names[2:]...)
 	if err := h.UseModel(&fakeModel{features: reordered}, testPolicy); err == nil {
 		t.Error("UseModel accepted a model with features in another order")
+	}
+	if err := h.UseModel(&fakeModel{features: features.Names[1:]}, testPolicy); err == nil {
+		t.Error("UseModel accepted a model that skips the first feature")
+	}
+	if err := h.UseModel(&fakeModel{features: append(slices.Clone(features.Names), "unknown")}, testPolicy); err == nil {
+		t.Error("UseModel accepted a model with a feature the service does not compute")
+	}
+	if err := h.UseModel(&fakeModel{features: []string{}}, testPolicy); err == nil {
+		t.Error("UseModel accepted a model without features")
 	}
 	if err := h.UseModel(&fakeModel{}, scoring.ModelPolicy{FlagAt: 0.1, ClearBelow: 0.2}); err == nil {
 		t.Error("UseModel accepted a bad policy")

@@ -2,7 +2,7 @@
 
 The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
 
-This file describes model v5 (50 features), which the service computes and loads by default.
+This file describes 54 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, and `lgbm-game-v5` takes all 54.
 
 ## General rules
 
@@ -10,7 +10,7 @@ This file describes model v5 (50 features), which the service computes and loads
 2. **History means strictly earlier purchases** in that order. The current purchase never counts itself, and later purchases never count.
 3. **Time windows.** "In the last hour" counts earlier purchases with `time > now - 3600` seconds; "in the last day" uses 86400. A purchase exactly 3600 seconds earlier is not counted.
 4. **Missing values become `-1`**: a missing request field, or a history feature that has no history yet (for example an average with no earlier purchase).
-5. **Model input order** is the order of the table below, the same as `FEATURES` in `ml/features.py` and `feature_names` in the model file. The service must refuse a model whose `feature_names` differ.
+5. **Model input order** is the order of the table below, the same as `FEATURES` in `ml/features.py`. A model takes the first features of this list, in order, and its `feature_names` say how many. Features are only added at the end, so a model exported with fewer features still loads and is scored with those. The service must refuse a model whose `feature_names` are in another order, skip a feature, or name a feature the service does not compute.
 6. All features are float64.
 
 ## Identities
@@ -88,6 +88,10 @@ Any other or missing value is `-1`.
 | 48 | `player_distinct_browsers` | Distinct known browsers the player used before (missing browsers are not counted) |
 | 49 | `card_issuer_code` | `card_issuer` (`card1`) as a number |
 | 50 | `billing_region_code` | `billing_region` (`addr1`) as a number |
+| 51 | `ip_country_differs_from_card` | 1 if `ip_country` and `card_country` are both present and differ as text, 0 if both are present and equal, `-1` if either is missing |
+| 52 | `device_id_is_new_for_player` | 1 if the request has a `device_id`, the player has earlier purchases, and none used this device ID, else 0 |
+| 53 | `device_distinct_players` | Distinct players who used this `device_id` before (the current player counts if they used it before); `-1` when the device ID is missing |
+| 54 | `billing_region_is_new_for_card` | 1 if the card ID has earlier purchases and none had this billing region (a missing region counts as `none`), else 0 |
 
 Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 
@@ -113,8 +117,10 @@ Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service ne
 | `recipient_email_domain` | `R_emaildomain` | |
 | `device_type` | `DeviceType` | Identity file, joined on `TransactionID` |
 | `device_name` | `DeviceInfo` | Identity file, joined on `TransactionID` |
+| `ip_country` | None | Always missing in IEEE-CIS; present in game traffic and in the test rows |
+| `device_id` | None | Always missing in IEEE-CIS; present in game traffic and in the test rows |
 
-`device_id`, `ip_address` and `ip_country` are not model inputs: IEEE-CIS has no such columns. `account_created_at` gives `account_age_days`, which IEEE-CIS approximates with `D1` (days since the client began). The client OS, browser and screen come from the identity file's `id_30`, `id_31` and `id_33` (values such as `Windows 10`, `chrome 63.0` and `1920x1080`); the score request gets matching optional fields in ML-3. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number becomes `-1`.
+`ip_address` is not a model input. IEEE-CIS has no IP country or device ID, so for IEEE-CIS rows features 51 and 53 are `-1` and feature 52 is 0. The test rows in `ml/testdata/transactions.csv` have two extra columns, `ip_country` and `device_id`, to test these features. Feature 51 compares `ip_country` with `card_country` as text, so training writes `card3` the way the request sends it (`150.0` becomes `150`). `account_created_at` gives `account_age_days`, which IEEE-CIS approximates with `D1` (days since the client began). The client OS, browser and screen come from the identity file's `id_30`, `id_31` and `id_33` (values such as `Windows 10`, `chrome 63.0` and `1920x1080`); the score request gets matching optional fields in ML-3. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number becomes `-1`.
 
 `hour_of_day` was removed in model v4: IEEE-CIS times start at an unknown moment, so the hour was shifted for live traffic, and the model loses nothing without it.
 
@@ -122,13 +128,15 @@ Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service ne
 
 The thresholds are in `backend/models/<version>.report.json` under `policy`: `flag_at` (an allowed purchase at or above it goes to review) and `clear_below` (a reviewed purchase below it is cleared). The model never blocks.
 
-The service reads the thresholds at startup from the report next to `MODEL_PATH` and refuses to start if the report is missing, the thresholds are not `0 <= clear_below < flag_at <= 1`, or the model's `feature_names` differ from the service's features. `scoring.ApplyModel` applies them after the rules. A block, from the rules or the blocklist, never changes. The score is saved in `decisions.model_score` and returned as `model_score`; without a model it is null and only the rules decide.
+The service reads the thresholds at startup from the report next to `MODEL_PATH` and refuses to start if the report is missing, the thresholds are not `0 <= clear_below < flag_at <= 1`, or the model's `feature_names` are not the first features of the service's list, in order. `scoring.ApplyModel` applies them after the rules. A block, from the rules or the blocklist, never changes. The score is saved in `decisions.model_score` and returned as `model_score`; without a model it is null and only the rules decide.
 
 ## Go implementation
 
 `backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
 
-- Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text.
+- Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text. The player query also counts earlier purchases with the same device ID, and the card query also returns the card's earlier purchase count and how many had the same billing region.
+- Feature 53 reads the distinct earlier players on the device ID with the `DeviceIDHistorySQL` query, which is served by the partial index on `device_id` from migration 000014. It only runs when the request has a device ID.
+- `UseModel` in `backend/internal/score/handler.go` accepts a model whose `feature_names` are the first features of `Names` and scores it with only those features.
 - Features 18, 26, 29, 30, 42, 43 and 44 read running totals from the `feature_counts` table: all purchases, and purchases per email domain, device name, client OS, browser and screen, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.
 
 ## Checking the Go implementation
