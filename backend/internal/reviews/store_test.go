@@ -151,7 +151,8 @@ func TestCaseReturnsEvidenceOfReviewPurchase(t *testing.T) {
 			},
 			DecidedAt: at,
 		},
-		RulesetVersion: 1,
+		RulesetVersion:  1,
+		PlayerPurchases: []PlayerPurchase{},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Case() =\n%+v\nwant\n%+v", got, want)
@@ -240,5 +241,63 @@ func TestQueueAndCaseReturnTheSavedRuleMessage(t *testing.T) {
 	reviewCase, err := store.Case(context.Background(), id)
 	if err != nil || !reflect.DeepEqual(reviewCase.FiredRules, want) {
 		t.Errorf("Case fired rules = %+v, %v; want %+v", reviewCase.FiredRules, err, want)
+	}
+}
+
+func TestCaseReturnsPlayerAndDeviceHistory(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	base := time.Date(2000, 1, 2, 12, 0, 0, 0, time.UTC)
+
+	insertHistoryRow := func(txnID, playerID, cardToken string, deviceID *string, eventTime time.Time, amount int64, outcome string) int64 {
+		var id int64
+		err := tx.QueryRow(ctx, `
+			INSERT INTO purchases (transaction_id, event_time, amount_minor, player_id, card_token, device_id)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id`, txnID, eventTime, amount, playerID, cardToken, deviceID).Scan(&id)
+		if err != nil {
+			t.Fatalf("insert purchase %s: %v", txnID, err)
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO decisions (purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, decided_at)
+			VALUES ($1, 1, $2, 60, '[]', '{}', $3)`, id, outcome, eventTime)
+		if err != nil {
+			t.Fatalf("insert decision %s: %v", txnID, err)
+		}
+		return id
+	}
+
+	device := "device-shared"
+	otherDevice := "device-other"
+	for i := range 6 {
+		insertHistoryRow("hist-p-"+string(rune('1'+i)), "player-hist", "card-1", &otherDevice,
+			base.Add(time.Duration(i)*time.Minute), int64(1000*(i+1)), "allow")
+	}
+	insertHistoryRow("hist-other-player", "player-other", "card-2", &device, base.Add(3*time.Minute), 4000, "block")
+	targetID := insertHistoryRow("hist-target", "player-hist", "card-3", &device, base.Add(10*time.Minute), 9000, "review")
+	// Purchases after the target must not appear in the target's history.
+	insertHistoryRow("hist-after", "player-hist", "card-4", &device, base.Add(20*time.Minute), 9999, "allow")
+
+	got, err := NewStore(tx).Case(ctx, targetID)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	wantPurchases := []PlayerPurchase{
+		{TransactionID: "hist-p-6", EventTime: base.Add(5 * time.Minute), AmountMinor: 6000, Outcome: scoring.OutcomeAllow},
+		{TransactionID: "hist-p-5", EventTime: base.Add(4 * time.Minute), AmountMinor: 5000, Outcome: scoring.OutcomeAllow},
+		{TransactionID: "hist-p-4", EventTime: base.Add(3 * time.Minute), AmountMinor: 4000, Outcome: scoring.OutcomeAllow},
+		{TransactionID: "hist-p-3", EventTime: base.Add(2 * time.Minute), AmountMinor: 3000, Outcome: scoring.OutcomeAllow},
+		{TransactionID: "hist-p-2", EventTime: base.Add(1 * time.Minute), AmountMinor: 2000, Outcome: scoring.OutcomeAllow},
+	}
+	if !reflect.DeepEqual(got.PlayerPurchases, wantPurchases) {
+		t.Errorf("PlayerPurchases =\n%+v\nwant\n%+v", got.PlayerPurchases, wantPurchases)
+	}
+	wantDevice := &DeviceActivity{
+		Purchases:     2,
+		DistinctCards: 2,
+		LastSeenAt:    base.Add(10 * time.Minute),
+	}
+	if !reflect.DeepEqual(got.DeviceActivity, wantDevice) {
+		t.Errorf("DeviceActivity = %+v, want %+v", got.DeviceActivity, wantDevice)
 	}
 }

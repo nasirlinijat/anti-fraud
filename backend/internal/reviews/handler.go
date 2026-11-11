@@ -76,9 +76,24 @@ type reviewResponse struct {
 	FiredRules    []scoring.FiredRule `json:"fired_rules"`
 }
 
+type playerPurchaseResponse struct {
+	TransactionID string          `json:"transaction_id"`
+	EventTime     time.Time       `json:"event_time"`
+	AmountMinor   string          `json:"amount_minor"`
+	Outcome       scoring.Outcome `json:"outcome"`
+}
+
+type deviceActivityResponse struct {
+	Purchases     int64     `json:"purchases"`
+	DistinctCards int64     `json:"distinct_cards"`
+	LastSeenAt    time.Time `json:"last_seen_at"`
+}
+
 type caseResponse struct {
 	reviewResponse
-	RulesetVersion int `json:"ruleset_version"`
+	RulesetVersion  int                      `json:"ruleset_version"`
+	PlayerPurchases []playerPurchaseResponse `json:"player_purchases"`
+	DeviceActivity  *deviceActivityResponse  `json:"device_activity"`
 }
 
 type queueResponse struct {
@@ -129,9 +144,28 @@ func serveCase(w http.ResponseWriter, r *http.Request, store caseReader) {
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	playerPurchases := make([]playerPurchaseResponse, 0, len(item.PlayerPurchases))
+	for _, p := range item.PlayerPurchases {
+		playerPurchases = append(playerPurchases, playerPurchaseResponse{
+			TransactionID: p.TransactionID,
+			EventTime:     p.EventTime.UTC(),
+			AmountMinor:   strconv.FormatInt(p.AmountMinor, 10),
+			Outcome:       p.Outcome,
+		})
+	}
+	var deviceActivity *deviceActivityResponse
+	if item.DeviceActivity != nil {
+		deviceActivity = &deviceActivityResponse{
+			Purchases:     item.DeviceActivity.Purchases,
+			DistinctCards: item.DeviceActivity.DistinctCards,
+			LastSeenAt:    item.DeviceActivity.LastSeenAt.UTC(),
+		}
+	}
 	platform.WriteJSON(w, http.StatusOK, caseResponse{
-		reviewResponse: newReviewResponse(item.QueueItem),
-		RulesetVersion: item.RulesetVersion,
+		reviewResponse:  newReviewResponse(item.QueueItem),
+		RulesetVersion:  item.RulesetVersion,
+		PlayerPurchases: playerPurchases,
+		DeviceActivity:  deviceActivity,
 	})
 }
 

@@ -37,7 +37,28 @@ type CaseItem struct {
 	QueueItem
 	// RulesetVersion is the ruleset version that scored the purchase.
 	RulesetVersion int
+	// PlayerPurchases lists the player's recent purchases before this one, newest first.
+	PlayerPurchases []PlayerPurchase
+	// DeviceActivity summarizes activity on the same device, or is nil when the purchase had no device ID.
+	DeviceActivity *DeviceActivity
 }
+
+// PlayerPurchase is an earlier purchase by the same player.
+type PlayerPurchase struct {
+	TransactionID string
+	EventTime     time.Time
+	AmountMinor   int64
+	Outcome       scoring.Outcome
+}
+
+// DeviceActivity summarizes recent activity on the same device.
+type DeviceActivity struct {
+	Purchases     int64
+	DistinctCards int64
+	LastSeenAt    time.Time
+}
+
+const casePlayerPurchaseLimit = 5
 
 // ErrNotFound means no purchase under review has the given ID.
 var ErrNotFound = errors.New("review case not found")
@@ -152,7 +173,49 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 	if err != nil {
 		return CaseItem{}, err
 	}
-	return CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}, nil
+
+	historyRows, err := s.q.ListCasePlayerPurchases(ctx, db.ListCasePlayerPurchasesParams{
+		PlayerID:      r.PlayerID,
+		EventTime:     r.EventTime,
+		TransactionID: r.TransactionID,
+		PageLimit:     casePlayerPurchaseLimit,
+	})
+	if err != nil {
+		return CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
+	}
+	playerPurchases := make([]PlayerPurchase, 0, len(historyRows))
+	for _, row := range historyRows {
+		playerPurchases = append(playerPurchases, PlayerPurchase{
+			TransactionID: row.TransactionID,
+			EventTime:     row.EventTime.Time.UTC(),
+			AmountMinor:   row.AmountMinor,
+			Outcome:       scoring.Outcome(row.Outcome),
+		})
+	}
+
+	var deviceActivity *DeviceActivity
+	if r.DeviceID.Valid {
+		activity, err := s.q.GetCaseDeviceActivity(ctx, db.GetCaseDeviceActivityParams{
+			DeviceID:      r.DeviceID.String,
+			EventTime:     r.EventTime,
+			TransactionID: r.TransactionID,
+		})
+		if err != nil {
+			return CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
+		}
+		deviceActivity = &DeviceActivity{
+			Purchases:     activity.Purchases,
+			DistinctCards: activity.DistinctCards,
+			LastSeenAt:    activity.LastSeenAt.Time.UTC(),
+		}
+	}
+
+	return CaseItem{
+		QueueItem:       item,
+		RulesetVersion:  int(r.RulesetVersion),
+		PlayerPurchases: playerPurchases,
+		DeviceActivity:  deviceActivity,
+	}, nil
 }
 
 func newQueueItem(

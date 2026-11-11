@@ -176,8 +176,23 @@ export interface Review {
   fired_rules: FiredRule[]
 }
 
+export interface PlayerPurchase {
+  transaction_id: string
+  event_time: string
+  amount_minor: string
+  outcome: Outcome
+}
+
+export interface DeviceActivity {
+  purchases: number
+  distinct_cards: number
+  last_seen_at: string
+}
+
 export interface ReviewCase extends Review {
   ruleset_version: number
+  player_purchases: PlayerPurchase[]
+  device_activity: DeviceActivity | null
 }
 
 export interface QueuePage {

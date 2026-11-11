@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase } from './api'
-import { ModelRiskBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
+import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
 import { formatUsdMinor } from './displayFormat'
 import { ApiError } from './request'
 import { usePolling } from './usePolling'
@@ -180,6 +180,44 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
             ))}
           </tbody>
         </table>
+      )}
+      <h4>Recent player purchases</h4>
+      {review.player_purchases.length === 0 ? (
+        <EmptyState>No earlier purchases for this player.</EmptyState>
+      ) : (
+        <table className="review-table review-rules">
+          <thead>
+            <tr>
+              <th scope="col">Transaction</th>
+              <th scope="col">Purchase time</th>
+              <th scope="col">Amount (USD)</th>
+              <th scope="col">Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            {review.player_purchases.map((purchase) => (
+              <tr key={purchase.transaction_id}>
+                <th scope="row">{purchase.transaction_id}</th>
+                <td><Timestamp value={purchase.event_time} display={time} /></td>
+                <td>{formatUsdMinor(purchase.amount_minor)}</td>
+                <td><OutcomeBadge outcome={purchase.outcome} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h4>Recent device activity</h4>
+      {review.device_activity === null ? (
+        <EmptyState>This purchase did not include a device ID.</EmptyState>
+      ) : (
+        <dl className="review-facts">
+          <dt>Purchases on this device</dt>
+          <dd>{review.device_activity.purchases}</dd>
+          <dt>Distinct cards</dt>
+          <dd>{review.device_activity.distinct_cards}</dd>
+          <dt>Last seen</dt>
+          <dd><Timestamp value={review.device_activity.last_seen_at} display={time} /></dd>
+        </dl>
       )}
     </>
   )
