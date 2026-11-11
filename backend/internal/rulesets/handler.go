@@ -8,8 +8,10 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -17,16 +19,20 @@ import (
 
 const maxBodyBytes = 64 << 10
 const maxDeviceSpikeWindowDays = 3650
+const maxNoteRunes = 500
 
-// RegisterRoutes exposes the active ruleset and version publishing.
+// RegisterRoutes exposes the active ruleset, version history, and version publishing.
 func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string) {
+	mux.Handle("GET /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.list)))
 	mux.Handle("GET /rulesets/active", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getActive)))
+	mux.Handle("GET /rulesets/{version}", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getVersion)))
 	mux.Handle("POST /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.publish)))
 }
 
 type configPayload struct {
 	ReviewThreshold int32                             `json:"review_threshold"`
 	BlockThreshold  int32                             `json:"block_threshold"`
+	Note            string                            `json:"note"`
 	Rules           map[scoring.RuleName]*rulePayload `json:"rules"`
 }
 
@@ -39,10 +45,41 @@ type rulePayload struct {
 	AmountMultiplier *int32 `json:"amount_multiplier,omitempty"`
 }
 
+func (s *Store) list(w http.ResponseWriter, r *http.Request) {
+	versions, err := s.List(r.Context())
+	if err != nil {
+		log.Printf("list rulesets: %v", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, struct {
+		Versions []VersionSummary `json:"versions"`
+	}{Versions: versions})
+}
+
 func (s *Store) getActive(w http.ResponseWriter, r *http.Request) {
 	rs, err := s.Active(r.Context())
 	if err != nil {
 		log.Printf("read active ruleset: %v", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeRuleset(w, http.StatusOK, rs)
+}
+
+func (s *Store) getVersion(w http.ResponseWriter, r *http.Request) {
+	version, err := strconv.ParseInt(r.PathValue("version"), 10, 32)
+	if err != nil || version <= 0 {
+		platform.WriteError(w, http.StatusBadRequest, "the ruleset version must be a positive integer")
+		return
+	}
+	rs, err := s.Version(r.Context(), int32(version))
+	if errors.Is(err, ErrNotFound) {
+		platform.WriteError(w, http.StatusNotFound, "no ruleset has this version")
+		return
+	}
+	if err != nil {
+		log.Printf("read ruleset %d: %v", version, err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -109,6 +146,10 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	if p.BlockThreshold <= p.ReviewThreshold || p.BlockThreshold <= 0 {
 		fields["block_threshold"] = "must be positive and greater than review_threshold"
 	}
+	note := strings.TrimSpace(p.Note)
+	if utf8.RuneCountInString(note) > maxNoteRunes {
+		fields["note"] = fmt.Sprintf("must be at most %d characters", maxNoteRunes)
+	}
 	if p.Rules == nil {
 		fields["rules"] = "is required"
 	}
@@ -116,6 +157,7 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	rs := scoring.Ruleset{
 		ReviewThreshold: int(p.ReviewThreshold),
 		BlockThreshold:  int(p.BlockThreshold),
+		Note:            note,
 		Rules:           make(map[scoring.RuleName]scoring.RuleConfig, len(p.Rules)),
 	}
 	var maxScore int64
@@ -198,13 +240,16 @@ func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
 		rules[name] = payload
 	}
 	platform.WriteJSON(w, status, struct {
-		Version int `json:"version"`
+		Version   int       `json:"version"`
+		CreatedAt time.Time `json:"created_at"`
 		configPayload
 	}{
-		Version: rs.Version,
+		Version:   rs.Version,
+		CreatedAt: rs.CreatedAt.UTC(),
 		configPayload: configPayload{
 			ReviewThreshold: int32(rs.ReviewThreshold),
 			BlockThreshold:  int32(rs.BlockThreshold),
+			Note:            rs.Note,
 			Rules:           rules,
 		},
 	})

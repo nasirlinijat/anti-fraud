@@ -2,10 +2,12 @@ package rulesets
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,6 +53,10 @@ func TestActiveDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
+	if got.CreatedAt.IsZero() {
+		t.Error("Active().CreatedAt is zero")
+	}
+	got.CreatedAt = wantZeroTime
 
 	want := scoring.Ruleset{
 		Version:         1,
@@ -68,10 +74,12 @@ func TestActiveDefault(t *testing.T) {
 	}
 }
 
+var wantZeroTime time.Time
+
 func TestActiveAfterSwitch(t *testing.T) {
 	tx := txWith(t, testPool(t),
 		`UPDATE rulesets SET is_active = false WHERE is_active`,
-		`INSERT INTO rulesets (version, review_threshold, block_threshold, is_active) VALUES (99, 40, 70, true)`,
+		`INSERT INTO rulesets (version, review_threshold, block_threshold, note, is_active) VALUES (99, 40, 70, 'Lower thresholds', true)`,
 		`INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit) VALUES (99, 'high_amount', false, 10, 1000)`,
 	)
 
@@ -79,11 +87,13 @@ func TestActiveAfterSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
+	got.CreatedAt = wantZeroTime
 
 	want := scoring.Ruleset{
 		Version:         99,
 		ReviewThreshold: 40,
 		BlockThreshold:  70,
+		Note:            "Lower thresholds",
 		Rules: map[scoring.RuleName]scoring.RuleConfig{
 			scoring.RuleHighAmount: {Enabled: false, Weight: 10, Limit: 1000},
 		},
@@ -99,6 +109,7 @@ func TestRulesetVersionsCannotChange(t *testing.T) {
 		`UPDATE ruleset_rules SET weight = 90 WHERE ruleset_version = 1`,
 		`DELETE FROM ruleset_rules WHERE ruleset_version = 1`,
 		`UPDATE rulesets SET block_threshold = 90 WHERE version = 1`,
+		`UPDATE rulesets SET note = 'changed' WHERE version = 1`,
 		`DELETE FROM rulesets WHERE version = 1`,
 	}
 
@@ -123,5 +134,50 @@ func TestActiveUnknownRule(t *testing.T) {
 	_, err := NewStore(tx).Active(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "high_ammount") {
 		t.Errorf("Active() error = %v, want an error naming high_ammount", err)
+	}
+}
+
+func TestListAndVersionHistory(t *testing.T) {
+	tx := txWith(t, testPool(t),
+		`UPDATE rulesets SET is_active = false WHERE is_active`,
+		`INSERT INTO rulesets (version, review_threshold, block_threshold, note, is_active, created_at)
+		 VALUES (50, 45, 75, 'Tune high amount', false, '2026-11-10T08:00:00Z'),
+		        (51, 40, 70, 'Lower thresholds', true, '2026-11-10T09:00:00Z')`,
+		`INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit)
+		 VALUES (50, 'high_amount', true, 35, 60000),
+		        (51, 'high_amount', true, 25, 40000)`,
+	)
+	store := NewStore(tx)
+	ctx := context.Background()
+
+	list, err := store.List(ctx)
+	if err != nil || len(list) < 3 {
+		t.Fatalf("List() = %+v, %v; want at least 3 versions", list, err)
+	}
+	if list[0].Version != 51 || list[0].Note != "Lower thresholds" ||
+		list[1].Version != 50 || list[1].Note != "Tune high amount" {
+		t.Errorf("newest versions = %+v, want 51 then 50", list[:2])
+	}
+
+	v50, err := store.Version(ctx, 50)
+	if err != nil {
+		t.Fatalf("Version(50): %v", err)
+	}
+	want50 := scoring.Ruleset{
+		Version:         50,
+		ReviewThreshold: 45,
+		BlockThreshold:  75,
+		Note:            "Tune high amount",
+		CreatedAt:       time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC),
+		Rules: map[scoring.RuleName]scoring.RuleConfig{
+			scoring.RuleHighAmount: {Enabled: true, Weight: 35, Limit: 60000},
+		},
+	}
+	if !reflect.DeepEqual(v50, want50) {
+		t.Errorf("Version(50) = %+v, want %+v", v50, want50)
+	}
+
+	if _, err := store.Version(ctx, 999999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Version(999999) error = %v, want ErrNotFound", err)
 	}
 }

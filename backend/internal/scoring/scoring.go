@@ -49,6 +49,8 @@ type Ruleset struct {
 	Version         int
 	ReviewThreshold int
 	BlockThreshold  int
+	Note            string
+	CreatedAt       time.Time
 	Rules           map[RuleName]RuleConfig
 }
 

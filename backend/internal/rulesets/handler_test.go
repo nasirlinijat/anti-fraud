@@ -28,14 +28,25 @@ func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptes
 func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, nil, "test-key")
-	for method, path := range map[string]string{"GET": "/rulesets/active", "POST": "/rulesets"} {
-		if w := rulesetRequest(mux, method, path, "", "wrong"); w.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s status = %d, want 401", method, path, w.Code)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/rulesets"},
+		{"GET", "/rulesets/active"},
+		{"GET", "/rulesets/1"},
+		{"POST", "/rulesets"},
+	} {
+		if w := rulesetRequest(mux, tc.method, tc.path, "", "wrong"); w.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s status = %d, want 401", tc.method, tc.path, w.Code)
+		}
+	}
+	for _, badVersion := range []string{"0", "-1", "abc", "2147483648"} {
+		if w := rulesetRequest(mux, "GET", "/rulesets/"+badVersion, "", "test-key"); w.Code != http.StatusBadRequest {
+			t.Errorf("GET /rulesets/%s status = %d, want 400", badVersion, w.Code)
 		}
 	}
 
 	w := rulesetRequest(mux, "POST", "/rulesets", `{
 		"review_threshold": 50, "block_threshold": 40,
+		"note": "`+strings.Repeat("n", 501)+`",
 		"rules": {"high_amount": {"enabled": true, "weight": -1}, "unknown": {}}
 	}`, "test-key")
 	if w.Code != http.StatusBadRequest {
@@ -45,7 +56,7 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"block_threshold", "rules.high_amount.weight", "rules.high_amount.limit", "rules.unknown"} {
+	for _, field := range []string{"block_threshold", "note", "rules.high_amount.weight", "rules.high_amount.limit", "rules.unknown"} {
 		if got.Fields[field] == "" {
 			t.Errorf("missing error for %q in %v", field, got.Fields)
 		}
@@ -86,6 +97,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	for _, path := range []string{
 		"../../migrations/000002_create_rulesets.up.sql",
 		"../../migrations/000015_add_new_device_spike_settings.up.sql",
+		"../../migrations/000016_add_ruleset_note.up.sql",
 	} {
 		migration, err := os.ReadFile(path)
 		if err != nil {
@@ -102,12 +114,13 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	responses := make(chan *httptest.ResponseRecorder, requests)
 	for i := range requests {
 		go func() {
-			body := fmt.Sprintf(`{"review_threshold":40,"block_threshold":70,"rules":{"high_amount":{"enabled":true,"weight":%d,"limit":1000}}}`, 10+i)
+			body := fmt.Sprintf(`{"review_threshold":40,"block_threshold":70,"note":"  note %d  ","rules":{"high_amount":{"enabled":true,"weight":%d,"limit":1000}}}`, i, 10+i)
 			responses <- rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
 		}()
 	}
 	type versionedConfig struct {
-		Version int `json:"version"`
+		Version   int       `json:"version"`
+		CreatedAt time.Time `json:"created_at"`
 		configPayload
 	}
 	versions := make(map[int]versionedConfig)
@@ -121,6 +134,9 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 			t.Error(err)
 			continue
+		}
+		if got.CreatedAt.IsZero() || strings.TrimSpace(got.Note) != got.Note || got.Note == "" {
+			t.Errorf("unexpected published metadata: %+v", got)
 		}
 		versions[got.Version] = got
 	}
@@ -137,6 +153,30 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	}
 	if active.Version != requests+1 || !reflect.DeepEqual(active.configPayload, versions[requests+1].configPayload) {
 		t.Errorf("active configuration does not match the last published version: %s", w.Body)
+	}
+
+	listRes := rulesetRequest(mux, "GET", "/rulesets", "", "test-key")
+	var history struct {
+		Versions []VersionSummary `json:"versions"`
+	}
+	if listRes.Code != http.StatusOK || json.Unmarshal(listRes.Body.Bytes(), &history) != nil {
+		t.Fatalf("GET /rulesets: %d %s", listRes.Code, listRes.Body)
+	}
+	if len(history.Versions) != requests+1 || history.Versions[0].Version != requests+1 || history.Versions[requests].Version != 1 {
+		t.Errorf("unexpected version history: %+v", history.Versions)
+	}
+
+	v2Res := rulesetRequest(mux, "GET", "/rulesets/2", "", "test-key")
+	var v2 versionedConfig
+	if v2Res.Code != http.StatusOK || json.Unmarshal(v2Res.Body.Bytes(), &v2) != nil {
+		t.Fatalf("GET /rulesets/2: %d %s", v2Res.Code, v2Res.Body)
+	}
+	if !reflect.DeepEqual(v2.configPayload, versions[2].configPayload) {
+		t.Errorf("GET /rulesets/2 = %+v, want %+v", v2.configPayload, versions[2].configPayload)
+	}
+
+	if missing := rulesetRequest(mux, "GET", "/rulesets/999", "", "test-key"); missing.Code != http.StatusNotFound {
+		t.Errorf("GET /rulesets/999 status = %d, want 404", missing.Code)
 	}
 
 	var oldWeight int

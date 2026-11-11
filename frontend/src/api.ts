@@ -81,11 +81,20 @@ export interface RuleSettings {
 export interface RulesetConfig {
   review_threshold: number
   block_threshold: number
+  note?: string
   rules: Record<string, RuleSettings>
 }
 
 export interface Ruleset extends RulesetConfig {
   version: number
+  note: string
+  created_at: string
+}
+
+export interface RulesetSummary {
+  version: number
+  note: string
+  created_at: string
 }
 
 // The API sends 64-bit thresholds as JSON integers. Keep their exact value in the editor.
@@ -105,6 +114,15 @@ async function readRuleset(res: Response): Promise<Ruleset> {
 
 export function getActiveRuleset(signal?: AbortSignal): Promise<Ruleset> {
   return request('/rulesets/active', { read: readRuleset, signal })
+}
+
+export function getRuleset(version: number, signal?: AbortSignal): Promise<Ruleset> {
+  return request(`/rulesets/${version}`, { read: readRuleset, signal })
+}
+
+export async function listRulesets(signal?: AbortSignal): Promise<RulesetSummary[]> {
+  const result = await request<{ versions: RulesetSummary[] }>('/rulesets', { signal })
+  return result.versions
 }
 
 export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {

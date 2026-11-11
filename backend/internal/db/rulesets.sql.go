@@ -21,7 +21,7 @@ func (q *Queries) DeactivateRuleset(ctx context.Context) error {
 }
 
 const getActiveRuleset = `-- name: GetActiveRuleset :one
-SELECT version, review_threshold, block_threshold
+SELECT version, review_threshold, block_threshold, note, created_at
 FROM rulesets
 WHERE is_active
 `
@@ -30,32 +30,73 @@ type GetActiveRulesetRow struct {
 	Version         int32
 	ReviewThreshold int32
 	BlockThreshold  int32
+	Note            string
+	CreatedAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetActiveRuleset(ctx context.Context) (GetActiveRulesetRow, error) {
 	row := q.db.QueryRow(ctx, getActiveRuleset)
 	var i GetActiveRulesetRow
-	err := row.Scan(&i.Version, &i.ReviewThreshold, &i.BlockThreshold)
+	err := row.Scan(
+		&i.Version,
+		&i.ReviewThreshold,
+		&i.BlockThreshold,
+		&i.Note,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRuleset = `-- name: GetRuleset :one
+SELECT version, review_threshold, block_threshold, note, created_at
+FROM rulesets
+WHERE version = $1
+`
+
+type GetRulesetRow struct {
+	Version         int32
+	ReviewThreshold int32
+	BlockThreshold  int32
+	Note            string
+	CreatedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) GetRuleset(ctx context.Context, version int32) (GetRulesetRow, error) {
+	row := q.db.QueryRow(ctx, getRuleset, version)
+	var i GetRulesetRow
+	err := row.Scan(
+		&i.Version,
+		&i.ReviewThreshold,
+		&i.BlockThreshold,
+		&i.Note,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const insertRuleset = `-- name: InsertRuleset :one
-INSERT INTO rulesets (version, review_threshold, block_threshold, is_active)
-SELECT COALESCE(MAX(version), 0) + 1, $1, $2, true
+INSERT INTO rulesets (version, review_threshold, block_threshold, note, is_active)
+SELECT COALESCE(MAX(version), 0) + 1, $1, $2, $3, true
 FROM rulesets
-RETURNING version
+RETURNING version, created_at
 `
 
 type InsertRulesetParams struct {
 	ReviewThreshold int32
 	BlockThreshold  int32
+	Note            string
 }
 
-func (q *Queries) InsertRuleset(ctx context.Context, arg InsertRulesetParams) (int32, error) {
-	row := q.db.QueryRow(ctx, insertRuleset, arg.ReviewThreshold, arg.BlockThreshold)
-	var version int32
-	err := row.Scan(&version)
-	return version, err
+type InsertRulesetRow struct {
+	Version   int32
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertRuleset(ctx context.Context, arg InsertRulesetParams) (InsertRulesetRow, error) {
+	row := q.db.QueryRow(ctx, insertRuleset, arg.ReviewThreshold, arg.BlockThreshold, arg.Note)
+	var i InsertRulesetRow
+	err := row.Scan(&i.Version, &i.CreatedAt)
+	return i, err
 }
 
 const insertRulesetRule = `-- name: InsertRulesetRule :exec
@@ -124,6 +165,38 @@ func (q *Queries) ListRulesetRules(ctx context.Context, rulesetVersion int32) ([
 			&i.MinAmountMinor,
 			&i.AmountMultiplier,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRulesets = `-- name: ListRulesets :many
+SELECT version, note, created_at
+FROM rulesets
+ORDER BY version DESC
+`
+
+type ListRulesetsRow struct {
+	Version   int32
+	Note      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListRulesets(ctx context.Context) ([]ListRulesetsRow, error) {
+	rows, err := q.db.Query(ctx, listRulesets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRulesetsRow
+	for rows.Next() {
+		var i ListRulesetsRow
+		if err := rows.Scan(&i.Version, &i.Note, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
