@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
@@ -126,41 +127,99 @@ func (s *trustedHistoryStore) TrustedHistory(ctx context.Context, p Purchase, wi
 	return s.Store.TrustedHistory(ctx, p, windowDays)
 }
 
-func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
+// spikeServer serves the ruleset, review and score routes from one
+// transaction, and counts the trusted history lookups.
+type spikeServer struct {
+	tx        pgx.Tx
+	mux       *http.ServeMux
+	rules     *rulesets.Store
+	purchases *trustedHistoryStore
+}
+
+func newSpikeServer(t *testing.T) spikeServer {
+	t.Helper()
 	tx := testTx(t)
-	ctx := t.Context()
-	ruleStore := rulesets.NewStore(tx)
-	purchaseStore := &trustedHistoryStore{Store: NewStore(tx)}
+	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: rulesets.NewStore(tx), purchases: &trustedHistoryStore{Store: NewStore(tx)}}
 	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"test","key":"review-test-key"}]`, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	rulesets.RegisterRoutes(mux, ruleStore, testKey, testOperators(t))
-	reviews.RegisterRoutes(mux, reviews.NewStore(tx), keys, false)
-	RegisterRoutes(mux, NewHandler(ruleStore, blocklist.NewStore(tx), purchaseStore), testKey)
-	request := func(method, path, body, key string) *httptest.ResponseRecorder {
-		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
-		req.Header.Set(platform.APIKeyHeader, key)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		return rec
-	}
+	rulesets.RegisterRoutes(srv.mux, srv.rules, testKey, testOperators(t))
+	reviews.RegisterRoutes(srv.mux, reviews.NewStore(tx), keys, false)
+	RegisterRoutes(srv.mux, NewHandler(srv.rules, blocklist.NewStore(tx), srv.purchases), testKey)
+	return srv
+}
 
-	originalRuleset, err := ruleStore.Active(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+func (srv spikeServer) request(ctx context.Context, method, path, body, key string) *httptest.ResponseRecorder {
+	req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+	req.Header.Set(platform.APIKeyHeader, key)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+// saveTrustedPurchases saves two allowed purchases and one under review on
+// the device "trusted", an hour before at. It returns the ID of the purchase
+// under review.
+func (srv spikeServer) saveTrustedPurchases(t *testing.T, rulesetVersion int, at time.Time) int64 {
+	t.Helper()
 	var reviewID int64
 	for i, outcome := range []scoring.Outcome{scoring.OutcomeAllow, scoring.OutcomeAllow, scoring.OutcomeReview} {
 		p := minimalPurchase(fmt.Sprintf("spike-trusted-%d", i))
 		p.EventTime, p.DeviceID, p.AmountMinor = at.Add(-time.Hour), ptr("trusted"), 400
-		reviewID, err = purchaseStore.Save(ctx, p, Decision{RulesetVersion: originalRuleset.Version, Result: scoring.Result{Outcome: outcome}})
+		var err error
+		reviewID, err = srv.purchases.Save(t.Context(), p, Decision{RulesetVersion: rulesetVersion, Result: scoring.Result{Outcome: outcome}})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+	return reviewID
+}
+
+// publishSpikeRuleset publishes a ruleset with only the new device spike rule
+// and checks that it became the active one and left the previous version's
+// rules as they were. It returns the new version.
+func (srv spikeServer) publishSpikeRuleset(t *testing.T, previous scoring.Ruleset) int {
+	t.Helper()
+	ctx := t.Context()
+	published := srv.request(ctx, http.MethodPost, "/rulesets", `{
+		"review_threshold":20,"block_threshold":40,"rules":{"new_device_spike":{
+			"enabled":true,"weight":50,"limit":3,"window_days":30,"min_amount_minor":1500,"amount_multiplier":4}}
+	}`, operatorTestKey)
+	if published.Code != http.StatusCreated {
+		t.Fatalf("publish: %d %s", published.Code, published.Body)
+	}
+	active := srv.request(ctx, http.MethodGet, "/rulesets/active", "", testKey)
+	var loaded struct {
+		Version int
+		Rules   map[string]map[string]json.RawMessage
+	}
+	if active.Code != http.StatusOK || active.Body.String() != published.Body.String() ||
+		json.Unmarshal(active.Body.Bytes(), &loaded) != nil || loaded.Version <= previous.Version {
+		t.Fatalf("active ruleset did not round-trip: %d %s", active.Code, active.Body)
+	}
+	for field, value := range map[string]string{"enabled": "true", "weight": "50", "limit": "3", "window_days": "30", "min_amount_minor": "1500", "amount_multiplier": "4"} {
+		if got := string(loaded.Rules["new_device_spike"][field]); got != value {
+			t.Errorf("active %s = %s, want %s", field, got, value)
+		}
+	}
+	if n := countRows(t, srv.tx, `SELECT count(*) FROM ruleset_rules WHERE ruleset_version = $1
+		AND window_days IS NULL AND min_amount_minor IS NULL AND amount_multiplier IS NULL`, previous.Version); n != len(previous.Rules) {
+		t.Errorf("prior ruleset rules without spike settings = %d, want %d", n, len(previous.Rules))
+	}
+	return loaded.Version
+}
+
+func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
+	srv := newSpikeServer(t)
+	ctx := t.Context()
+	mux, purchaseStore := srv.mux, srv.purchases
+	originalRuleset, err := srv.rules.Active(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	reviewID := srv.saveTrustedPurchases(t, originalRuleset.Version, at)
 
 	body := func(id, device string, amount int64, when time.Time) string {
 		return fmt.Sprintf(`{"transaction_id":%q,"card_token":"spike-card","device_id":%q,
@@ -173,33 +232,9 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 		t.Fatalf("score before activation: %d %s, history calls = %d", first.Code, first.Body, purchaseStore.calls)
 	}
 
-	published := request(http.MethodPost, "/rulesets", `{
-		"review_threshold":20,"block_threshold":40,"rules":{"new_device_spike":{
-			"enabled":true,"weight":50,"limit":3,"window_days":30,"min_amount_minor":1500,"amount_multiplier":4}}
-	}`, operatorTestKey)
-	if published.Code != http.StatusCreated {
-		t.Fatalf("publish: %d %s", published.Code, published.Body)
-	}
-	active := request(http.MethodGet, "/rulesets/active", "", testKey)
-	var loaded struct {
-		Version int
-		Rules   map[string]map[string]json.RawMessage
-	}
-	if active.Code != http.StatusOK || active.Body.String() != published.Body.String() ||
-		json.Unmarshal(active.Body.Bytes(), &loaded) != nil || loaded.Version <= originalRuleset.Version {
-		t.Fatalf("active ruleset did not round-trip: %d %s", active.Code, active.Body)
-	}
-	for field, value := range map[string]string{"enabled": "true", "weight": "50", "limit": "3", "window_days": "30", "min_amount_minor": "1500", "amount_multiplier": "4"} {
-		if got := string(loaded.Rules["new_device_spike"][field]); got != value {
-			t.Errorf("active %s = %s, want %s", field, got, value)
-		}
-	}
-	if n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules WHERE ruleset_version = $1
-		AND window_days IS NULL AND min_amount_minor IS NULL AND amount_multiplier IS NULL`, originalRuleset.Version); n != len(originalRuleset.Rules) {
-		t.Errorf("prior ruleset rules without spike settings = %d, want %d", n, len(originalRuleset.Rules))
-	}
+	spikeVersion := srv.publishSpikeRuleset(t, originalRuleset)
 
-	approved := request(http.MethodPost, fmt.Sprintf("/reviews/%d/decision", reviewID), `{"decision":"approve"}`, "review-test-key")
+	approved := srv.request(ctx, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", reviewID), `{"decision":"approve"}`, "review-test-key")
 	if approved.Code != http.StatusCreated {
 		t.Fatalf("approve prior review: %d %s", approved.Code, approved.Body)
 	}
@@ -207,7 +242,7 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 		id := fmt.Sprintf("spike-attempt-%d", i)
 		rec := postScore(ctx, mux, testKey, body(id, "attacker", amount, at.Add(time.Duration(i)*time.Minute)))
 		got := decodeJSON[scoreResponse](t, rec)
-		if rec.Code != http.StatusOK || got.Outcome != scoring.OutcomeBlock || got.RulesetVersion != loaded.Version ||
+		if rec.Code != http.StatusOK || got.Outcome != scoring.OutcomeBlock || got.RulesetVersion != spikeVersion ||
 			got.Score != 50 || len(got.FiredRules) != 1 || got.FiredRules[0].Name != scoring.RuleNewDeviceSpike ||
 			got.FiredRules[0].Points != 50 || !strings.Contains(got.FiredRules[0].Message, "4 times the average of 3 trusted purchases in 30 days") {
 			t.Fatalf("attempt %d: %d %s, want block with new device spike evidence", i+1, rec.Code, rec.Body)

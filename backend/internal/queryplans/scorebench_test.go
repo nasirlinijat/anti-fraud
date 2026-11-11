@@ -76,8 +76,19 @@ func (c scorebenchClient) json(ctx context.Context, method, path string, payload
 	return elapsed, json.Unmarshal(data, response)
 }
 
-// TestScoreBenchmark is run by scripts/scorebench.sh against its disposable stack.
-func TestScoreBenchmark(t *testing.T) {
+// scorebenchStack is the disposable database and API that scripts/scorebench.sh
+// starts, with the operator key for publishing a ruleset.
+type scorebenchStack struct {
+	conn        *pgx.Conn
+	client      scorebenchClient
+	operatorKey string
+}
+
+// connectScorebench connects to the benchmark stack. It skips the test when
+// the script did not start it, and refuses any database or API other than the
+// dedicated loopback ones.
+func connectScorebench(t *testing.T) scorebenchStack {
+	t.Helper()
 	dsn := os.Getenv("SCOREBENCH_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("run scripts/scorebench.sh to benchmark scoring")
@@ -107,9 +118,20 @@ func TestScoreBenchmark(t *testing.T) {
 		Transport: transport, Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
+	operatorKey := os.Getenv("SCOREBENCH_OPERATOR_KEY")
+	if operatorKey == "" || operatorKey == key {
+		t.Fatal("a distinct SCOREBENCH_OPERATOR_KEY is required")
+	}
+	return scorebenchStack{conn: conn, client: client, operatorKey: operatorKey}
+}
 
+// checkScorebenchFixture checks that the seeded history is complete. It
+// returns the number of purchases and the PostgreSQL version for the log.
+func checkScorebenchFixture(t *testing.T, conn *pgx.Conn) (int, string) {
+	t.Helper()
+	ctx := t.Context()
 	var purchases, decisions, runningPurchases, players int
-	err = conn.QueryRow(ctx, `SELECT (SELECT count(*) FROM purchases), (SELECT count(*) FROM decisions),
+	err := conn.QueryRow(ctx, `SELECT (SELECT count(*) FROM purchases), (SELECT count(*) FROM decisions),
 		purchases, players FROM feature_counts WHERE kind = 'all' AND key = ''`).
 		Scan(&purchases, &decisions, &runningPurchases, &players)
 	if err != nil || purchases != scorebenchRows || decisions != scorebenchRows || runningPurchases != scorebenchRows || players != 10_000 {
@@ -120,11 +142,16 @@ func TestScoreBenchmark(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SHOW server_version").Scan(&pgVersion); err != nil {
 		t.Fatal(err)
 	}
+	return purchases, pgVersion
+}
 
-	operatorKey := os.Getenv("SCOREBENCH_OPERATOR_KEY")
-	if operatorKey == "" || operatorKey == key {
-		t.Fatal("a distinct SCOREBENCH_OPERATOR_KEY is required")
-	}
+// TestScoreBenchmark is run by scripts/scorebench.sh against its disposable stack.
+func TestScoreBenchmark(t *testing.T) {
+	stack := connectScorebench(t)
+	ctx := t.Context()
+	conn, client, operatorKey := stack.conn, stack.client, stack.operatorKey
+	purchases, pgVersion := checkScorebenchFixture(t, conn)
+
 	version := publishScorebenchRuleset(t, client, operatorKey)
 	profiles := readScorebenchProfiles(t, conn)
 	rng := rand.New(rand.NewPCG(42, 42))
@@ -151,7 +178,7 @@ func TestScoreBenchmark(t *testing.T) {
 	logScorebenchStatements(t, conn)
 
 	var saved int
-	err = conn.QueryRow(ctx, `SELECT count(*) FROM purchases p JOIN decisions d ON d.purchase_id = p.id
+	err := conn.QueryRow(ctx, `SELECT count(*) FROM purchases p JOIN decisions d ON d.purchase_id = p.id
 		WHERE p.transaction_id LIKE 'bench-timed-%' AND d.ruleset_version = $1 AND d.model_version = $2`,
 		version, scorebenchModel).Scan(&saved)
 	if err != nil || saved != len(timed) {
@@ -363,6 +390,10 @@ func explainScorebenchReads(t *testing.T, conn *pgx.Conn, profiles [3][]scoreben
 	at := scorebenchEnd.Add(2 * time.Second)
 	p := profiles[2][0]
 	const txn = "bench-plan"
+	region := features.NoRegion
+	if p.BillingRegion != nil {
+		region = *p.BillingRegion
+	}
 	for _, q := range []struct {
 		name, sql, index string
 		args             []any
@@ -371,8 +402,10 @@ func explainScorebenchReads(t *testing.T, conn *pgx.Conn, profiles [3][]scoreben
 		{"IssuerHistory missing", features.IssuerHistorySQL, "purchases_issuer_event_time", []any{"", at, txn}},
 		{"IssuerHistory common", features.IssuerHistorySQL, "purchases_issuer_event_time", []any{"bench-common-issuer", at, txn}},
 		{"PlayerHistory", features.PlayerHistorySQL, "purchases_player_event_time", []any{
-			at, int64(10_000), *p.EmailDomain, p.DeviceName, p.ClientOS, p.ClientBrowser, p.ScreenResolution, p.PlayerID, txn}},
-		{"CardHistory", features.CardHistorySQL, "purchases_card_event_time", []any{at, p.CardToken, txn}},
+			at, int64(10_000), *p.EmailDomain, p.DeviceName, p.ClientOS, p.ClientBrowser, p.ScreenResolution, p.PlayerID, txn,
+			p.DeviceID}},
+		{"CardHistory", features.CardHistorySQL, "purchases_card_event_time", []any{at, p.CardToken, txn, region}},
+		{"DeviceIDHistory", features.DeviceIDHistorySQL, "purchases_device_event_time", []any{"bench-shared-0", at, txn}},
 		{"PlayerEarlierModelScores", score.PlayerEarlierModelScoresSQL, "purchases_player_event_time", []any{p.PlayerID, at, txn}},
 		{"CardPurchasesLastHour", score.CountCardPurchasesLastHourSQL, "purchases_card_event_time", []any{p.CardToken, at}},
 		{"DeviceDistinctCardsLastHour", score.CountDeviceCardsLastHourSQL, "purchases_device_event_time", []any{"bench-shared-0", at, p.CardToken}},

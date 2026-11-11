@@ -5,7 +5,7 @@ services:
   backend:
     restart: unless-stopped
     environment:
-      MODEL_PATH: /models/${MODEL_FILE:-lgbm-ieee-v5-combined.json}
+      MODEL_PATH: /models/${MODEL_FILE:-lgbm-game-v5.json}
 
   frontend:
     restart: unless-stopped

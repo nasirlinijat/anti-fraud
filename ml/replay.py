@@ -78,6 +78,8 @@ def requests_from(df):
             "recipient_email_domain": code(row.R_emaildomain),
             "device_type": code(row.DeviceType),
             "device_name": code(row.DeviceInfo),
+            "device_id": code(row.device_id),
+            "ip_country": code(row.ip_country),
             "client_os": code(row.id_30),
             "client_browser": code(row.id_31),
             "screen_resolution": code(row.id_33),
@@ -236,7 +238,7 @@ def write_labels(rows, path):
     labels.to_csv(path, index=False)
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
     parser.add_argument("--requests", help="replay a simulator dump (JSON Lines) instead of IEEE-CIS")
@@ -247,6 +249,55 @@ def main():
     parser.add_argument("--limit", type=int, help="replay only the first N purchases, for a quick check")
     parser.add_argument("--model", default="../backend/models/lgbm-ieee-v5-combined.json")
     parser.add_argument("--out", default="output/replay")
+    return parser
+
+
+def load_purchases(args):
+    """Reads the purchases to replay, in the columns features.build() reads."""
+    if args.requests:
+        data = features.load_requests(args.requests)
+    else:
+        data = features.load(args.csv)
+        data = data[data["day"] >= args.from_day].reset_index(drop=True)
+    if args.limit:
+        data = data.head(args.limit)
+    return data
+
+
+def load_model(path):
+    """Reads an exported model and the policy from the report saved next to it."""
+    dump = json.loads(Path(path).read_text())
+    policy = json.loads(Path(path).with_suffix(".report.json").read_text())["policy"]
+    blend = policy.get("player_blend_weight", 0)
+    return dump, {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"], "player_blend_weight": blend}
+
+
+def python_scores(model_path, dump, built, blend):
+    """Scores every purchase with the exported model, without the service."""
+    if "combination" not in dump:
+        return export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
+    # A combination of models: the highest percentile, as the service computes it.
+    parts = [
+        (json.loads((Path(model_path).parent / part["file"]).read_text()), np.array(part["percentiles"]))
+        for part in dump["models"]
+    ]
+    # The service blends the main model's score with the player's earlier
+    # main-model scores saved in this replay.
+    return export.combined_score(parts, built[dump["feature_names"]].to_numpy(), built["player_id"].to_numpy(), blend)
+
+
+def labelled_rows(data, built, python_score):
+    return pd.DataFrame({
+        "transaction_id": data["TransactionID"].to_numpy(),
+        "day": data["day"].to_numpy(),
+        "is_fraud": data["isFraud"].to_numpy(),
+        "first_fraud_only": train.first_fraud_only(built).to_numpy(),
+        "python_score": python_score,
+    })
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -256,46 +307,19 @@ def main():
     if args.requests:
         # A dump is replayed from its first purchase, and all of it is measured.
         args.from_day = 0
-        data = features.load_requests(args.requests)
-    else:
-        data = features.load(args.csv)
-        data = data[data["day"] >= args.from_day].reset_index(drop=True)
-    if args.limit:
-        data = data.head(args.limit)
+    data = load_purchases(args)
     print(f"replaying {len(data)} purchases from day {args.from_day} to {args.url}")
 
-    dump = json.loads(Path(args.model).read_text())
-    policy = json.loads(Path(args.model).with_suffix(".report.json").read_text())["policy"]
-    blend = policy.get("player_blend_weight", 0)
-    policy = {"flag_at": policy["flag_at"], "clear_below": policy["clear_below"], "player_blend_weight": blend}
-
+    dump, policy = load_model(args.model)
     built = features.build(data.copy())
-    if "combination" in dump:
-        # A combination of models: the highest percentile, as the service computes it.
-        parts = [
-            (json.loads((Path(args.model).parent / part["file"]).read_text()), np.array(part["percentiles"]))
-            for part in dump["models"]
-        ]
-        # The service blends the main model's score with the player's earlier
-        # main-model scores saved in this replay.
-        python_score = export.combined_score(
-            parts, built[dump["feature_names"]].to_numpy(), built["player_id"].to_numpy(), blend
-        )
-    else:
-        python_score = export.predict_fast(dump, built[dump["feature_names"]].to_numpy())
+    python_score = python_scores(args.model, dump, built, policy["player_blend_weight"])
 
     started = time.time()
     requests = dumped_requests(args.requests, data["TransactionID"]) if args.requests else requests_from(data)
     live = send(requests, Client(args.url, args.api_key))
     print(f"sent {len(live)} purchases in {(time.time() - started) / 60:.1f} min")
 
-    rows = pd.DataFrame({
-        "transaction_id": data["TransactionID"].to_numpy(),
-        "day": data["day"].to_numpy(),
-        "is_fraud": data["isFraud"].to_numpy(),
-        "first_fraud_only": train.first_fraud_only(built).to_numpy(),
-        "python_score": python_score,
-    })
+    rows = labelled_rows(data, built, python_score)
     if args.requests:
         rows["pattern"] = data["pattern"].to_numpy()
     rows = pd.concat([rows, live], axis=1)

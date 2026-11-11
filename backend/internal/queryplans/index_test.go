@@ -37,14 +37,16 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 	until := pgtype.Timestamptz{Time: at.Time.Add(time.Hour), Valid: true}
 	width := pgtype.Interval{Microseconds: (5 * time.Minute).Microseconds(), Valid: true}
 	device := pgtype.Text{String: "Windows", Valid: true}
+	deviceID := pgtype.Text{String: "device-1", Valid: true}
 	client := pgtype.Text{String: "Windows 10", Valid: true}
 	queries := []struct {
 		name  string
 		query string
 		args  []any
 	}{
-		{"PlayerHistory", features.PlayerHistorySQL, []any{at, int64(1000), "gmail.com", device, client, client, client, "player-1", "txn-1"}},
-		{"CardHistory", features.CardHistorySQL, []any{at, "card-1", "txn-1"}},
+		{"PlayerHistory", features.PlayerHistorySQL, []any{at, int64(1000), "gmail.com", device, client, client, client, "player-1", "txn-1", deviceID}},
+		{"CardHistory", features.CardHistorySQL, []any{at, "card-1", "txn-1", "100"}},
+		{"DeviceIDHistory", features.DeviceIDHistorySQL, []any{"device-1", at, "txn-1"}},
 		{"IssuerHistory", features.IssuerHistorySQL, []any{"1001", at, "txn-1"}},
 		{"FeatureCounts", features.FeatureCountsSQL, []any{"gmail.com", device, client, client, client}},
 		{"DecisionOverview", stats.DecisionOverviewSQL, []any{at, until}},

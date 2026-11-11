@@ -1,8 +1,8 @@
 # ML
 
-Trains the fraud model on the IEEE-CIS dataset. Python is used only offline; the Go service loads the exported model.
+Trains the fraud models. Python is used only offline; the Go service loads the exported model.
 
-The service loads **`lgbm-ieee-v5-combined`** by default. [Current results](#current-results) describes how it performs; [History of changes](#history-of-changes) keeps the results of earlier versions. A second model, **`lgbm-game-v2`**, is trained on the simulator's game traffic, see [Game model](#game-model-simulated-traffic).
+There are two models. **`lgbm-ieee-v5-combined`** is trained on the IEEE-CIS dataset and is the real-data benchmark: [Current results](#current-results) describes how it performs, and [History of changes](#history-of-changes) keeps the results of earlier versions. **`lgbm-game-v5`** is trained on the simulator's game traffic, see [Game model](#game-model-simulated-traffic). The service loads `lgbm-game-v5` by default, because the demo traffic comes from the simulator.
 
 ## Setup
 
@@ -41,7 +41,7 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 | `backend/models/lgbm-ieee-v5.golden.csv` | 2,000 synthetic feature rows (random values within realistic ranges, not dataset rows) with the expected model score, for the Go tests |
 | `backend/models/lgbm-ieee-v5.report.json` | Metrics of the baseline and the main model, thresholds and export checks |
 | `backend/models/lgbm-ieee-v5-first.*` | The first-fraud model, trained on each customer's first fraud only |
-| `backend/models/lgbm-ieee-v5-combined.*` | Both models with their percentile tables, the policy, golden rows and the results described below; the service loads this file |
+| `backend/models/lgbm-ieee-v5-combined.*` | Both models with their percentile tables, the policy, golden rows and the results described below; the file the service loads for the IEEE-CIS model |
 | `ml/output/training_report.json` | Same report as the main model's, kept locally |
 
 | Option | Default | Meaning |
@@ -57,7 +57,7 @@ It builds the features, trains a logistic regression baseline and LightGBM, choo
 
 All thresholds are chosen on the validation month only. The export fails if the model uses a split type the Go reader does not support, or if a plain tree reader does not reproduce LightGBM's scores on the test rows.
 
-## How the default model scores a purchase
+## How the IEEE-CIS model scores a purchase
 
 1. **Main model** (`lgbm-ieee-v5`): the average of 5 LightGBM models trained with different seeds, over the 50 features in [FEATURES.md](FEATURES.md).
 2. **Player blend**: the main score is blended with the average of the same player's earlier main-model scores, `0.5 * score + 0.5 * earlier average`. A player's first purchase keeps its own score. The service reads the earlier scores from `decisions.model_score_unblended`, so a blended score never feeds the next blend.
@@ -123,7 +123,9 @@ Most model variants in [History of changes](#history-of-changes) were compared o
 
 ## Game model (simulated traffic)
 
-IEEE-CIS is card data from 2017 with no game signals. On the simulator's game traffic the IEEE-CIS model flags 0.09% of purchases and catches 1% of the fraud, so it adds almost nothing to what the demo shows. `lgbm-game-v2` is trained on the simulator's own traffic with the same 50 features and the same LightGBM settings. **Every number in this section is for simulated traffic. It says how well the model learns the simulator's scenarios, not how it would do on real fraud;** the real-data result is the IEEE-CIS model above.
+IEEE-CIS is card data from 2017 with no game signals. On the simulator's game traffic the IEEE-CIS model flags 0.06% of purchases and catches 0.2% of the fraud, so it adds almost nothing to what the demo shows. `lgbm-game-v5` is trained on the simulator's own traffic with the 54 features in [FEATURES.md](FEATURES.md) and the same LightGBM settings. **Every number in this section is for simulated traffic. It says how well the model learns the simulator's scenarios, not how it would do on real fraud;** the real-data result is the IEEE-CIS model above.
+
+The traffic has normal purchases, 10 legitimate edge cases and 7 fraud scenarios, listed in the simulator section of the main `README.md`. Each player's client also leaves out each of seven groups of optional request fields with a probability of 25% (`-missing`), on every purchase of that player and whatever the scenario. The model therefore also learns from requests without an IP country, a device ID or an account creation time.
 
 Generate labelled traffic (from `backend`). `-dump` writes the purchases with their scenario and fraud label to a file and calls no API:
 
@@ -138,43 +140,71 @@ Train (from `ml`):
 .venv/bin/python train_game.py data/game/world1.jsonl --second-world data/game/world2.jsonl
 ```
 
-It writes `backend/models/lgbm-game-v2.json`, its golden rows and its report. The first world covers 125 days: training uses days 0-84, validation days 90-104 (early stopping and thresholds) and test days 105-124. The second world has other players and another seed and is only scored, its first 14 days separately. To run the service with this model, set `MODEL_PATH=models/lgbm-game-v2.json`. Which model the service loads by default is a team decision; this change does not switch it.
+It writes `backend/models/lgbm-game-v5.json`, its golden rows and its report. The first world covers 125 days: training uses days 0-84, validation days 90-104 (early stopping and thresholds) and test days 105-124. The second world has other players, cards and devices and another seed. It is only scored, its first 14 days separately. To run the service with another model, set `MODEL_PATH`, for example `MODEL_PATH=models/lgbm-ieee-v5-combined.json`.
 
 Training saves every finished model in `output/checkpoints/<version>/`. If a run is interrupted, start the same command again: finished models are loaded and only the missing ones are trained. A checkpoint is used only for the same seed, settings and data. `train.py` and `check_game.py` do the same.
 
 ### Results
 
-Thresholds are chosen on validation (`flag_at` 0.473306 at a 0.5% review rate, `clear_below` 0.184585).
+Thresholds are chosen on validation (`flag_at` 0.538138 at a 0.5% review rate, `clear_below` 0.168688).
 
 | Simulated traffic | Purchases | Flagged | Precision | Fraud caught |
 |---|---|---|---|---|
-| Second world, first 14 days (empty database) | 68,038 | 9.1% | 97.3% | 91.5% |
-| Second world, later days | 81,962 | 9.2% | 97.9% | 91.9% |
-| First world, test days | 93,922 | 9.9% | 94.7% | 95.7% |
-| First world, test days, `lgbm-ieee-v5-combined` with its own thresholds | 93,922 | 0.09% | 100% | 1.0% |
+| Second world, first 14 days (empty database) | 67,613 | 7.5% | 97.9% | 78.2% |
+| Second world, later days | 82,387 | 7.6% | 97.0% | 80.3% |
+| First world, test days | 95,487 | 7.8% | 94.1% | 83.2% |
+| First world, test days, `lgbm-ieee-v5-combined` with its own thresholds | 95,487 | 0.06% | 31% | 0.2% |
 
 Share of each scenario flagged in the second world's later days:
 
 | Fraud scenario | Flagged | Legitimate scenario | Flagged |
 |---|---|---|---|
-| Card testing | 100% | Normal | 0.0% |
-| New account spend | 100% | Burst buyer | 0.0% |
-| Stolen card | 100% | Internet cafe | 0.0% |
-| Account takeover | 94% | Traveler | 0.0% |
-| Low and slow | 9% | New phone | 2.1% |
-| | | Returning player | 5.0% |
-| | | New casual player | 17% |
+| Card testing | 99% | Normal | 0.0% |
+| Account takeover | 98% | Expat | 0.0% |
+| Stolen card | 82% | Internet cafe | 0.0% |
+| Slow card testing | 75% | Returning player | 0.0% |
+| Quiet takeover | 69% | Traveler | 0.2% |
+| New account spend | 17% | Burst buyer | 0.3% |
+| Low and slow | 0.2% | Family card | 3.0% |
+| | | Session shopper | 4.8% |
+| | | New casual player | 5.1% |
+| | | New phone | 6.0% |
+| | | New big spender | 13% |
 
-Low and slow is one ordinary purchase from an old account. It is built to look like a returning player, so missing it is the expected, honest limit.
+Three scenarios are missed by design, and missing them is the honest limit:
 
-Replay through the service (2026-11-11, first 10,000 purchases of the second world on an empty database, see the next section): the live score equals the Python score for every purchase (largest difference 2.2e-16) with the same flag decisions, and latency p50 / p95 / p99 of 8.1 / 13.1 / 19.2 ms.
+- Low and slow is one ordinary purchase from an old account, built to look like a returning player.
+- New account spend has the account age and the amounts of the legitimate new big spender, so the model flags little of either. The rules send both to review when the account is new and the amount is high.
+- The first purchase of a slow card testing series is an ordinary small purchase. Only the later purchases, on other cards, can be told from a session shopper.
+
+Replay through the service (2026-11-11, first 10,000 purchases of the second world on an empty database, see the next section): the live score equals the Python score for every purchase (largest difference 1.1e-16) with the same flag decisions, and latency p50 / p95 / p99 of 3.7 / 5.6 / 6.5 ms.
 
 | First 10,000 purchases on an empty database | Fraud sent to review or blocked | Precision |
 |---|---|---|
-| Rules only | 43% | 99.8% |
-| Rules and `lgbm-game-v2` | 91% | 92% |
+| Rules only | 21% | 88.8% |
+| Rules and `lgbm-game-v5` | 77% | 95.2% |
 
-The model adds stolen card (0% to 89%) and the card testing purchases the velocity rule lets through (39% to 100%).
+The model adds slow card testing (0% to 74%), stolen card (0% to 68%), quiet takeover (0% to 43%), the card testing purchases the rules let through (34% to 96%) and the account takeovers they miss (50% to 90%). The rules alone stop less than on traffic with every field, because a rule that needs a missing field does not fire. The model cleared none of the 141 fraud purchases the rules sent to review, and 1 of the 24 legitimate ones.
+
+### Missing request fields
+
+Only `transaction_id`, `event_time`, `amount_minor`, `player_id` and `card_token` are required by the score API. The table shows the second world's later days when a caller never sends a group of optional fields. It is measured on the second world generated with `-missing 0`, with the fields removed from every request.
+
+| Request has | Precision | Fraud caught |
+|---|---|---|
+| Every field | 98.7% | 80.7% |
+| No IP country | 98.4% | 75.0% |
+| No device ID | 98.8% | 77.1% |
+| No device name and type | 98.7% | 81.2% |
+| No account creation time | 98.6% | 80.6% |
+| No billing region | 98.7% | 80.2% |
+| No card details | 97.8% | 77.6% |
+| No email | 98.7% | 80.7% |
+| No IP, device ID or device | 98.2% | 71.4% |
+| Required fields only | 98.2% | 68.7% |
+| The simulator's default: each group missing for 25% of players | 97.0% | 80.3% |
+
+This is why the training traffic has missing fields. A model with the same 54 features, trained on traffic where every field is always present, caught 84.7% of the fraud with every field, 30% without the IP country and 17% with the required fields only: it had never seen a request without them.
 
 ### Checks: what the model really learned
 
@@ -190,33 +220,51 @@ The first command runs from `backend`, the second from `ml`. The checks use one 
 | Fraud scenario | Caught when trained on it | Caught when left out |
 |---|---|---|
 | Card testing | 100% | 0% |
-| Account takeover | 94% | 0% |
-| Stolen card | 100% | 0% |
-| Low and slow | 54% | 1% |
-| New account spend | 100% | 60% |
+| Account takeover | 99% | 0% |
+| Stolen card | 91% | 0% |
+| Slow card testing | 76% | 0.4% |
+| Quiet takeover | 64% | 0% |
+| New account spend | 51% | 0% |
+| Low and slow | 0.6% | 0.4% |
 
-**The model recognises the scenarios it was trained on and does not find fraud of a kind it has never seen.** The left-out results also change from run to run (in an earlier run stolen card was caught 52% and new account spend 0%), so even the partial catches are not reliable. New fraud types stay the job of the rules and the analysts until labelled examples exist.
+**The model recognises the scenarios it was trained on and does not find fraud of a kind it has never seen.** New fraud types stay the job of the rules and the analysts until labelled examples exist. New account spend sits at the threshold, so the single model of this check flags half of it and the exported average of 5 flags 17%.
 
-**2. Empty database.** A model trained only on days 14-84 (`lgbm-game-v1`, replaced) learned that a player without history is suspicious, because by then every regular player has history and only scenario players do not. On an empty database nobody has history:
+**2. Empty database.** A model trained only on days 14-84 learns that a player without history is suspicious, because by then every regular player has history and only scenario players do not. On an empty database nobody has history:
 
 | Second world, first 14 days | Precision | Fraud caught | Legitimate purchases flagged |
 |---|---|---|---|
-| Trained on days 14-84 | 88.2% | 95.4% | 1.36% |
-| Trained on days 0-84 (`lgbm-game-v2`) | 97.2% | 91.4% | 0.28% |
+| Trained on days 14-84 | 92.8% | 81.8% | 0.66% |
+| Trained on days 0-84 (`lgbm-game-v5`) | 98.0% | 78.2% | 0.17% |
 
-In the 10,000-purchase replay the difference was larger: 61% precision with the rules for v1, 92% for v2. The cost is low and slow fraud, which v1 caught about half of only through this tell.
+**3. Realistic fraud share.** With 1.6% of purchases fraudulent instead of 9% (`-suspicious 0.015`), the model trained on the first world keeps its result on that traffic's test days: 97.2% precision, 80.5% of fraud caught, 0.04% of legitimate purchases flagged. A model trained on the low-fraud traffic itself catches 96.2% at 73.6% precision, because the same review rate then covers many more legitimate purchases per fraud.
 
-**3. Realistic fraud share.** With 1.5% of purchases fraudulent instead of 10% (`-suspicious 0.015`), `lgbm-game-v2` keeps its result on that traffic's test days: 96.9% precision, 91.2% of fraud caught, 0.05% of legitimate purchases flagged. A model trained on the low-fraud traffic itself catches 99.3% at 74.3% precision, because the same review rate then covers many more legitimate purchases per fraud.
+**4. Training days against unseen days.** The exported model with its threshold, on the days it was trained on and on purchases it never saw:
+
+| Purchases | Precision | Fraud caught |
+|---|---|---|
+| First world, training days 0-84 | 94.3% | 83.9% |
+| First world, validation days 90-104 | 94.6% | 83.2% |
+| First world, test days 105-124 | 94.1% | 83.2% |
+| Second world, all days | 97.4% | 79.3% |
+
+The model catches less than one point more on its training days than on later days, so it has not memorised purchases. The second world differs by a few points in both directions, and it is the number to quote.
 
 ### Simulator tells
 
 | Tell | Status |
 |---|---|
-| Scenario players have an old account and no purchase history, while regular players soon have history | Reduced: training from day 0 stops the model from flagging missing history. Not removed: on the first world's test days v2 still flags 46% of returning players |
-| About 10% of purchases are fraud | Accepted: the model keeps its precision at 1.5% fraud (check 3) |
+| Scenario players have an old account and no purchase history, while regular players soon have history | Reduced: training from day 0 stops the model from flagging missing history. On the first world's test days v5 flags 2.1% of returning players |
+| About 9% of purchases are fraud | Accepted: the model keeps its precision at 1.6% fraud (check 3) |
 | Fraud comes in a few fixed scenarios | Accepted and stated: the model does not generalise to unseen scenarios (check 1) |
-| The traffic is easy: the logistic regression baseline reaches ROC-AUC 0.994 on the test days (LightGBM 0.999) | Accepted: the results show that the pipeline learns labelled patterns, not real-world accuracy |
-| The model can clear a correct rule review: it cleared 9 of 92 account takeover purchases in the replay | Open: `clear_below` is chosen on all purchases, not on rule-reviewed ones (AF-90) |
+| Every special scenario is equally likely, so a hard fraud scenario is as common as the legitimate behaviour it imitates | Accepted and stated: in real traffic the legitimate behaviour is far more common, and precision on these scenarios would be lower |
+| Some amounts only occur in fraud: under 2.00 almost only in card testing, above 1,200.00 only in account takeover | Not removed |
+| A field is missing for a player at random, not because of the platform or the integration | Accepted: the missing fields say nothing about the scenario, which is what the model must not learn from |
+| The traffic is easy: the logistic regression baseline reaches ROC-AUC 0.989 on the test days (LightGBM 0.997) | Accepted: the results show that the pipeline learns labelled patterns, not real-world accuracy |
+| The model can clear a correct rule review | Open: it cleared none in the replay, but `clear_below` is still chosen on all purchases, not on rule-reviewed ones (AF-90) |
+
+### Earlier game models
+
+`lgbm-game-v1` was trained on days 14-84 only and was replaced (check 2). `lgbm-game-v2` is kept in `backend/models/`. It has the first 50 features and was trained on earlier traffic with 5 fraud scenarios, 6 legitimate edge cases and every field present. On that traffic its precision was 97.9% and it caught 91.9% of the fraud in the second world's later days. On the current traffic it reaches 81.8% precision and catches 65.5%, which is why it was replaced.
 
 ## Replay through the score API
 
@@ -252,7 +300,7 @@ Then, from `ml`:
 A simulator dump is replayed the same way, from its first purchase, with the model trained on it; the report then also shows, per scenario, how many purchases the rules alone and the rules with the model stopped:
 
 ```bash
-.venv/bin/python replay.py --requests data/game/world2.jsonl --limit 10000 --model ../backend/models/lgbm-game-v2.json --url http://localhost:8082 --api-key replay-key --out output/replay-game
+.venv/bin/python replay.py --requests data/game/world2.jsonl --limit 10000 --model ../backend/models/lgbm-game-v5.json --url http://localhost:8082 --api-key replay-key --out output/replay-game
 ```
 
 For IEEE-CIS, by default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 10000` for a quick check. A full run sends about 170,000 purchases and takes about 40 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts` in that database.

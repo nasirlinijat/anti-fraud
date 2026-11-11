@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
@@ -83,55 +84,109 @@ func TestReviewDecisionRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
+// postDecision sends a review decision for the purchase.
+func postDecision(mux *http.ServeMux, id int64, key, body string) *httptest.ResponseRecorder {
+	return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", key, body)
+}
+
+// reviewCounts are the decision counts the dashboard shows. It derives review
+// outcomes and model effects from decisions, so resolving a review must
+// change only the open review count.
+type reviewCounts struct{ allowed, reviewed, blocked, scored, flagged, cleared int64 }
+
+// reviewStats is what a review decision must leave unchanged, except for the
+// queue length.
+type reviewStats struct {
+	queue    int64
+	outcomes reviewCounts
+	model    reviewCounts
+}
+
+func readReviewStats(t *testing.T, tx pgx.Tx, from, to time.Time) reviewStats {
+	t.Helper()
+	var queue int64
+	var c reviewCounts
+	err := tx.QueryRow(context.Background(), `
+		SELECT
+		    (SELECT count(*) FROM decisions d WHERE d.outcome = 'review'
+		       AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)),
+		    count(*) FILTER (WHERE d.outcome = 'allow'),
+		    count(*) FILTER (WHERE d.outcome = 'review'),
+		    count(*) FILTER (WHERE d.outcome = 'block'),
+		    count(d.model_score),
+		    count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold),
+		    count(*) FILTER (WHERE d.outcome = 'allow' AND d.rule_score >= r.review_threshold)
+		FROM decisions d
+		JOIN rulesets r ON r.version = d.ruleset_version
+		WHERE d.decided_at >= $1 AND d.decided_at < $2`, from, to,
+	).Scan(&queue, &c.allowed, &c.reviewed, &c.blocked, &c.scored, &c.flagged, &c.cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, model := c, c
+	outcomes.scored, outcomes.flagged, outcomes.cleared = 0, 0, 0
+	model.allowed, model.reviewed, model.blocked = 0, 0, 0
+	return reviewStats{queue: queue, outcomes: outcomes, model: model}
+}
+
+type wantDecision struct {
+	id                int64
+	analyst, decision string
+}
+
+// checkSavedDecision checks the response to a saved decision and the row
+// stored for it.
+func checkSavedDecision(t *testing.T, tx pgx.Tx, rec *httptest.ResponseRecorder, want wantDecision) {
+	t.Helper()
+	var saved decisionResponse
+	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &saved) != nil ||
+		saved.PurchaseID != strconv.FormatInt(want.id, 10) || saved.AnalystID != want.analyst ||
+		saved.Decision != want.decision || saved.ResolvedAt.IsZero() {
+		t.Fatalf("save response = %d %s", rec.Code, rec.Body)
+	}
+	var analystID, decision string
+	var resolvedAt time.Time
+	err := tx.QueryRow(context.Background(), "SELECT analyst_id, decision, resolved_at FROM review_resolutions WHERE purchase_id = $1", want.id).
+		Scan(&analystID, &decision, &resolvedAt)
+	if err != nil || analystID != want.analyst || decision != want.decision || !resolvedAt.Equal(saved.ResolvedAt) {
+		t.Fatalf("stored resolution = %q %q %v, err = %v", analystID, decision, resolvedAt, err)
+	}
+}
+
+// checkScoreKept checks that approving the purchase left its saved score and
+// outcome as they were.
+func checkScoreKept(t *testing.T, tx pgx.Tx, purchaseID int64, score float64) {
+	t.Helper()
+	var modelVersion, originalOutcome, originalResolution string
+	var modelScore float64
+	err := tx.QueryRow(context.Background(), `
+		SELECT d.model_version, d.outcome, d.model_score, r.decision
+		FROM decisions d JOIN review_resolutions r USING (purchase_id)
+		WHERE d.purchase_id = $1`, purchaseID).Scan(&modelVersion, &originalOutcome, &modelScore, &originalResolution)
+	if err != nil || modelVersion != testModelVersion || originalOutcome != "review" ||
+		modelScore != score || originalResolution != "approve" {
+		t.Fatalf("saved score or resolution was changed: %q %q %v %q, err = %v",
+			modelVersion, originalOutcome, modelScore, originalResolution, err)
+	}
+}
+
 func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	tx := testTx(t)
-	ctx := context.Background()
 	at := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 	score := 0.7
 	first := insertDecision(t, tx, "resolution-first", "review", at, &score, `[]`)
 	second := insertDecision(t, tx, "resolution-second", "review", at, nil, `[]`)
 	allowed := insertDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
-	store := NewStore(tx)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, store, testAnalystKeys(t), false)
+	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
 	until := time.Now().UTC()
-	// The dashboard counts review outcomes and model effects from decisions,
-	// so resolving a review must change only the open review count.
-	type counts struct{ allowed, reviewed, blocked, scored, flagged, cleared int64 }
-	snapshot := func() (int64, counts, counts) {
-		t.Helper()
-		var queue int64
-		var c counts
-		err := tx.QueryRow(ctx, `
-			SELECT
-			    (SELECT count(*) FROM decisions d WHERE d.outcome = 'review'
-			       AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)),
-			    count(*) FILTER (WHERE d.outcome = 'allow'),
-			    count(*) FILTER (WHERE d.outcome = 'review'),
-			    count(*) FILTER (WHERE d.outcome = 'block'),
-			    count(d.model_score),
-			    count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold),
-			    count(*) FILTER (WHERE d.outcome = 'allow' AND d.rule_score >= r.review_threshold)
-			FROM decisions d
-			JOIN rulesets r ON r.version = d.ruleset_version
-			WHERE d.decided_at >= $1 AND d.decided_at < $2`, at, until,
-		).Scan(&queue, &c.allowed, &c.reviewed, &c.blocked, &c.scored, &c.flagged, &c.cleared)
-		if err != nil {
-			t.Fatal(err)
-		}
-		outcomes, model := c, c
-		outcomes.scored, outcomes.flagged, outcomes.cleared = 0, 0, 0
-		model.allowed, model.reviewed, model.blocked = 0, 0, 0
-		return queue, outcomes, model
-	}
-	beforeQueue, beforeOutcomes, beforeModel := snapshot()
+	before := readReviewStats(t, tx, at, until)
 	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
 	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusOK {
 		t.Fatalf("pending case = %d %s", rec.Code, rec.Body)
 	}
 	submit := func(id int64, key, decision string) *httptest.ResponseRecorder {
-		return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", key,
-			`{"decision":"`+decision+`"}`)
+		return postDecision(mux, id, key, `{"decision":"`+decision+`"}`)
 	}
 	for _, tc := range []struct {
 		id                     int64
@@ -141,19 +196,7 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 		{second, secondAnalystTestKey, "second", "reject"},
 	} {
 		rec := submit(tc.id, tc.key, tc.decision)
-		var saved decisionResponse
-		if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &saved) != nil ||
-			saved.PurchaseID != strconv.FormatInt(tc.id, 10) || saved.AnalystID != tc.analyst ||
-			saved.Decision != tc.decision || saved.ResolvedAt.IsZero() {
-			t.Fatalf("save response = %d %s", rec.Code, rec.Body)
-		}
-		var analystID, decision string
-		var resolvedAt time.Time
-		err := tx.QueryRow(ctx, "SELECT analyst_id, decision, resolved_at FROM review_resolutions WHERE purchase_id = $1", tc.id).
-			Scan(&analystID, &decision, &resolvedAt)
-		if err != nil || analystID != tc.analyst || decision != tc.decision || !resolvedAt.Equal(saved.ResolvedAt) {
-			t.Fatalf("stored resolution = %q %q %v, err = %v", analystID, decision, resolvedAt, err)
-		}
+		checkSavedDecision(t, tx, rec, wantDecision{id: tc.id, analyst: tc.analyst, decision: tc.decision})
 	}
 	if rec := submit(first, secondAnalystTestKey, "reject"); rec.Code != http.StatusConflict {
 		t.Fatalf("second decision = %d %s", rec.Code, rec.Body)
@@ -173,83 +216,83 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 			t.Fatalf("resolved purchase %s remained in queue", item.PurchaseID)
 		}
 	}
-	afterQueue, afterOutcomes, afterModel := snapshot()
-	if afterQueue != beforeQueue-2 || afterOutcomes != beforeOutcomes || afterModel != beforeModel {
+	after := readReviewStats(t, tx, at, until)
+	if after.queue != before.queue-2 || after.outcomes != before.outcomes || after.model != before.model {
 		t.Fatalf("unexpected stats after resolution: queue %d → %d, outcomes %+v → %+v, model %+v → %+v",
-			beforeQueue, afterQueue, beforeOutcomes, afterOutcomes, beforeModel, afterModel)
+			before.queue, after.queue, before.outcomes, after.outcomes, before.model, after.model)
 	}
-	var modelVersion, originalOutcome, originalResolution string
-	var modelScore float64
-	err := tx.QueryRow(ctx, `
-		SELECT d.model_version, d.outcome, d.model_score, r.decision
-		FROM decisions d JOIN review_resolutions r USING (purchase_id)
-		WHERE d.purchase_id = $1`, first).Scan(&modelVersion, &originalOutcome, &modelScore, &originalResolution)
-	if err != nil || modelVersion != testModelVersion || originalOutcome != "review" ||
-		modelScore != score || originalResolution != "approve" {
-		t.Fatalf("saved score or resolution was changed: %q %q %v %q, err = %v",
-			modelVersion, originalOutcome, modelScore, originalResolution, err)
+	checkScoreKept(t, tx, first, score)
+}
+
+// insertDeviceReview adds a purchase awaiting review that was made from the
+// device.
+func insertDeviceReview(t *testing.T, tx pgx.Tx, txnID, device string) int64 {
+	t.Helper()
+	id := insertDecision(t, tx, txnID, "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
+	if _, err := tx.Exec(context.Background(), `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
+		t.Fatalf("set device ID: %v", err)
 	}
+	return id
+}
+
+func deviceBlocked(t *testing.T, tx pgx.Tx, device string) bool {
+	t.Helper()
+	_, found, err := blocklist.NewStore(tx).Match(context.Background(), blocklist.Subject{CardToken: "none", PlayerID: "none", DeviceID: &device})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+func countRows(t *testing.T, tx pgx.Tx, query string) int {
+	t.Helper()
+	var n int
+	if err := tx.QueryRow(context.Background(), query).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func TestRejectCanBlockTheDevice(t *testing.T) {
 	tx := testTx(t)
-	ctx := context.Background()
-	at := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
-	withDevice := func(txnID, device string) int64 {
-		t.Helper()
-		id := insertDecision(t, tx, txnID, "review", at, nil, `[]`)
-		if _, err := tx.Exec(ctx, `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
-			t.Fatalf("set device ID: %v", err)
-		}
-		return id
-	}
-	blocked := func(device string) bool {
-		t.Helper()
-		_, found, err := blocklist.NewStore(tx).Match(ctx, blocklist.Subject{CardToken: "none", PlayerID: "none", DeviceID: &device})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return found
-	}
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
 	decide := func(id int64, body string) *httptest.ResponseRecorder {
-		return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", queueTestKey, body)
+		return postDecision(mux, id, queueTestKey, body)
 	}
+	blocked := func(device string) bool { return deviceBlocked(t, tx, device) }
 	const reject = `{"decision":"reject","block_device":true}`
 
 	// A rejection without the option leaves the device alone.
-	plain := withDevice("block-plain", "device-plain")
+	plain := insertDeviceReview(t, tx, "block-plain", "device-plain")
 	if rec := decide(plain, `{"decision":"reject"}`); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) || blocked("device-plain") {
 		t.Fatalf("plain rejection = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-plain"))
 	}
 
 	// With the option, the rejection and the entry are saved together, and the next purchase from the device is blocked.
-	first := withDevice("block-first", "device-bad")
+	first := insertDeviceReview(t, tx, "block-first", "device-bad")
 	if rec := decide(first, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":true`) || !blocked("device-bad") {
 		t.Fatalf("rejection with the option = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-bad"))
 	}
 
 	// A device that is already blocked adds no second entry, and the rejection still succeeds.
-	again := withDevice("block-again", "device-bad")
+	again := insertDeviceReview(t, tx, "block-again", "device-bad")
 	if rec := decide(again, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) {
 		t.Fatalf("rejection of an already blocked device = %d %s", rec.Code, rec.Body)
 	}
-	var entries int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM blocklist_entries WHERE entry_type = 'device' AND value = 'device-bad'`).Scan(&entries); err != nil || entries != 1 {
-		t.Fatalf("entries for the device = %d, err = %v, want 1", entries, err)
+	if entries := countRows(t, tx, `SELECT count(*) FROM blocklist_entries WHERE entry_type = 'device' AND value = 'device-bad'`); entries != 1 {
+		t.Fatalf("entries for the device = %d, want 1", entries)
 	}
-	var audited int
-	if err := tx.QueryRow(ctx, `
+	if audited := countRows(t, tx, `
 		SELECT count(*) FROM configuration_audit_events
 		WHERE action = 'blocklist.add' AND actor_kind = 'analyst' AND actor_id = 'first'
 		  AND details->>'value' = 'device-bad'
-	`).Scan(&audited); err != nil || audited != 1 {
-		t.Fatalf("audit events for the device = %d, err = %v, want 1", audited, err)
+	`); audited != 1 {
+		t.Fatalf("audit events for the device = %d, want 1", audited)
 	}
 
 	// A conflicting decision creates no entry.
-	decided := withDevice("block-decided", "device-conflict")
+	decided := insertDeviceReview(t, tx, "block-decided", "device-conflict")
 	if rec := decide(decided, `{"decision":"approve"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("approve = %d %s", rec.Code, rec.Body)
 	}
@@ -258,13 +301,13 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 	}
 
 	// A purchase without a device is rejected and nothing is blocked.
-	noDevice := insertDecision(t, tx, "block-no-device", "review", at, nil, `[]`)
+	noDevice := insertDecision(t, tx, "block-no-device", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
 	if rec := decide(noDevice, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) {
 		t.Fatalf("rejection without a device = %d %s", rec.Code, rec.Body)
 	}
 
 	// The option only makes sense for a rejection.
-	approve := withDevice("block-approve", "device-approve")
+	approve := insertDeviceReview(t, tx, "block-approve", "device-approve")
 	if rec := decide(approve, `{"decision":"approve","block_device":true}`); rec.Code != http.StatusBadRequest || blocked("device-approve") {
 		t.Fatalf("approval with the option = %d %s, blocked = %v", rec.Code, rec.Body, blocked("device-approve"))
 	}

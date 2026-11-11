@@ -170,7 +170,7 @@ func TestGenerateOrderAndIDs(t *testing.T) {
 		if r.EventTime.Before(cfg.Start) {
 			t.Fatalf("purchase %d at %v is before the start %v", i, r.EventTime, cfg.Start)
 		}
-		if r.AccountCreatedAt == nil || r.AccountCreatedAt.After(r.EventTime) {
+		if r.AccountCreatedAt != nil && r.AccountCreatedAt.After(r.EventTime) {
 			t.Fatalf("purchase %d has account_created_at %v after its event time", i, r.AccountCreatedAt)
 		}
 	}
@@ -227,13 +227,15 @@ func TestGenerateHonoursSuspiciousShare(t *testing.T) {
 
 func TestGenerateRejectsBadConfig(t *testing.T) {
 	bad := map[string]func(*simulator.Config){
-		"empty run":      func(c *simulator.Config) { c.Run = "" },
-		"no start":       func(c *simulator.Config) { c.Start = time.Time{} },
-		"share above 1":  func(c *simulator.Config) { c.SuspiciousShare = 1.5 },
-		"negative share": func(c *simulator.Config) { c.SuspiciousShare = -0.1 },
-		"no players":     func(c *simulator.Config) { c.Players = 0 },
-		"zero mean gap":  func(c *simulator.Config) { c.MeanGap = 0 },
-		"negative gap":   func(c *simulator.Config) { c.MeanGap = -time.Second },
+		"empty run":        func(c *simulator.Config) { c.Run = "" },
+		"no start":         func(c *simulator.Config) { c.Start = time.Time{} },
+		"share above 1":    func(c *simulator.Config) { c.SuspiciousShare = 1.5 },
+		"negative share":   func(c *simulator.Config) { c.SuspiciousShare = -0.1 },
+		"no players":       func(c *simulator.Config) { c.Players = 0 },
+		"zero mean gap":    func(c *simulator.Config) { c.MeanGap = 0 },
+		"negative gap":     func(c *simulator.Config) { c.MeanGap = -time.Second },
+		"missing above 1":  func(c *simulator.Config) { c.MissingFieldShare = 1.5 },
+		"negative missing": func(c *simulator.Config) { c.MissingFieldShare = -0.1 },
 	}
 	for name, change := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -253,6 +255,8 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 	srv, store := newServer(t)
 	cfg := simulator.DefaultConfig()
 	cfg.SuspiciousShare = 0.2
+	// The expected rule outcomes are for requests with every field.
+	cfg.MissingFieldShare = 0
 	traffic := generate(t, cfg, 2000)
 	for _, p := range traffic {
 		body, err := json.Marshal(p.Request)
@@ -288,9 +292,9 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 		}
 		want[p.Pattern][string(result.Outcome)]++
 		switch p.Pattern {
-		case simulator.PatternLowAndSlow:
+		case simulator.PatternLowAndSlow, simulator.PatternSlowCardTesting, simulator.PatternQuietTakeover:
 			if result.Outcome != scoring.OutcomeAllow || len(result.FiredRules) != 0 {
-				t.Errorf("low and slow should pass without firing a rule, got %+v", result)
+				t.Errorf("%s should pass without firing a rule, got %+v", p.Pattern, result)
 			}
 		case simulator.PatternCardTesting:
 			cardTestingUses[p.Request.CardToken]++
@@ -303,8 +307,8 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 			}
 		}
 	}
-	if len(simulator.Patterns) != 12 || len(want) != 12 {
-		t.Fatalf("expected all 12 patterns, got registry %v and outcomes %v", simulator.Patterns, want)
+	if len(simulator.Patterns) != 18 || len(want) != 18 {
+		t.Fatalf("expected all 18 patterns, got registry %v and outcomes %v", simulator.Patterns, want)
 	}
 	for _, pattern := range simulator.Patterns {
 		if len(want[pattern]) == 0 {

@@ -25,17 +25,31 @@ type namedCredential struct {
 	digest [sha256.Size]byte
 }
 
+// keyVariable names an environment variable that holds named keys, and the
+// field that holds the ID in each of its entries.
+type keyVariable struct {
+	name    string
+	idField string
+}
+
+// ParseAnalystKeys reads the value of REVIEW_ANALYST_KEYS. Every key must
+// differ from the service key and from the other analyst keys.
 func ParseAnalystKeys(value, serviceKey string) (AnalystKeys, error) {
-	keys, err := parseNamedKeys(value, "REVIEW_ANALYST_KEYS", "analyst_id", serviceKey, namedKeys{})
+	keys, err := parseNamedKeys(value, keyVariable{"REVIEW_ANALYST_KEYS", "analyst_id"}, serviceKey, namedKeys{})
 	return AnalystKeys{keys}, err
 }
 
+// ParseOperatorKeys reads the value of OPERATOR_API_KEYS. Every key must
+// differ from the service key, the analyst keys, and the other operator keys.
 func ParseOperatorKeys(value, serviceKey string, analysts AnalystKeys) (OperatorKeys, error) {
-	keys, err := parseNamedKeys(value, "OPERATOR_API_KEYS", "operator_id", serviceKey, analysts.namedKeys)
+	keys, err := parseNamedKeys(value, keyVariable{"OPERATOR_API_KEYS", "operator_id"}, serviceKey, analysts.namedKeys)
 	return OperatorKeys{keys}, err
 }
 
-func parseNamedKeys(value, variable, idField, serviceKey string, other namedKeys) (namedKeys, error) {
+// parseNamedKeys reads a JSON array of ID and key entries. An empty value
+// gives no keys. other holds keys that these must not repeat.
+func parseNamedKeys(value string, v keyVariable, serviceKey string, other namedKeys) (namedKeys, error) {
+	variable, idField := v.name, v.idField
 	if strings.TrimSpace(value) == "" {
 		return namedKeys{}, nil
 	}
@@ -71,6 +85,7 @@ func parseNamedKeys(value, variable, idField, serviceKey string, other namedKeys
 	return keys, nil
 }
 
+// Configured reports whether at least one key is set.
 func (keys namedKeys) Configured() bool {
 	return len(keys.entries) > 0
 }

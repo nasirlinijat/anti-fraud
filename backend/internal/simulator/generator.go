@@ -2,6 +2,8 @@ package simulator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"iter"
 	"math"
@@ -35,6 +37,25 @@ const (
 	PatternReturningPlayer Pattern = "returning_player"
 	PatternStolenCard      Pattern = "stolen_card"
 	PatternLowAndSlow      Pattern = "low_and_slow"
+	// PatternExpat is a regular player who lives abroad, so the connection's
+	// country always differs from the card's country.
+	PatternExpat Pattern = "expat"
+	// PatternNewBigSpender is a legitimate large purchase from an account
+	// created a few hours earlier.
+	PatternNewBigSpender Pattern = "new_big_spender"
+	// PatternFamilyCard is a relative who uses a regular player's card from
+	// the same home connection.
+	PatternFamilyCard Pattern = "family_card"
+	// PatternSessionShopper is an older account that makes a few small
+	// purchases with its own card, minutes apart.
+	PatternSessionShopper Pattern = "session_shopper"
+	// PatternSlowCardTesting is a few stolen cards checked with one small
+	// purchase each, minutes apart, from an older account in the cards' own
+	// country.
+	PatternSlowCardTesting Pattern = "slow_card_testing"
+	// PatternQuietTakeover is an existing account used from a new phone in
+	// the player's own country for an amount below the high-amount rule.
+	PatternQuietTakeover Pattern = "quiet_takeover"
 )
 
 // Patterns lists every pattern in a fixed order.
@@ -97,17 +118,22 @@ type Config struct {
 	Players int
 	// MeanGap is the mean simulated time between two traffic events.
 	MeanGap time.Duration
+	// MissingFieldShare is the share of players, from 0 to 1, whose client
+	// leaves out each group of optional request fields. A player misses the
+	// same groups on every purchase.
+	MissingFieldShare float64
 }
 
 // DefaultConfig returns the settings used by the simulator command.
 func DefaultConfig() Config {
 	return Config{
-		Seed:            1,
-		Run:             "sim",
-		Start:           time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC),
-		SuspiciousShare: 0.1,
-		Players:         300,
-		MeanGap:         20 * time.Second,
+		Seed:              1,
+		Run:               "sim",
+		Start:             time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC),
+		SuspiciousShare:   0.1,
+		Players:           300,
+		MeanGap:           20 * time.Second,
+		MissingFieldShare: 0.25,
 	}
 }
 
@@ -134,6 +160,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("players must be at least 1, got %d", c.Players)
 	case c.MeanGap <= 0:
 		return fmt.Errorf("mean gap must be positive, got %v", c.MeanGap)
+	case c.MissingFieldShare < 0 || c.MissingFieldShare > 1:
+		return fmt.Errorf("missing field share must be between 0 and 1, got %v", c.MissingFieldShare)
 	}
 	return nil
 }
@@ -151,6 +179,9 @@ var (
 
 // Normal purchases are paced so a small pool can still model casual shoppers.
 const normalCardUsesPerHour = 3
+
+// One expat exists for this many regular players, and at least one.
+const playersPerExpat = 40
 
 type player struct {
 	id         string
@@ -178,6 +209,7 @@ type generator struct {
 	cfg     Config
 	rng     *rand.Rand
 	players []player
+	expats  []player
 	recent  map[string][]time.Time
 	next    int
 	clock   time.Time
@@ -203,6 +235,14 @@ func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error
 		p := g.newPlayer(cfg.Start.Add(-g.days(30, 900)))
 		g.players = append(g.players, p)
 		g.recent[p.card.token] = nil
+	}
+	for range max(1, cfg.Players/playersPerExpat) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p := g.newPlayer(cfg.Start.Add(-g.days(30, 900)))
+		p.country = g.otherCountry(p.card.country)
+		g.expats = append(g.expats, p)
 	}
 	return g, nil
 }
@@ -329,10 +369,15 @@ func (g *generator) normal(at time.Time) {
 	g.add(PatternNormal, g.request(p, at, g.regularAmount()))
 }
 
+// regularAmount is mostly an ordinary purchase, sometimes a larger bundle and
+// rarely a premium one.
 func (g *generator) regularAmount() int64 {
 	amount := g.ordinaryAmount()
-	if g.rng.Float64() < 0.03 {
+	switch tier := g.rng.Float64(); {
+	case tier < 0.03:
 		return g.amount(50000, 80000)
+	case tier < 0.15:
+		return g.amount(10000, 49999)
 	}
 	return amount
 }
@@ -377,13 +422,51 @@ func (g *generator) newAccountSpend(at time.Time) {
 }
 
 func (g *generator) add(pattern Pattern, req Request) {
-	// Only regular cards can be reused across events. Purchases scheduled
-	// ahead by a single event always use cards outside this history.
+	// Only regular cards are paced. Expat cards return across events without
+	// pacing, and purchases scheduled ahead by a single event always use
+	// cards outside this history.
 	if _, tracked := g.recent[req.CardToken]; tracked {
 		g.usesLastHour(req.CardToken, req.EventTime)
 		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
 	}
-	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: req})
+	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: g.withoutMissingFields(req)})
+}
+
+// fieldGroups lists the optional request fields a client leaves out together.
+var fieldGroups = []struct {
+	name  string
+	clear func(*Request)
+}{
+	{"ip", func(r *Request) { r.IPAddress, r.IPCountry = nil, nil }},
+	{"device_id", func(r *Request) { r.DeviceID = nil }},
+	{"device", func(r *Request) { r.DeviceType, r.DeviceName = nil, nil }},
+	{"account", func(r *Request) { r.AccountCreatedAt = nil }},
+	{"billing", func(r *Request) { r.BillingRegion, r.BillingCountry, r.BillingDistance = nil, nil, nil }},
+	{"card", func(r *Request) {
+		r.CardIssuer, r.CardNetwork, r.CardType, r.CardCountry, r.CardCategory = nil, nil, nil, nil, nil
+	}},
+	{"email", func(r *Request) { r.EmailDomain, r.RecipientEmailDomain = nil, nil }},
+}
+
+// withoutMissingFields removes the field groups the player's client does not
+// send. It runs on every finished request, so a scenario cannot put a field
+// back and the missing fields say nothing about the pattern.
+func (g *generator) withoutMissingFields(req Request) Request {
+	for _, group := range fieldGroups {
+		if g.clientOmits(req.PlayerID, group.name) {
+			group.clear(&req)
+		}
+	}
+	return req
+}
+
+// clientOmits decides from the seed and the player ID alone, without the
+// random sequence: the purchases are the same for every MissingFieldShare,
+// apart from the removed fields.
+func (g *generator) clientOmits(playerID, group string) bool {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d|%s|%s", g.cfg.Seed, playerID, group))
+	draw := float64(binary.BigEndian.Uint64(sum[:8])>>11) / (1 << 53)
+	return draw < g.cfg.MissingFieldShare
 }
 
 func (g *generator) usesLastHour(cardToken string, at time.Time) int {
@@ -408,15 +491,8 @@ func (g *generator) newPlayer(createdAt time.Time) player {
 	country := g.pick(countries)
 	deviceType, deviceName := g.device()
 	return player{
-		id: g.id("player"),
-		card: card{
-			token:    g.id("card"),
-			issuer:   fmt.Sprint(1000 + g.rng.IntN(17000)),
-			network:  g.pick(cardNetworks),
-			cardType: g.pick(cardTypes),
-			country:  country,
-			category: g.pick(cardCategory),
-		},
+		id:         g.id("player"),
+		card:       g.newCard(country),
 		email:      g.pick(emailDomains),
 		country:    country,
 		region:     fmt.Sprint(100 + g.rng.IntN(440)),
@@ -425,6 +501,17 @@ func (g *generator) newPlayer(createdAt time.Time) player {
 		deviceID:   g.id("device"),
 		ipAddress:  g.ipAddress(),
 		createdAt:  createdAt.UTC(),
+	}
+}
+
+func (g *generator) newCard(country string) card {
+	return card{
+		token:    g.id("card"),
+		issuer:   fmt.Sprint(1000 + g.rng.IntN(17000)),
+		network:  g.pick(cardNetworks),
+		cardType: g.pick(cardTypes),
+		country:  country,
+		category: g.pick(cardCategory),
 	}
 }
 

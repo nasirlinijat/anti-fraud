@@ -32,6 +32,8 @@ def test_requests_use_the_api_format():
         "email_domain": "gmail.com",
         "device_type": "desktop",
         "device_name": "Windows",
+        "device_id": "dev-a",
+        "ip_country": "150",
         "client_os": "Windows 10",
         "client_browser": "chrome 63.0",
         "screen_resolution": "1920x1080",
@@ -40,6 +42,8 @@ def test_requests_use_the_api_format():
     assert requests[4]["amount_minor"] == 10000
     assert "email_domain" not in requests[7] and "device_name" not in requests[7]
     assert "client_os" not in requests[7] and "account_created_at" not in requests[7]
+    assert "device_id" not in requests[7] and "ip_country" not in requests[7]
+    assert requests[3]["device_id"] == "dev-a" and "ip_country" not in requests[3]
     assert requests[5]["client_browser"] == "chrome 62.0" and "client_os" not in requests[5]
 
 

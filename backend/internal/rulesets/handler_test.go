@@ -85,7 +85,10 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	}
 }
 
-func TestConcurrentRulesetPublishing(t *testing.T) {
+// isolatedRulesetPool returns a pool on a new schema that has only the ruleset
+// and audit tables, so that publishing can commit without touching other tests.
+func isolatedRulesetPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := fmt.Sprintf("rulesets_publish_%d", time.Now().UnixNano())
@@ -120,24 +123,26 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 			t.Fatalf("apply %s: %v", path, err)
 		}
 	}
+	return isolated
+}
 
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(isolated), "test-key", testOperators(t))
-	const requests = 4
-	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
-		t.Fatalf("service key publishing status = %d, want 401", w.Code)
-	}
+type versionedConfig struct {
+	Version   int       `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	configPayload
+}
+
+// publishConcurrently publishes the given number of rulesets at the same time
+// and returns them by version. The versions must follow the seeded version 1
+// without a gap.
+func publishConcurrently(t *testing.T, mux *http.ServeMux, requests int) map[int]versionedConfig {
+	t.Helper()
 	responses := make(chan *httptest.ResponseRecorder, requests)
 	for i := range requests {
 		go func() {
 			body := fmt.Sprintf(`{"review_threshold":40,"block_threshold":70,"note":"  note %d  ","rules":{"high_amount":{"enabled":true,"weight":%d,"limit":1000}}}`, i, 10+i)
 			responses <- rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
 		}()
-	}
-	type versionedConfig struct {
-		Version   int       `json:"version"`
-		CreatedAt time.Time `json:"created_at"`
-		configPayload
 	}
 	versions := make(map[int]versionedConfig)
 	for range requests {
@@ -161,6 +166,19 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 			t.Errorf("version %d was not published", version)
 		}
 	}
+	return versions
+}
+
+func TestConcurrentRulesetPublishing(t *testing.T) {
+	ctx := context.Background()
+	isolated := isolatedRulesetPool(t)
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, NewStore(isolated), "test-key", testOperators(t))
+	const requests = 4
+	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("service key publishing status = %d, want 401", w.Code)
+	}
+	versions := publishConcurrently(t, mux, requests)
 
 	w := rulesetRequest(mux, "GET", "/rulesets/active", "", "test-key")
 	var active versionedConfig
@@ -205,7 +223,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	}
 
 	var oldWeight int
-	err = isolated.QueryRow(ctx, `SELECT weight FROM ruleset_rules WHERE ruleset_version = 1 AND rule_name = 'high_amount'`).Scan(&oldWeight)
+	err := isolated.QueryRow(ctx, `SELECT weight FROM ruleset_rules WHERE ruleset_version = 1 AND rule_name = 'high_amount'`).Scan(&oldWeight)
 	if err != nil || oldWeight != 30 {
 		t.Errorf("seed weight = %d, error = %v, want 30", oldWeight, err)
 	}

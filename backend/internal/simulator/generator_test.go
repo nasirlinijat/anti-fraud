@@ -31,9 +31,10 @@ func TestGeneratorKeepsPendingPurchasesAndHistoryBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A card-testing burst has at most eight gaps of up to 120 seconds.
-	// Events start at least one second apart and each adds at most nine purchases.
-	const maxPending = (8*120 + 1) * 9
+	// The longest scenario is slow card testing, with at most four gaps of up
+	// to 45 minutes. Events start at least one second apart and each adds at
+	// most nine purchases.
+	const maxPending = (4*45*60 + 1) * 9
 	const count = 30_000
 	var previous Purchase
 	overlap := false

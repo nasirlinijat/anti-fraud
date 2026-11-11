@@ -24,7 +24,10 @@ def feature_sets():
     return sets
 
 
-def run(columns, train, validation, test, keep):
+def run(columns, split, keep):
+    """Trains on one feature set. split holds the training, validation and
+    test days; keep marks the test purchases counted in the first-fraud result."""
+    train, validation, test = split
     model = lightgbm_model()
     model.fit(
         train[columns], train["is_fraud"],
@@ -65,7 +68,7 @@ def main():
     results = {}
     print(f"{'feature set':22s}{'n':>4}{'ROC-AUC':>9}{'PR-AUC':>8}{'1st-PR':>8}{'P@0.1%':>8}{'P@0.5%':>8}{'P@1%':>8}{'C@1%':>7}")
     for name, columns in feature_sets().items():
-        r = run(columns, train, validation, test, test_keep)
+        r = run(columns, (train, validation, test), test_keep)
         results[name] = r
         op = r["operating_points"]
         print(f"{name:22s}{r['features']:>4}{r['roc_auc']:>9.4f}{r['pr_auc']:>8.4f}{r['first_fraud_pr_auc']:>8.4f}"

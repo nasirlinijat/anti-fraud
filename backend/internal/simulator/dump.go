@@ -10,7 +10,8 @@ import (
 // key for generated traffic and is never sent to the score API.
 func (p Pattern) Fraud() bool {
 	switch p {
-	case PatternCardTesting, PatternAccountTakeover, PatternNewAccountSpend, PatternStolenCard, PatternLowAndSlow:
+	case PatternCardTesting, PatternAccountTakeover, PatternNewAccountSpend, PatternStolenCard, PatternLowAndSlow,
+		PatternSlowCardTesting, PatternQuietTakeover:
 		return true
 	}
 	return false

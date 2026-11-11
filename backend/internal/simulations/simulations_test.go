@@ -43,7 +43,9 @@ func TestDisabled(t *testing.T) {
 		}
 	}
 }
-func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pgxpool.Pool) {
+
+// testDSN returns the test database URL, or skips the test without one.
+func testDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("AF77_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -52,6 +54,14 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
+	return dsn
+}
+
+// isolatedSchema creates a schema with all migrations applied and returns a
+// pool that uses it, with the schema name. The schema is dropped when the
+// test ends; the caller closes the pool.
+func isolatedSchema(t *testing.T, dsn string) (*pgxpool.Pool, string) {
+	t.Helper()
 	admin, e := pgxpool.New(t.Context(), dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -87,7 +97,12 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 			t.Fatalf("%s: %v", f, e)
 		}
 	}
-	runtimePool := pool
+	return pool, schema
+}
+
+// withSearchPath returns the database URL with the schema as its search path.
+func withSearchPath(t *testing.T, dsn, schema string) string {
+	t.Helper()
 	u, e := url.Parse(dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -95,34 +110,43 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 	q := u.Query()
 	q.Set("search_path", schema)
 	u.RawQuery = q.Encode()
-	dsn = u.String()
+	return u.String()
+}
+
+// runtimePool returns a pool and URL for the restricted runtime role on the
+// schema, when a runtime database URL is set. Without one it returns the
+// owner pool and the owner URL.
+func runtimePool(t *testing.T, pool *pgxpool.Pool, ownerDSN, schema string) (*pgxpool.Pool, string) {
+	t.Helper()
 	runtimeDSN := os.Getenv("AF77_RUNTIME_TEST_DATABASE_URL")
 	if runtimeDSN == "" {
 		runtimeDSN = os.Getenv("TEST_RUNTIME_DATABASE_URL")
 	}
-	if runtimeDSN != "" {
-		if _, e = pool.Exec(t.Context(), "GRANT USAGE ON SCHEMA "+ident+" TO antifraud_api; GRANT SELECT ON purchases,decisions TO antifraud_api; GRANT SELECT,INSERT,UPDATE ON simulation_runs TO antifraud_api"); e != nil {
-			t.Fatal(e)
-		}
-		rc, e := pgxpool.ParseConfig(runtimeDSN)
-		if e != nil {
-			t.Fatal(e)
-		}
-		rc.ConnConfig.RuntimeParams["search_path"] = schema
-		runtimePool, e = pgxpool.NewWithConfig(t.Context(), rc)
-		if e != nil {
-			t.Fatal(e)
-		}
-		u, e := url.Parse(runtimeDSN)
-		if e != nil {
-			t.Fatal(e)
-		}
-		q := u.Query()
-		q.Set("search_path", schema)
-		u.RawQuery = q.Encode()
-		dsn = u.String()
+	if runtimeDSN == "" {
+		return pool, withSearchPath(t, ownerDSN, schema)
 	}
-	m, e := New(t.Context(), runtimePool, dsn, scorer)
+	ident := pgx.Identifier{schema}.Sanitize()
+	if _, e := pool.Exec(t.Context(), "GRANT USAGE ON SCHEMA "+ident+" TO antifraud_api; GRANT SELECT ON purchases,decisions TO antifraud_api; GRANT SELECT,INSERT,UPDATE ON simulation_runs TO antifraud_api"); e != nil {
+		t.Fatal(e)
+	}
+	rc, e := pgxpool.ParseConfig(runtimeDSN)
+	if e != nil {
+		t.Fatal(e)
+	}
+	rc.ConnConfig.RuntimeParams["search_path"] = schema
+	runtime, e := pgxpool.NewWithConfig(t.Context(), rc)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return runtime, withSearchPath(t, runtimeDSN, schema)
+}
+
+func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pgxpool.Pool) {
+	t.Helper()
+	ownerDSN := testDSN(t)
+	pool, schema := isolatedSchema(t, ownerDSN)
+	runtime, dsn := runtimePool(t, pool, ownerDSN, schema)
+	m, e := New(t.Context(), runtime, dsn, scorer)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -132,8 +156,8 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 		if e := m.Close(ctx); e != nil {
 			t.Error(e)
 		}
-		if runtimePool != pool {
-			runtimePool.Close()
+		if runtime != pool {
+			runtime.Close()
 		}
 		pool.Close()
 	})
@@ -145,6 +169,7 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 	RegisterRoutes(mux, m, true, "service", ops)
 	return m, mux, pool
 }
+
 func call(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if key != "" {
@@ -177,11 +202,12 @@ func wait(t *testing.T, m *Manager, id string) Run {
 	t.Fatal("worker did not finish")
 	return Run{}
 }
-func TestDurableLifecycle(t *testing.T) {
-	entered := make(chan struct{})
-	release := make(chan struct{})
+
+// heldScorer returns a scorer that closes entered on its first call and
+// answers "review" once release is closed.
+func heldScorer(entered chan<- struct{}, release <-chan struct{}) simulator.Scorer {
 	var once sync.Once
-	m, mux, _ := setup(t, scoreFunc(func(ctx context.Context, r simulator.Request) (simulator.Result, error) {
+	return scoreFunc(func(ctx context.Context, r simulator.Request) (simulator.Result, error) {
 		once.Do(func() { close(entered) })
 		select {
 		case <-release:
@@ -189,7 +215,13 @@ func TestDurableLifecycle(t *testing.T) {
 		case <-ctx.Done():
 			return simulator.Result{}, ctx.Err()
 		}
-	}))
+	})
+}
+
+func TestDurableLifecycle(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	m, mux, _ := setup(t, heldScorer(entered, release))
 	body := `{"request_id":"one","mode":"live","rate":50}`
 	for _, key := range []string{"", "service", "bad"} {
 		if w := call(mux, "POST", "/simulations", key, body); w.Code != 401 {

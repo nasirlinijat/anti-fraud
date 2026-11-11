@@ -65,7 +65,7 @@ POSTGRES_USER=antifraud
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RUNTIME_DB_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=antifraud
-MODEL_FILE=lgbm-ieee-v5-combined.json
+MODEL_FILE=lgbm-game-v5.json
 CONSOLE_HOST=console.$DASHED.sslip.io
 API_HOST=api.$DASHED.sslip.io
 CONSOLE_USER=team
@@ -110,8 +110,9 @@ go run ./cmd/simulator -url https://api.<dashed-ip>.sslip.io -api-key <API_KEY> 
 
 | Value | Model |
 |---|---|
-| `lgbm-ieee-v5-combined.json` | Trained on IEEE-CIS card data (the default of the repository) |
-| `lgbm-game-v2.json` | Trained on the simulator's game traffic, see `ml/README.md` |
+| `lgbm-game-v5.json` | Trained on the simulator's game traffic, see `ml/README.md` (the default of the repository) |
+| `lgbm-ieee-v5-combined.json` | Trained on IEEE-CIS card data, the real-data benchmark |
+| `lgbm-game-v2.json` | The earlier game model, trained on easier simulated traffic |
 | empty | Rules only |
 
 After changing it, run `bash deploy/deploy.sh` again.
