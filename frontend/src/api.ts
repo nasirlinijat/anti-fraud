@@ -254,3 +254,46 @@ export async function submitReviewDecision(analystKey: string, purchaseId: strin
     throw error
   }
 }
+
+export interface SimulationSettings {
+  request_id: string
+  mode: 'live' | 'backfill'
+  scenarios: string[]
+  seed: number
+  rate: number
+  count: number
+}
+export type SimulationStatus = 'starting' | 'running' | 'stopping' | 'completed' | 'stopped' | 'failed' | 'interrupted'
+export interface SimulationRun {
+  id: string
+  settings: SimulationSettings
+  status: SimulationStatus
+  created_at: string
+  finished_at: string | null
+  sent: number
+  failed: number
+  allowed: number
+  reviewed: number
+  blocked: number
+  pending: boolean
+  error?: string
+}
+export interface SimulationHistory {
+  items: SimulationRun[]
+  next_cursor?: string
+  available_scenarios: string[]
+}
+export function listSimulations(signal?: AbortSignal): Promise<SimulationHistory> {
+  return request('/simulations?limit=10', { signal })
+}
+export function getSimulation(id: string, signal?: AbortSignal): Promise<SimulationRun> {
+  return request(`/simulations/${encodeURIComponent(id)}`, { signal })
+}
+export function startSimulation(settings: SimulationSettings, operatorKey: string, signal?: AbortSignal): Promise<SimulationRun> {
+  return request('/simulations', { method: 'POST', auth: 'operator', signal,
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey }, body: JSON.stringify(settings) })
+}
+export function stopSimulation(id: string, operatorKey: string, signal?: AbortSignal): Promise<SimulationRun> {
+  return request(`/simulations/${encodeURIComponent(id)}/stop`, { method: 'POST', auth: 'operator', signal,
+    headers: { 'X-API-Key': operatorKey } })
+}
