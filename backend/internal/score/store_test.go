@@ -104,12 +104,11 @@ func countRows(t *testing.T, conn Conn, query string, args ...any) int {
 	return n
 }
 
-func TestSaveStoresPurchaseAndDecision(t *testing.T) {
-	tx := testTx(t)
-	ctx := context.Background()
-
+// fullPurchase returns a purchase with every optional field set. Its event
+// time is in a zone other than UTC.
+func fullPurchase() Purchase {
 	baku := time.FixedZone("Baku", 4*3600)
-	p := Purchase{
+	return Purchase{
 		TransactionID:        "txn-full",
 		EventTime:            time.Date(2026, 11, 8, 14, 30, 0, 0, baku),
 		AmountMinor:          75000,
@@ -133,6 +132,64 @@ func TestSaveStoresPurchaseAndDecision(t *testing.T) {
 		IPCountry:            ptr("TR"),
 		AccountCreatedAt:     ptr(time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)),
 	}
+}
+
+// savedDecision holds the decision columns as they were saved.
+type savedDecision struct {
+	version    int
+	outcome    string
+	ruleScore  int
+	fired      []scoring.FiredRule
+	inputs     map[string]float64
+	modelScore float64
+}
+
+// readSaved reads back a purchase that has every optional field, and its
+// decision.
+func readSaved(t *testing.T, tx pgx.Tx, id int64) (Purchase, savedDecision) {
+	t.Helper()
+	ctx := context.Background()
+	var (
+		got        Purchase
+		d          savedDecision
+		ip         netip.Addr
+		accountAt  time.Time
+		firedJSON  []byte
+		inputsJSON []byte
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.card_token,
+		       p.card_issuer, p.card_network, p.card_type, p.card_country, p.card_category,
+		       p.product_code, p.billing_region, p.billing_country, p.billing_distance,
+		       p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
+		       p.ip_address, p.ip_country, p.account_created_at,
+		       d.ruleset_version, d.outcome, d.rule_score, d.fired_rules, d.model_inputs, d.model_score
+		FROM purchases p JOIN decisions d ON d.purchase_id = p.id
+		WHERE p.id = $1`, id).Scan(
+		&got.TransactionID, &got.EventTime, &got.AmountMinor, &got.PlayerID, &got.CardToken,
+		&got.CardIssuer, &got.CardNetwork, &got.CardType, &got.CardCountry, &got.CardCategory,
+		&got.ProductCode, &got.BillingRegion, &got.BillingCountry, &got.BillingDistance,
+		&got.EmailDomain, &got.RecipientEmailDomain, &got.DeviceType, &got.DeviceName, &got.DeviceID,
+		&ip, &got.IPCountry, &accountAt,
+		&d.version, &d.outcome, &d.ruleScore, &firedJSON, &inputsJSON, &d.modelScore,
+	)
+	if err != nil {
+		t.Fatalf("read saved purchase: %v", err)
+	}
+	got.IPAddress = &ip
+	got.AccountCreatedAt = &accountAt
+	if err := json.Unmarshal(firedJSON, &d.fired); err != nil {
+		t.Fatalf("decode fired_rules %s: %v", firedJSON, err)
+	}
+	if err := json.Unmarshal(inputsJSON, &d.inputs); err != nil {
+		t.Fatalf("decode model_inputs %s: %v", inputsJSON, err)
+	}
+	return got, d
+}
+
+func TestSaveStoresPurchaseAndDecision(t *testing.T) {
+	tx := testTx(t)
+	p := fullPurchase()
 	d := Decision{
 		RulesetVersion: 1,
 		Result: scoring.Result{
@@ -147,43 +204,11 @@ func TestSaveStoresPurchaseAndDecision(t *testing.T) {
 		ModelScore:  ptr(0.42),
 	}
 
-	id, err := NewStore(tx).Save(ctx, p, d)
+	id, err := NewStore(tx).Save(context.Background(), p, d)
 	if err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-
-	var (
-		got        Purchase
-		ip         netip.Addr
-		accountAt  time.Time
-		version    int
-		outcome    string
-		ruleScore  int
-		firedJSON  []byte
-		inputsJSON []byte
-		modelScore float64
-	)
-	err = tx.QueryRow(ctx, `
-		SELECT p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.card_token,
-		       p.card_issuer, p.card_network, p.card_type, p.card_country, p.card_category,
-		       p.product_code, p.billing_region, p.billing_country, p.billing_distance,
-		       p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
-		       p.ip_address, p.ip_country, p.account_created_at,
-		       d.ruleset_version, d.outcome, d.rule_score, d.fired_rules, d.model_inputs, d.model_score
-		FROM purchases p JOIN decisions d ON d.purchase_id = p.id
-		WHERE p.id = $1`, id).Scan(
-		&got.TransactionID, &got.EventTime, &got.AmountMinor, &got.PlayerID, &got.CardToken,
-		&got.CardIssuer, &got.CardNetwork, &got.CardType, &got.CardCountry, &got.CardCategory,
-		&got.ProductCode, &got.BillingRegion, &got.BillingCountry, &got.BillingDistance,
-		&got.EmailDomain, &got.RecipientEmailDomain, &got.DeviceType, &got.DeviceName, &got.DeviceID,
-		&ip, &got.IPCountry, &accountAt,
-		&version, &outcome, &ruleScore, &firedJSON, &inputsJSON, &modelScore,
-	)
-	if err != nil {
-		t.Fatalf("read saved purchase: %v", err)
-	}
-	got.IPAddress = &ip
-	got.AccountCreatedAt = &accountAt
+	got, saved := readSaved(t, tx, id)
 
 	if !got.EventTime.Equal(p.EventTime) {
 		t.Errorf("event_time = %v, want %v", got.EventTime, p.EventTime)
@@ -200,23 +225,15 @@ func TestSaveStoresPurchaseAndDecision(t *testing.T) {
 		t.Errorf("saved purchase = %+v, want %+v", got, p)
 	}
 
-	if version != 1 || outcome != "review" || ruleScore != 55 || modelScore != 0.42 {
+	if saved.version != 1 || saved.outcome != "review" || saved.ruleScore != 55 || saved.modelScore != 0.42 {
 		t.Errorf("decision = (version %d, %s, score %d, model %v), want (version 1, review, score 55, model 0.42)",
-			version, outcome, ruleScore, modelScore)
+			saved.version, saved.outcome, saved.ruleScore, saved.modelScore)
 	}
-	var fired []scoring.FiredRule
-	if err := json.Unmarshal(firedJSON, &fired); err != nil {
-		t.Fatalf("decode fired_rules %s: %v", firedJSON, err)
+	if !reflect.DeepEqual(saved.fired, d.Result.FiredRules) {
+		t.Errorf("fired_rules = %+v, want %+v", saved.fired, d.Result.FiredRules)
 	}
-	if !reflect.DeepEqual(fired, d.Result.FiredRules) {
-		t.Errorf("fired_rules = %+v, want %+v", fired, d.Result.FiredRules)
-	}
-	var inputs map[string]float64
-	if err := json.Unmarshal(inputsJSON, &inputs); err != nil {
-		t.Fatalf("decode model_inputs %s: %v", inputsJSON, err)
-	}
-	if !reflect.DeepEqual(inputs, d.ModelInputs) {
-		t.Errorf("model_inputs = %v, want %v", inputs, d.ModelInputs)
+	if !reflect.DeepEqual(saved.inputs, d.ModelInputs) {
+		t.Errorf("model_inputs = %v, want %v", saved.inputs, d.ModelInputs)
 	}
 }
 
