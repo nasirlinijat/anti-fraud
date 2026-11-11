@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -90,7 +89,7 @@ func TestSummary(t *testing.T) {
 	save(t, tx, "old", scoring.OutcomeReview, 50, []scoring.FiredRule{high, newAccount}, nil, 3*time.Hour)
 
 	window := Window{Since: now.Add(-time.Hour), Until: now, BucketWidth: 5 * time.Minute}
-	got, err := readSummary(ctx, db.New(tx), window, 10)
+	got, err := readSummary(ctx, tx, window, 10)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -116,7 +115,7 @@ func TestSummary(t *testing.T) {
 		t.Errorf("last hour summary =\n%+v\nwant\n%+v", got, want)
 	}
 
-	all, err := readSummary(ctx, db.New(tx), Window{Since: time.Unix(0, 0).UTC(), Until: now}, 2)
+	all, err := readSummary(ctx, tx, Window{Since: time.Unix(0, 0).UTC(), Until: now}, 2)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -134,7 +133,7 @@ func TestSummary(t *testing.T) {
 
 func TestSummaryWithoutDecisions(t *testing.T) {
 	tx := testTx(t)
-	got, err := readSummary(t.Context(), db.New(tx), Window{Since: time.Unix(0, 0).UTC(), Until: now}, 10)
+	got, err := readSummary(t.Context(), tx, Window{Since: time.Unix(0, 0).UTC(), Until: now}, 10)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -168,7 +167,7 @@ func TestDecisionMetricsUseTheSameWindow(t *testing.T) {
 	if _, err := tx.Exec(ctx, `UPDATE purchases SET amount_minor = 9223372036854775807 WHERE id = ANY($1::bigint[])`, []int64{first, last}); err != nil {
 		t.Fatal(err)
 	}
-	legacyOnly, err := readSummary(ctx, db.New(tx), window, 10)
+	legacyOnly, err := readSummary(ctx, tx, window, 10)
 	if err != nil || legacyOnly.P95ScoringLatencyUs != nil {
 		t.Fatalf("legacy-only p95 = %v, error = %v", legacyOnly.P95ScoringLatencyUs, err)
 	}
@@ -179,7 +178,7 @@ func TestDecisionMetricsUseTheSameWindow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sum, err := readSummary(ctx, db.New(tx), window, 10)
+	sum, err := readSummary(ctx, tx, window, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

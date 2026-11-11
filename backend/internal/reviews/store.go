@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -66,19 +65,43 @@ var ErrNotFound = errors.New("review case not found")
 // DB is a connection that can also start a transaction. Both a pool and a
 // transaction qualify, so tests can run the store inside a rolled-back one.
 type DB interface {
-	db.DBTX
+	platform.DBTX
 	Begin(context.Context) (pgx.Tx, error)
 }
 
 // Store reads the review queue and saves review decisions.
 type Store struct {
 	conn DB
-	q    *db.Queries
 }
 
 func NewStore(conn DB) *Store {
-	return &Store{conn: conn, q: db.New(conn)}
+	return &Store{conn: conn}
 }
+
+// resolveReview saves a decision for a purchase still awaiting review and
+// reports what happened: saved, not_found, already_resolved, or not_review.
+const resolveReview = `
+WITH candidate AS (
+    SELECT d.purchase_id, d.outcome
+    FROM decisions d
+    WHERE d.purchase_id = $1
+), saved AS (
+    INSERT INTO review_resolutions (purchase_id, decision, analyst_id)
+    SELECT candidate.purchase_id, $2::text, $3::text
+    FROM candidate
+    WHERE candidate.outcome = 'review'
+    ON CONFLICT (purchase_id) DO NOTHING
+    RETURNING resolved_at
+)
+SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM saved) THEN 'saved'
+    WHEN NOT EXISTS (SELECT 1 FROM candidate) THEN 'not_found'
+    WHEN EXISTS (SELECT 1 FROM candidate WHERE outcome = 'review') THEN 'already_resolved'
+    ELSE 'not_review'
+END::text AS status,
+(SELECT resolved_at FROM saved)::timestamptz AS resolved_at`
+
+const getPurchaseDeviceID = `SELECT device_id FROM purchases WHERE id = $1`
 
 // resolve saves the decision. When the decision is a saved rejection and
 // blockDevice is set, it also blocklists the purchase's device in the same
@@ -91,25 +114,24 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 	}
 	defer tx.Rollback(ctx)
 
-	row, err := db.New(tx).ResolveReview(ctx, db.ResolveReviewParams{
-		TargetPurchaseID: purchaseID,
-		Decision:         decision,
-		AnalystID:        analystID,
-	})
-	if err != nil {
+	var result resolution
+	var resolvedAt *time.Time
+	if err := tx.QueryRow(ctx, resolveReview, purchaseID, decision, analystID).Scan(&result.status, &resolvedAt); err != nil {
 		return resolution{}, fmt.Errorf("resolve review: %w", err)
 	}
-	result := resolution{status: row.Status, resolvedAt: row.ResolvedAt.Time}
+	if resolvedAt != nil {
+		result.resolvedAt = *resolvedAt
+	}
 
-	if row.Status == "saved" && decision == "reject" && blockDevice {
-		device, err := db.New(tx).GetPurchaseDeviceID(ctx, purchaseID)
-		if err != nil {
+	if result.status == "saved" && decision == "reject" && blockDevice {
+		var device *string
+		if err := tx.QueryRow(ctx, getPurchaseDeviceID, purchaseID).Scan(&device); err != nil {
 			return resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
 		}
-		if device.Valid {
+		if device != nil {
 			_, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{
 				Type:   blocklist.TypeDevice,
-				Value:  device.String,
+				Value:  *device,
 				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
 			}, analystID)
 			if err != nil {
@@ -155,148 +177,167 @@ func cursorFor(order queueOrder, item QueueItem) queueCursor {
 	return queueCursor{decidedAt: item.DecidedAt, purchaseID: item.PurchaseID, scoreKey: key}
 }
 
+// queueItemColumns are the columns scanQueueItem reads, in order.
+const queueItemColumns = `d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at`
+
+// listQueueByRuleScore pages through open reviews, highest rule score first.
+// $1 to $3 are the cursor of the last item already returned, or NULL for the
+// first page.
+const listQueueByRuleScore = `
+SELECT ` + queueItemColumns + `
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      $1::integer IS NULL
+      OR (-d.rule_score, d.decided_at, d.purchase_id) > (
+          $1::integer, $2::timestamptz, $3::bigint
+      )
+  )
+ORDER BY -d.rule_score, d.decided_at, d.purchase_id
+LIMIT $4`
+
+// listQueueByModelScore pages through open reviews, highest model score first
+// and purchases without a model score last.
+const listQueueByModelScore = `
+SELECT ` + queueItemColumns + `
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      $1::double precision IS NULL
+      OR (COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id) > (
+          $1::double precision, $2::timestamptz, $3::bigint
+      )
+  )
+ORDER BY COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id
+LIMIT $4`
+
 func (s *Store) queue(ctx context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
-	rows, err := s.queueRows(ctx, int32(limit), order, after)
+	var score any
+	var decidedAt *time.Time
+	var purchaseID *int64
+	if after != nil {
+		decidedAt, purchaseID = &after.decidedAt, &after.purchaseID
+		score = after.scoreKey
+		if order == byRuleScore {
+			score = int32(after.scoreKey)
+		}
+	}
+	query := listQueueByModelScore
+	if order == byRuleScore {
+		query = listQueueByRuleScore
+	}
+	rows, err := s.conn.Query(ctx, query, score, decidedAt, purchaseID, int32(limit))
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}
-
-	items := make([]QueueItem, 0, len(rows))
-	for _, r := range rows {
-		item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
-			r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (QueueItem, error) {
+		return scanQueueItem(row)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list review queue: %w", err)
 	}
 	return items, nil
 }
 
-func (s *Store) queueRows(ctx context.Context, limit int32, order queueOrder, after *queueCursor) ([]db.ListReviewQueueRow, error) {
-	var decidedAt pgtype.Timestamptz
-	var purchaseID pgtype.Int8
-	var score float64
-	if after != nil {
-		decidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
-		purchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
-		score = after.scoreKey
+// scanQueueItem reads the queueItemColumns, followed by any extra
+// destinations.
+func scanQueueItem(row pgx.Row, extra ...any) (QueueItem, error) {
+	var item QueueItem
+	var firedRules []byte
+	dest := append([]any{
+		&item.PurchaseID, &item.TransactionID, &item.EventTime, &item.AmountMinor, &item.PlayerID, &item.DeviceID,
+		&item.RuleScore, &item.ModelScore, &item.ModelVersion, &firedRules, &item.DecidedAt,
+	}, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return QueueItem{}, err
 	}
-	if order == byRuleScore {
-		return s.q.ListReviewQueue(ctx, db.ListReviewQueueParams{
-			PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
-			AfterScore: pgtype.Int4{Int32: int32(score), Valid: after != nil},
-		})
+	if err := json.Unmarshal(firedRules, &item.FiredRules); err != nil {
+		return QueueItem{}, fmt.Errorf("decode fired rules of purchase %d: %w", item.PurchaseID, err)
 	}
-	rows, err := s.q.ListReviewQueueByModel(ctx, db.ListReviewQueueByModelParams{
-		PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
-		AfterScore: pgtype.Float8{Float64: score, Valid: after != nil},
-	})
-	if err != nil {
-		return nil, err
+	// Decisions saved before rule messages existed show the rule name.
+	for i := range item.FiredRules {
+		if item.FiredRules[i].Message == "" {
+			item.FiredRules[i].Message = string(item.FiredRules[i].Name)
+		}
 	}
-	result := make([]db.ListReviewQueueRow, len(rows))
-	for i, row := range rows {
-		result[i] = db.ListReviewQueueRow(row)
-	}
-	return result, nil
+	item.EventTime = item.EventTime.UTC()
+	item.DecidedAt = item.DecidedAt.UTC()
+	return item, nil
 }
+
+// getReviewCase returns a purchase that is still awaiting review.
+const getReviewCase = `
+SELECT ` + queueItemColumns + `, d.ruleset_version
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.purchase_id = $1
+  AND d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
+
+// listCasePlayerPurchases lists the player's purchases before the given one,
+// newest first.
+const listCasePlayerPurchases = `
+SELECT p.transaction_id, p.event_time, p.amount_minor, d.outcome
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = $1
+  AND (p.event_time, p.transaction_id) < ($2::timestamptz, $3::text)
+ORDER BY p.event_time DESC, p.transaction_id DESC
+LIMIT $4`
+
+// getCaseDeviceActivity summarizes the device's purchases up to and including
+// the given one.
+const getCaseDeviceActivity = `
+SELECT
+    count(*) AS purchases,
+    count(DISTINCT card_token) AS distinct_cards,
+    max(event_time)::timestamptz AS last_seen_at
+FROM purchases
+WHERE device_id IS NOT NULL
+  AND device_id = $1::text
+  AND (event_time, transaction_id) <= ($2::timestamptz, $3::text)`
 
 // Case returns the purchase with the given ID if it is under review. It
 // returns ErrNotFound if there is none.
 func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
-	r, err := s.q.GetReviewCase(ctx, purchaseID)
+	var c CaseItem
+	item, err := scanQueueItem(s.conn.QueryRow(ctx, getReviewCase, purchaseID), &c.RulesetVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CaseItem{}, ErrNotFound
 	}
 	if err != nil {
 		return CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
 	}
-	item, err := newQueueItem(r.PurchaseID, r.TransactionID, r.EventTime, r.AmountMinor, r.PlayerID, r.DeviceID,
-		r.RuleScore, r.ModelScore, r.ModelVersion, r.FiredRules, r.DecidedAt)
-	if err != nil {
-		return CaseItem{}, err
-	}
+	c.QueueItem = item
 
-	historyRows, err := s.q.ListCasePlayerPurchases(ctx, db.ListCasePlayerPurchasesParams{
-		PlayerID:      r.PlayerID,
-		EventTime:     r.EventTime,
-		TransactionID: r.TransactionID,
-		PageLimit:     casePlayerPurchaseLimit,
+	rows, err := s.conn.Query(ctx, listCasePlayerPurchases, item.PlayerID, item.EventTime, item.TransactionID, int32(casePlayerPurchaseLimit))
+	if err != nil {
+		return CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
+	}
+	c.PlayerPurchases, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (PlayerPurchase, error) {
+		var p PlayerPurchase
+		err := row.Scan(&p.TransactionID, &p.EventTime, &p.AmountMinor, &p.Outcome)
+		p.EventTime = p.EventTime.UTC()
+		return p, err
 	})
 	if err != nil {
 		return CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
 	}
-	playerPurchases := make([]PlayerPurchase, 0, len(historyRows))
-	for _, row := range historyRows {
-		playerPurchases = append(playerPurchases, PlayerPurchase{
-			TransactionID: row.TransactionID,
-			EventTime:     row.EventTime.Time.UTC(),
-			AmountMinor:   row.AmountMinor,
-			Outcome:       scoring.Outcome(row.Outcome),
-		})
-	}
 
-	var deviceActivity *DeviceActivity
-	if r.DeviceID.Valid {
-		activity, err := s.q.GetCaseDeviceActivity(ctx, db.GetCaseDeviceActivityParams{
-			DeviceID:      r.DeviceID.String,
-			EventTime:     r.EventTime,
-			TransactionID: r.TransactionID,
-		})
+	if item.DeviceID != nil {
+		var a DeviceActivity
+		err := s.conn.QueryRow(ctx, getCaseDeviceActivity, *item.DeviceID, item.EventTime, item.TransactionID).
+			Scan(&a.Purchases, &a.DistinctCards, &a.LastSeenAt)
 		if err != nil {
 			return CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
 		}
-		deviceActivity = &DeviceActivity{
-			Purchases:     activity.Purchases,
-			DistinctCards: activity.DistinctCards,
-			LastSeenAt:    activity.LastSeenAt.Time.UTC(),
-		}
+		a.LastSeenAt = a.LastSeenAt.UTC()
+		c.DeviceActivity = &a
 	}
-
-	return CaseItem{
-		QueueItem:       item,
-		RulesetVersion:  int(r.RulesetVersion),
-		PlayerPurchases: playerPurchases,
-		DeviceActivity:  deviceActivity,
-	}, nil
-}
-
-func newQueueItem(
-	purchaseID int64, transactionID string, eventTime pgtype.Timestamptz, amountMinor int64, playerID string, deviceID pgtype.Text,
-	ruleScore int32, modelScore pgtype.Float8, modelVersion pgtype.Text, firedRules []byte, decidedAt pgtype.Timestamptz,
-) (QueueItem, error) {
-	var fired []scoring.FiredRule
-	if err := json.Unmarshal(firedRules, &fired); err != nil {
-		return QueueItem{}, fmt.Errorf("decode fired rules of purchase %d: %w", purchaseID, err)
-	}
-	// Decisions saved before rule messages existed show the rule name.
-	for i := range fired {
-		if fired[i].Message == "" {
-			fired[i].Message = string(fired[i].Name)
-		}
-	}
-	item := QueueItem{
-		PurchaseID:    purchaseID,
-		TransactionID: transactionID,
-		EventTime:     eventTime.Time.UTC(),
-		AmountMinor:   amountMinor,
-		PlayerID:      playerID,
-		RuleScore:     int(ruleScore),
-		FiredRules:    fired,
-		DecidedAt:     decidedAt.Time.UTC(),
-	}
-	if deviceID.Valid {
-		device := deviceID.String
-		item.DeviceID = &device
-	}
-	if modelScore.Valid {
-		score := modelScore.Float64
-		item.ModelScore = &score
-	}
-	if modelVersion.Valid {
-		version := modelVersion.String
-		item.ModelVersion = &version
-	}
-	return item, nil
+	return c, nil
 }

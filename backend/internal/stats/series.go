@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 type DecisionBucket struct {
@@ -20,33 +21,51 @@ type DecisionSeries struct {
 	Buckets       []DecisionBucket `json:"buckets"`
 }
 
-func readDecisionSeries(ctx context.Context, q *db.Queries, window Window, overview db.DecisionOverviewRow) (DecisionSeries, error) {
+// countDecisionBuckets counts decisions by outcome in buckets of width $1
+// aligned to the Unix epoch. Buckets without decisions have no row.
+const countDecisionBuckets = `
+SELECT
+    date_bin($1::interval, decided_at, TIMESTAMPTZ '1970-01-01 00:00:00+00')::timestamptz AS bucket_start,
+    count(*) FILTER (WHERE outcome = 'allow') AS allowed,
+    count(*) FILTER (WHERE outcome = 'review') AS reviewed,
+    count(*) FILTER (WHERE outcome = 'block') AS blocked
+FROM decisions
+WHERE decided_at >= $2::timestamptz
+  AND decided_at < $3::timestamptz
+GROUP BY bucket_start
+ORDER BY bucket_start`
+
+func readDecisionSeries(ctx context.Context, conn platform.DBTX, window Window, o overview) (DecisionSeries, error) {
 	width, start := window.BucketWidth, window.Since
 	if width == 0 {
-		start = overview.FirstDecisionAt.Time
+		start = o.firstDecisionAt
 		width = time.Minute
-		if overview.Total > 0 {
+		if o.Total > 0 {
 			width = allTimeBucketWidth(start, window.Until)
 		}
 	}
 	series := DecisionSeries{BucketSeconds: int64(width / time.Second), Buckets: []DecisionBucket{}}
-	if overview.Total == 0 {
+	if o.Total == 0 {
 		return series, nil
 	}
 
-	rows, err := q.CountDecisionBuckets(ctx, db.CountDecisionBucketsParams{
-		BucketWidth: pgtype.Interval{Microseconds: width.Microseconds(), Valid: true},
-		Since:       pgtype.Timestamptz{Time: window.Since, Valid: true},
-		Until:       pgtype.Timestamptz{Time: window.Until, Valid: true},
+	rows, err := conn.Query(ctx, countDecisionBuckets,
+		pgtype.Interval{Microseconds: width.Microseconds(), Valid: true}, window.Since, window.Until)
+	if err != nil {
+		return DecisionSeries{}, err
+	}
+	counted, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DecisionBucket, error) {
+		var b DecisionBucket
+		return b, row.Scan(&b.Start, &b.Allow, &b.Review, &b.Block)
 	})
 	if err != nil {
 		return DecisionSeries{}, err
 	}
 	for at := bucketStart(start, width); at.Before(window.Until); at = at.Add(width) {
 		bucket := DecisionBucket{Start: at}
-		if len(rows) > 0 && rows[0].BucketStart.Time.Equal(at) {
-			bucket.Allow, bucket.Review, bucket.Block = rows[0].Allowed, rows[0].Reviewed, rows[0].Blocked
-			rows = rows[1:]
+		if len(counted) > 0 && counted[0].Start.Equal(at) {
+			bucket.Allow, bucket.Review, bucket.Block = counted[0].Allow, counted[0].Review, counted[0].Block
+			counted = counted[1:]
 		}
 		series.Buckets = append(series.Buckets, bucket)
 	}
