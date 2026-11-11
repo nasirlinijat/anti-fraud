@@ -25,8 +25,8 @@ const (
 // Entries lists, adds and removes blocklist entries.
 type Entries interface {
 	List(ctx context.Context) ([]StoredEntry, error)
-	Add(ctx context.Context, e Entry) (StoredEntry, error)
-	Remove(ctx context.Context, id int64) error
+	Add(ctx context.Context, e Entry, operatorID string) (StoredEntry, error)
+	Remove(ctx context.Context, id int64, operatorID string) error
 }
 
 // Handler serves the blocklist management endpoints.
@@ -40,10 +40,10 @@ func NewHandler(entries Entries) *Handler {
 
 // RegisterRoutes registers GET and POST /blocklist and DELETE /blocklist/{id}
 // behind API key authentication.
-func RegisterRoutes(mux *http.ServeMux, h *Handler, apiKey string) {
+func RegisterRoutes(mux *http.ServeMux, h *Handler, apiKey string, operators platform.OperatorKeys) {
 	mux.Handle("GET /blocklist", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.list)))
-	mux.Handle("POST /blocklist", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.add)))
-	mux.Handle("DELETE /blocklist/{id}", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.remove)))
+	mux.Handle("POST /blocklist", platform.RequireOperator(operators, h.add))
+	mux.Handle("DELETE /blocklist/{id}", platform.RequireOperator(operators, h.remove))
 }
 
 type listResponse struct {
@@ -65,7 +65,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, listResponse{Entries: entries})
 }
 
-func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) add(w http.ResponseWriter, r *http.Request, operatorID string) {
 	var req addRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
@@ -84,7 +84,7 @@ func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, err := h.entries.Add(r.Context(), entry)
+	saved, err := h.entries.Add(r.Context(), entry, operatorID)
 	if errors.Is(err, ErrDuplicate) {
 		platform.WriteJSON(w, http.StatusConflict, platform.ErrorResponse{
 			Error:  "this value is already on the blocklist",
@@ -108,13 +108,13 @@ func writeAddDecodeError(w http.ResponseWriter, err error) {
 	platform.WriteError(w, http.StatusBadRequest, "request body must be one JSON object with type, value and reason")
 }
 
-func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) remove(w http.ResponseWriter, r *http.Request, operatorID string) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		platform.WriteError(w, http.StatusBadRequest, "the entry ID must be a positive integer")
 		return
 	}
-	err = h.entries.Remove(r.Context(), id)
+	err = h.entries.Remove(r.Context(), id, operatorID)
 	if errors.Is(err, ErrNotFound) {
 		platform.WriteError(w, http.StatusNotFound, "no blocklist entry has this ID")
 		return

@@ -111,7 +111,7 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 				Type:   blocklist.TypeDevice,
 				Value:  device.String,
 				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
-			})
+			}, analystID)
 			if err != nil {
 				return resolution{}, err
 			}

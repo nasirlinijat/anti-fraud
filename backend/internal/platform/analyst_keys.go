@@ -11,60 +11,76 @@ import (
 )
 
 // AnalystKeys authenticates the individual credentials for the review console.
-type AnalystKeys struct {
-	entries []analystCredential
+type AnalystKeys struct{ namedKeys }
+
+// OperatorKeys authenticates operators who change fraud configuration.
+type OperatorKeys struct{ namedKeys }
+
+type namedKeys struct {
+	entries []namedCredential
 }
 
-type analystCredential struct {
+type namedCredential struct {
 	id     string
 	digest [sha256.Size]byte
 }
 
-// ParseAnalystKeys loads optional reviewer credentials without retaining their raw keys.
 func ParseAnalystKeys(value, serviceKey string) (AnalystKeys, error) {
+	keys, err := parseNamedKeys(value, "REVIEW_ANALYST_KEYS", "analyst_id", serviceKey, namedKeys{})
+	return AnalystKeys{keys}, err
+}
+
+func ParseOperatorKeys(value, serviceKey string, analysts AnalystKeys) (OperatorKeys, error) {
+	keys, err := parseNamedKeys(value, "OPERATOR_API_KEYS", "operator_id", serviceKey, analysts.namedKeys)
+	return OperatorKeys{keys}, err
+}
+
+func parseNamedKeys(value, variable, idField, serviceKey string, other namedKeys) (namedKeys, error) {
 	if strings.TrimSpace(value) == "" {
-		return AnalystKeys{}, nil
+		return namedKeys{}, nil
 	}
-
-	var entries []struct {
-		AnalystID string `json:"analyst_id"`
-		Key       string `json:"key"`
-	}
+	var entries []map[string]string
 	dec := json.NewDecoder(strings.NewReader(value))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&entries); err != nil || entries == nil || dec.Decode(new(any)) != io.EOF {
-		return AnalystKeys{}, fmt.Errorf("REVIEW_ANALYST_KEYS must be a JSON array of analyst_id and key entries")
+		return namedKeys{}, fmt.Errorf("%s must be a JSON array of %s and key entries", variable, idField)
 	}
 
-	var keys AnalystKeys
+	var keys namedKeys
 	ids := make(map[string]bool, len(entries))
-	digests := make(map[[sha256.Size]byte]bool, len(entries))
-	serviceDigest := sha256.Sum256([]byte(serviceKey))
+	digests := make(map[[sha256.Size]byte]bool, len(entries)+len(other.entries)+1)
+	digests[sha256.Sum256([]byte(serviceKey))] = true
+	for _, entry := range other.entries {
+		digests[entry.digest] = true
+	}
 	for i, entry := range entries {
-		if entry.AnalystID == "" || strings.TrimSpace(entry.AnalystID) != entry.AnalystID ||
-			strings.ContainsFunc(entry.AnalystID, unicode.IsControl) {
-			return AnalystKeys{}, fmt.Errorf("REVIEW_ANALYST_KEYS entry %d has an invalid analyst_id", i+1)
+		id, key := entry[idField], entry["key"]
+		if len(entry) != 2 || id == "" || strings.TrimSpace(id) != id || strings.ContainsFunc(id, unicode.IsControl) {
+			return namedKeys{}, fmt.Errorf("%s entry %d must contain a valid %s and key", variable, i+1, idField)
 		}
-		if entry.Key == "" || strings.ContainsFunc(entry.Key, func(r rune) bool { return r <= ' ' || r > '~' }) {
-			return AnalystKeys{}, fmt.Errorf("REVIEW_ANALYST_KEYS entry %d needs a nonempty ASCII key without spaces", i+1)
+		if key == "" || strings.ContainsFunc(key, func(r rune) bool { return r <= ' ' || r > '~' }) {
+			return namedKeys{}, fmt.Errorf("%s entry %d needs a nonempty ASCII key without spaces", variable, i+1)
 		}
-		digest := sha256.Sum256([]byte(entry.Key))
-		if ids[entry.AnalystID] || digests[digest] || digest == serviceDigest {
-			return AnalystKeys{}, fmt.Errorf("REVIEW_ANALYST_KEYS entry %d must have a unique analyst ID and a key distinct from all other keys and API_KEY", i+1)
+		digest := sha256.Sum256([]byte(key))
+		if ids[id] || digests[digest] {
+			return namedKeys{}, fmt.Errorf("%s entry %d must have a unique ID and a distinct key", variable, i+1)
 		}
-		ids[entry.AnalystID] = true
+		ids[id] = true
 		digests[digest] = true
-		keys.entries = append(keys.entries, analystCredential{id: entry.AnalystID, digest: digest})
+		keys.entries = append(keys.entries, namedCredential{id: id, digest: digest})
 	}
 	return keys, nil
 }
 
-func (keys AnalystKeys) Configured() bool {
+func (keys namedKeys) Configured() bool {
 	return len(keys.entries) > 0
 }
 
-// Analyst returns the ID associated with a key, or the empty string if it is invalid.
+// Analyst returns the authenticated analyst ID, or the empty string.
 func (keys AnalystKeys) Analyst(key string) string {
+	return keys.identity(key)
+}
+
+func (keys namedKeys) identity(key string) string {
 	digest := sha256.Sum256([]byte(key))
 	var id string
 	for _, entry := range keys.entries {

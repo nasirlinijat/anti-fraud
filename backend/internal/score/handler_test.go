@@ -23,6 +23,16 @@ import (
 )
 
 const testKey = "test-key"
+const operatorTestKey = "operator-key"
+
+func testOperators(t *testing.T) platform.OperatorKeys {
+	t.Helper()
+	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"test-operator","key":"`+operatorTestKey+`"}]`, testKey, platform.AnalystKeys{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
 
 var testRuleset = scoring.Ruleset{
 	Version:         7,
@@ -716,7 +726,7 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	rulesetStore := rulesets.NewStore(tx)
 	purchaseStore := &deviceHistoryStore{Store: NewStore(tx)}
 	mux := http.NewServeMux()
-	rulesets.RegisterRoutes(mux, rulesetStore, testKey)
+	rulesets.RegisterRoutes(mux, rulesetStore, testKey, testOperators(t))
 	RegisterRoutes(mux, NewHandler(rulesetStore, blocklist.NewStore(tx), purchaseStore), testKey)
 
 	originalRuleset, err := rulesetStore.Active(ctx)
@@ -739,7 +749,7 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 		"review_threshold":20,"block_threshold":80,
 		"rules":{"device_card_count":{"enabled":true,"weight":20,"limit":5}}
 	}`))
-	publish.Header.Set(platform.APIKeyHeader, testKey)
+	publish.Header.Set(platform.APIKeyHeader, operatorTestKey)
 	published := httptest.NewRecorder()
 	mux.ServeHTTP(published, publish)
 	if published.Code != http.StatusCreated {

@@ -230,6 +230,14 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM blocklist_entries WHERE entry_type = 'device' AND value = 'device-bad'`).Scan(&entries); err != nil || entries != 1 {
 		t.Fatalf("entries for the device = %d, err = %v, want 1", entries, err)
 	}
+	var audited int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM configuration_audit_events
+		WHERE action = 'blocklist.add' AND actor_kind = 'analyst' AND actor_id = 'first'
+		  AND details->>'value' = 'device-bad'
+	`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("audit events for the device = %d, err = %v, want 1", audited, err)
+	}
 
 	// A conflicting decision creates no entry.
 	decided := withDevice("block-decided", "device-conflict")

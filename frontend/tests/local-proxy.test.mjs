@@ -45,6 +45,9 @@ test('local console proxy checks origin before forwarding credentials', async t 
   assert.equal(await call(port, '/score', 'POST', { origin, 'x-api-key': 'caller-key' }), 204)
   assert.equal(await call(port, '/reviews?sort=model_score', 'GET', { 'x-api-key': 'analyst-key' }), 204)
   assert.equal(await call(port, '/reviews', 'GET', {}), 204)
+  assert.equal(await call(port, '/rulesets', 'POST', { origin, 'x-api-key': 'operator-key' }), 204)
+  assert.equal(await call(port, '/blocklist/1', 'DELETE', { origin }), 204)
+  assert.equal(await call(port, '/rulesets', 'GET', { origin }), 204)
   assert.equal(await call(port, '/rulesets', 'POST', { origin: 'https://example.invalid' }), 403)
   assert.equal(await call(port, '/blocklist/1', 'DELETE', { 'sec-fetch-site': 'cross-site' }), 403)
   assert.equal(await call(port, '/score', 'POST', { host: 'example.invalid' }), 403)
@@ -52,5 +55,8 @@ test('local console proxy checks origin before forwarding credentials', async t 
     ['/score', 'proxy-test-service-key'],
     ['/reviews?sort=model_score', 'analyst-key'],
     ['/reviews', undefined],
+    ['/rulesets', 'operator-key'],
+    ['/blocklist/1', undefined],
+    ['/rulesets', 'proxy-test-service-key'],
   ])
 })

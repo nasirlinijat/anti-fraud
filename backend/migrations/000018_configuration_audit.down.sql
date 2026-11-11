@@ -1,0 +1,1 @@
+DROP TABLE configuration_audit_events;

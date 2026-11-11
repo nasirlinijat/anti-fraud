@@ -3,15 +3,18 @@ package blocklist_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
 )
@@ -46,15 +49,15 @@ func TestAddListRemove(t *testing.T) {
 	ctx := context.Background()
 	store := blocklist.NewStore(tx)
 
-	card, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeCard, Value: "card-1", Reason: "stolen"})
+	card, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeCard, Value: "card-1", Reason: "stolen"}, "test-actor")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeIP, Value: "203.0.113.9", Reason: "proxy"}); err != nil {
+	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeIP, Value: "203.0.113.9", Reason: "proxy"}, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	// The same value is allowed for another type.
-	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "card-1", Reason: "same text"}); err != nil {
+	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "card-1", Reason: "same text"}, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -66,10 +69,10 @@ func TestAddListRemove(t *testing.T) {
 		t.Fatalf("entries = %+v, want 3 with the card entry last", entries)
 	}
 
-	if err := store.Remove(ctx, card.ID); err != nil {
+	if err := store.Remove(ctx, card.ID, "test-actor"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if err := store.Remove(ctx, card.ID); !errors.Is(err, blocklist.ErrNotFound) {
+	if err := store.Remove(ctx, card.ID, "test-actor"); !errors.Is(err, blocklist.ErrNotFound) {
 		t.Fatalf("second Remove = %v, want ErrNotFound", err)
 	}
 	if entries, _ := store.List(ctx); len(entries) != 2 {
@@ -82,7 +85,7 @@ func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 	ctx := context.Background()
 	store := blocklist.NewStore(tx)
 	e := blocklist.Entry{Type: blocklist.TypeDevice, Value: "device-1", Reason: "emulator"}
-	if _, err := store.Add(ctx, e); err != nil {
+	if _, err := store.Add(ctx, e, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	// A failed insert aborts a Postgres transaction, so run it in a savepoint.
@@ -91,7 +94,7 @@ func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sp.Rollback(ctx)
-	if _, err := blocklist.NewStore(sp).Add(ctx, e); !errors.Is(err, blocklist.ErrDuplicate) {
+	if _, err := blocklist.NewStore(sp).Add(ctx, e, "test-actor"); !errors.Is(err, blocklist.ErrDuplicate) {
 		t.Fatalf("second Add = %v, want ErrDuplicate", err)
 	}
 }
@@ -102,7 +105,7 @@ func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
 	store := blocklist.NewStore(tx)
 	device := blocklist.Entry{Type: blocklist.TypeDevice, Value: "device-9", Reason: "first"}
 
-	first, added, err := store.AddIfAbsent(ctx, device)
+	first, added, err := store.AddIfAbsent(ctx, device, "test-actor")
 	if err != nil || !added || first.ID == 0 || first.Type != blocklist.TypeDevice || first.Value != "device-9" || first.CreatedAt.IsZero() {
 		t.Fatalf("first AddIfAbsent = %+v, %v, %v; want a saved entry", first, added, err)
 	}
@@ -110,7 +113,7 @@ func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
 	// No savepoint is needed: an existing entry is not an error, so the
 	// transaction stays usable.
 	device.Reason = "second"
-	if _, added, err := store.AddIfAbsent(ctx, device); err != nil || added {
+	if _, added, err := store.AddIfAbsent(ctx, device, "test-actor"); err != nil || added {
 		t.Fatalf("second AddIfAbsent added = %v, err = %v; want no new entry and no error", added, err)
 	}
 	entries, err := store.List(ctx)
@@ -118,7 +121,7 @@ func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
 		t.Fatalf("entries = %+v, err = %v; want only the first entry", entries, err)
 	}
 	// The same value on another type is a different entry.
-	if _, added, err := store.AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "device-9", Reason: "other type"}); err != nil || !added {
+	if _, added, err := store.AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "device-9", Reason: "other type"}, "test-actor"); err != nil || !added {
 		t.Fatalf("other type: added = %v, err = %v; want saved", added, err)
 	}
 }
@@ -140,7 +143,7 @@ func TestAddIfAbsentIsPartOfItsTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypeDevice, Value: value, Reason: "test"}); err != nil || !added {
+	if _, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypeDevice, Value: value, Reason: "test"}, "test-actor"); err != nil || !added {
 		t.Fatalf("AddIfAbsent added = %v, err = %v", added, err)
 	}
 	if err := tx.Rollback(ctx); err != nil {
@@ -160,12 +163,20 @@ func ptrTo[T any](v T) *T { return &v }
 func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	tx := emptyTx(t)
 	mux := http.NewServeMux()
-	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(tx)), testKey)
+	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"audit-operator","key":"operator-key"}]`, testKey, platform.AnalystKeys{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(tx)), testKey, keys)
 	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), score.NewStore(tx)), testKey)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("X-API-Key", testKey)
+		key := testKey
+		if strings.HasPrefix(path, "/blocklist") {
+			key = "operator-key"
+		}
+		req.Header.Set("X-API-Key", key)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
@@ -183,4 +194,21 @@ func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	if rec := send(http.MethodPost, "/score", purchase("after")); !strings.Contains(rec.Body.String(), `"outcome":"block"`) {
 		t.Fatalf("after the entry: %s, want block", rec.Body.String())
 	}
+	var id int64
+	if err := tx.QueryRow(t.Context(), `SELECT id FROM blocklist_entries WHERE value = '198.51.100.4'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if rec := send(http.MethodDelete, fmt.Sprintf("/blocklist/%d", id), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("remove entry: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var events []string
+	if err := tx.QueryRow(t.Context(), `
+        SELECT array_agg(action ORDER BY id)
+        FROM configuration_audit_events
+        WHERE resource_id = $1 AND actor_kind = 'operator' AND actor_id = 'audit-operator'
+          AND details->>'value' = '198.51.100.4'
+    `, id).Scan(&events); err != nil || !slices.Equal(events, []string{"blocklist.add", "blocklist.remove"}) {
+		t.Fatalf("audit events = %v, error = %v", events, err)
+	}
+
 }

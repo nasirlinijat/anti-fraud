@@ -11,16 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteBlocklistEntry = `-- name: DeleteBlocklistEntry :execrows
-DELETE FROM blocklist_entries WHERE id = $1
+const deleteBlocklistEntry = `-- name: DeleteBlocklistEntry :one
+WITH removed AS (
+    DELETE FROM blocklist_entries AS entry WHERE entry.id = $1
+    RETURNING id, entry_type, value, reason
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'operator', $2, 'blocklist.remove', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM removed
+)
+SELECT count(*) FROM removed
 `
 
-func (q *Queries) DeleteBlocklistEntry(ctx context.Context, id int64) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteBlocklistEntry, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+type DeleteBlocklistEntryParams struct {
+	EntryID    int64
+	OperatorID string
+}
+
+func (q *Queries) DeleteBlocklistEntry(ctx context.Context, arg DeleteBlocklistEntryParams) (int64, error) {
+	row := q.db.QueryRow(ctx, deleteBlocklistEntry, arg.EntryID, arg.OperatorID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const findBlocklistEntry = `-- name: FindBlocklistEntry :one
@@ -62,15 +75,24 @@ func (q *Queries) FindBlocklistEntry(ctx context.Context, arg FindBlocklistEntry
 }
 
 const insertBlocklistEntry = `-- name: InsertBlocklistEntry :one
-INSERT INTO blocklist_entries (entry_type, value, reason)
-VALUES ($1, $2, $3)
-RETURNING id, created_at
+WITH added AS (
+    INSERT INTO blocklist_entries (entry_type, value, reason)
+    VALUES ($1, $2, $3)
+    RETURNING id, entry_type, value, reason, created_at
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'operator', $4, 'blocklist.add', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM added
+)
+SELECT id, created_at FROM added
 `
 
 type InsertBlocklistEntryParams struct {
-	EntryType string
-	Value     string
-	Reason    string
+	EntryType  string
+	Value      string
+	Reason     string
+	OperatorID string
 }
 
 type InsertBlocklistEntryRow struct {
@@ -79,23 +101,37 @@ type InsertBlocklistEntryRow struct {
 }
 
 func (q *Queries) InsertBlocklistEntry(ctx context.Context, arg InsertBlocklistEntryParams) (InsertBlocklistEntryRow, error) {
-	row := q.db.QueryRow(ctx, insertBlocklistEntry, arg.EntryType, arg.Value, arg.Reason)
+	row := q.db.QueryRow(ctx, insertBlocklistEntry,
+		arg.EntryType,
+		arg.Value,
+		arg.Reason,
+		arg.OperatorID,
+	)
 	var i InsertBlocklistEntryRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }
 
 const insertBlocklistEntryIfAbsent = `-- name: InsertBlocklistEntryIfAbsent :one
-INSERT INTO blocklist_entries (entry_type, value, reason)
-VALUES ($1, $2, $3)
-ON CONFLICT (entry_type, value) DO NOTHING
-RETURNING id, created_at
+WITH added AS (
+    INSERT INTO blocklist_entries (entry_type, value, reason)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (entry_type, value) DO NOTHING
+    RETURNING id, entry_type, value, reason, created_at
+), audit AS (
+    INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id, details)
+    SELECT 'analyst', $4, 'blocklist.add', id,
+           jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
+    FROM added
+)
+SELECT id, created_at FROM added
 `
 
 type InsertBlocklistEntryIfAbsentParams struct {
 	EntryType string
 	Value     string
 	Reason    string
+	AnalystID string
 }
 
 type InsertBlocklistEntryIfAbsentRow struct {
@@ -105,7 +141,12 @@ type InsertBlocklistEntryIfAbsentRow struct {
 
 // Returns no row when the type and value are already on the blocklist.
 func (q *Queries) InsertBlocklistEntryIfAbsent(ctx context.Context, arg InsertBlocklistEntryIfAbsentParams) (InsertBlocklistEntryIfAbsentRow, error) {
-	row := q.db.QueryRow(ctx, insertBlocklistEntryIfAbsent, arg.EntryType, arg.Value, arg.Reason)
+	row := q.db.QueryRow(ctx, insertBlocklistEntryIfAbsent,
+		arg.EntryType,
+		arg.Value,
+		arg.Reason,
+		arg.AnalystID,
+	)
 	var i InsertBlocklistEntryIfAbsentRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err

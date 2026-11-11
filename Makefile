@@ -1,6 +1,8 @@
 -include .env
 export
 
+TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+
 .PHONY: up down db run test lint migrate generate docs simulate
 
 up:
@@ -12,11 +14,11 @@ down:
 db:
 	docker compose up -d --wait db
 
-run: db
+run: migrate
 	cd backend && go run ./cmd/api
 
 test: migrate
-	cd backend && TEST_DATABASE_URL="$(DATABASE_URL)" go test ./...
+	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./...
 
 lint:
 	@unformatted="$$(gofmt -l backend)"; \
@@ -29,6 +31,7 @@ lint:
 
 migrate:
 	docker compose run --rm migrate
+	docker compose run --rm --no-deps db-permissions
 
 generate:
 	docker compose run --rm sqlc

@@ -40,7 +40,7 @@ test('reports proxy, invalid JSON, and network failures distinctly', async ({ mo
 
 test('accepts empty delete and readiness responses', async ({ mock }) => {
   mock.method(globalThis, 'fetch', async () => new Response(null, { status: 204 }))
-  assert.deepEqual(await removeBlocklistEntry(17), { ok: true, value: null })
+  assert.deepEqual(await removeBlocklistEntry(17, 'operator-key'), { ok: true, value: null })
   assert.equal(await checkReadiness(), undefined)
 })
 
@@ -77,7 +77,7 @@ test('ruleset limits round trip as exact JSON integers', async ({ mock }) => {
   const { version, ...config } = await getActiveRuleset()
   assert.equal(version, 1)
   assert.equal(config.rules.high_amount.limit, 9223372036854775807n)
-  assert.equal((await publishRuleset(config)).ok, true)
+  assert.equal((await publishRuleset(config, 'operator-key')).ok, true)
   assert.match(fetch.mock.calls[1].arguments[1].body, /"limit":9223372036854775807[},]/)
 })
 
