@@ -58,3 +58,15 @@ def test_requests_keep_the_player_and_card_keys():
 
 def test_rule_outcome_uses_the_default_thresholds():
     assert replay.rule_outcome(np.array([0, 49, 50, 79, 80])).tolist() == ["allow", "allow", "review", "review", "block"]
+
+
+def test_labels_csv_keeps_truth_out_of_requests(tmp_path):
+    import pandas as pd
+    frame = pd.DataFrame({"transaction_id": ["one"], "is_fraud": [1]})
+    replay.write_labels(frame, tmp_path / "labels.csv")
+    assert list(pd.read_csv(tmp_path / "labels.csv")) == ["transaction_id", "is_fraud"]
+    frame["pattern"] = "stolen_card"
+    replay.write_labels(frame, tmp_path / "labels.csv")
+    saved = pd.read_csv(tmp_path / "labels.csv")
+    assert list(saved) == ["transaction_id", "is_fraud", "scenario"]
+    assert saved.loc[0, "scenario"] == "stolen_card"

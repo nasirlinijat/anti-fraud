@@ -20,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
@@ -100,17 +101,21 @@ func scan(row pgx.Row) (Run, error) {
 
 // Manager owns background workers; database locks also exclude other processes.
 type Manager struct {
-	pool    *pgxpool.Pool
-	dsn     string
-	client  simulator.Scorer
-	mu      sync.Mutex
-	closed  bool
-	cancels map[string]context.CancelFunc
-	wg      sync.WaitGroup
+	pool       *pgxpool.Pool
+	evaluation *pgxpool.Pool
+	dsn        string
+	client     simulator.Scorer
+	mu         sync.Mutex
+	closed     bool
+	cancels    map[string]context.CancelFunc
+	wg         sync.WaitGroup
 }
 
-func New(ctx context.Context, pool *pgxpool.Pool, dsn string, client simulator.Scorer) (*Manager, error) {
+func New(ctx context.Context, pool *pgxpool.Pool, dsn string, client simulator.Scorer, evaluation ...*pgxpool.Pool) (*Manager, error) {
 	m := &Manager{pool: pool, dsn: dsn, client: client, cancels: map[string]context.CancelFunc{}}
+	if len(evaluation) > 0 {
+		m.evaluation = evaluation[0]
+	}
 	c, ok, err := m.lock(ctx)
 	if err != nil {
 		return nil, err
@@ -137,21 +142,43 @@ func (m *Manager) lock(ctx context.Context) (*pgx.Conn, bool, error) {
 	return c, true, nil
 }
 func (m *Manager) recover(ctx context.Context, c *pgx.Conn) error {
-	// A single sequential worker writes its pending ID before sending. Recover the
-	// commit/checkpoint gap by exact transaction lookup, never by a prefix scan.
-	_, err := c.Exec(ctx, `UPDATE simulation_runs r SET
+	return pgx.BeginFunc(ctx, recoveryConnection{m: m, c: c}, func(tx pgx.Tx) error {
+		if m.evaluation != nil {
+			if _, err := labels.RecoverTx(ctx, tx, ""); err != nil {
+				return err
+			}
+		}
+		var conn platform.DBTX = tx
+		// A single sequential worker writes its pending ID before sending. Recover the
+		// commit/checkpoint gap by exact transaction lookup, never by a prefix scan.
+		_, err := conn.Exec(ctx, `UPDATE simulation_runs r SET
  sent=r.sent+1, allowed=r.allowed+(d.outcome='allow')::int,
  reviewed=r.reviewed+(d.outcome='review')::int, blocked=r.blocked+(d.outcome='block')::int,
  pending_transaction_id=NULL, failed=GREATEST(r.failed-1,0)
  FROM purchases p JOIN decisions d ON d.purchase_id=p.id
  WHERE p.transaction_id=r.pending_transaction_id`)
-	if err != nil {
-		return err
-	}
-	_, err = c.Exec(ctx, `UPDATE simulation_runs SET status='interrupted', finished_at=now(), error='backend interrupted the run'
+		if err != nil {
+			return err
+		}
+		_, err = conn.Exec(ctx, `UPDATE simulation_runs SET status='interrupted', finished_at=now(), error='backend interrupted the run'
  WHERE status IN ('starting','running','stopping')`)
-	return err
+		return err
+	})
 }
+
+// Recovery and progress use the evaluation transaction; the original session retains ownership.
+type recoveryConnection struct {
+	m *Manager
+	c *pgx.Conn
+}
+
+func (r recoveryConnection) Begin(ctx context.Context) (pgx.Tx, error) {
+	if r.m.evaluation != nil {
+		return r.m.evaluation.Begin(ctx)
+	}
+	return r.c.Begin(ctx)
+}
+
 func (m *Manager) get(ctx context.Context, id string) (Run, error) {
 	return scan(m.pool.QueryRow(ctx, `SELECT `+columns+` FROM simulation_runs WHERE id=$1`, id))
 }
@@ -410,11 +437,30 @@ func (m *Manager) stop(w http.ResponseWriter, r *http.Request, operator string) 
 
 // trackedScorer checkpoints each sequential purchase on the controller session.
 type trackedScorer struct {
-	m      *Manager
-	c      *pgx.Conn
-	id     string
-	cancel context.CancelFunc
-	fatal  error
+	m       *Manager
+	c       *pgx.Conn
+	id      string
+	cancel  context.CancelFunc
+	fatal   error
+	current labels.Label
+}
+
+// ScorePurchase saves the purchase's private label as pending, then scores
+// it. A label that cannot be saved stops the run, because the run would
+// otherwise have decisions without answers.
+func (t *trackedScorer) ScorePurchase(ctx context.Context, p simulator.Purchase) (simulator.Result, error) {
+	if t.m.evaluation != nil {
+		prep, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := labels.Prepare(prep, t.m.evaluation, labels.FromPurchase(t.id, p))
+		cancel()
+		if err != nil {
+			t.fatal = err
+			t.cancel()
+			return simulator.Result{}, simulator.FatalError{Err: err}
+		}
+	}
+	t.current = labels.FromPurchase(t.id, p)
+	return t.Score(ctx, p.Request)
 }
 
 // Score sends one purchase. It saves the transaction ID as pending before the
@@ -457,7 +503,15 @@ func (t *trackedScorer) Score(ctx context.Context, req simulator.Request) (simul
 	}
 	checkpointCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
-	_, err = t.c.Exec(checkpointCtx, `UPDATE simulation_runs SET sent=sent+1,allowed=allowed+($3='allow')::int,reviewed=reviewed+($3='review')::int,blocked=blocked+($3='block')::int,pending_transaction_id=NULL WHERE id=$1 AND pending_transaction_id=$2`, t.id, req.TransactionID, result.Outcome)
+	if t.m.evaluation != nil {
+		err = labels.Finalize(checkpointCtx, t.m.evaluation, t.current, func(tx pgx.Tx) error {
+			_, err := tx.Exec(checkpointCtx, `UPDATE simulation_runs SET sent=sent+1,allowed=allowed+($3='allow')::int,reviewed=reviewed+($3='review')::int,blocked=blocked+($3='block')::int,pending_transaction_id=NULL WHERE id=$1 AND pending_transaction_id=$2`, t.id, req.TransactionID, result.Outcome)
+			return err
+		})
+	} else {
+		_, err = t.c.Exec(checkpointCtx, `UPDATE simulation_runs SET sent=sent+1,allowed=allowed+($3='allow')::int,reviewed=reviewed+($3='review')::int,blocked=blocked+($3='block')::int,pending_transaction_id=NULL WHERE id=$1 AND pending_transaction_id=$2`, t.id, req.TransactionID, result.Outcome)
+	}
+
 	if err != nil {
 		t.fatal = err
 		t.cancel()

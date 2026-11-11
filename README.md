@@ -305,4 +305,43 @@ the active-run guard; separately launched CLI simulators are not controlled.
 A seed determines traffic given the same generator settings and time anchor.
 Actual outcomes also depend on existing history, blocklists, rules and model.
 Backfill should use a clean demonstration database when comparing results.
-This API does not reset data or write fraud labels.
+This API does not reset data or expose fraud labels; the controller persists evaluation answers privately.
+
+## Private evaluation labels
+
+Scored simulator runs now require `LABELS_DATABASE_URL` pointing to the **same
+PostgreSQL database as the score API**, using the separate `antifraud_labels`
+role. Set `LABELS_DB_PASSWORD` in `.env` and rerun `make migrate` to provision it.
+Compose supplies the container connection; host CLI commands use the connection
+in `.env.example`. Scoring-only installations can leave evaluation credentials
+unset while `SIMULATION_ENABLED=false`. Never use the database owner for ingestion.
+
+Both CLI and console simulations store private pending metadata before sending a
+purchase, then its label after the decision is saved. Console label writes and
+progress checkpoints commit together. A persistence failure stops traffic and
+leaves pending metadata recoverable; score requests never contain scenario or
+fraud answers. Dump-only runs need neither a database nor an API key.
+
+After a crash, recover saved pending decisions without resending traffic (from
+`backend`, with `LABELS_DATABASE_URL` set):
+
+```bash
+go run ./cmd/import-labels -run my-run -recover
+```
+
+Load the IEEE-CIS replay's existing labels file after replay has saved decisions:
+
+```bash
+go run ./cmd/import-labels -run ieee-replay-1 -source ieee-cis -file ../ml/output/replay/labels.csv
+```
+
+The CSV has `transaction_id,is_fraud`, where the flag is exactly 0 or 1. For
+simulator replays, use `-source simulator` and the additional `scenario` column
+now written by `replay.py --requests`. Repeating the same import is safe;
+contradictory answers, different run assignments, duplicate file IDs, malformed
+rows and unscored transactions fail the complete import without partial writes.
+Keep run IDs stable for retries. Old console runs have no recoverable answer key
+and remain unlabelled. No historical answers are guessed.
+
+Raw and replay-derived label files stay in ignored `ml/data/` or `ml/output/` and
+must never be committed. The public API and model inputs do not expose labels.

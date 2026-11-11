@@ -32,6 +32,17 @@ type Scorer interface {
 	Score(ctx context.Context, req Request) (Result, error)
 }
 
+// PurchaseScorer receives private metadata without changing the HTTP request.
+type PurchaseScorer interface {
+	ScorePurchase(context.Context, Purchase) (Result, error)
+}
+
+// FatalError stops dispatch when a persistence prerequisite fails.
+type FatalError struct{ Err error }
+
+func (e FatalError) Error() string { return e.Err.Error() }
+func (e FatalError) Unwrap() error { return e.Err }
+
 // Client calls POST /score on a running backend.
 type Client struct {
 	BaseURL string
@@ -141,8 +152,11 @@ func (s sender) send(ctx context.Context, purchases iter.Seq[Purchase]) (Summary
 		if s.live {
 			p.Request.EventTime = time.Now().UTC()
 		}
-		res, err := s.scorer.Score(ctx, p.Request)
+		res, err := s.score(ctx, p)
 		if err != nil {
+			if errors.As(err, new(FatalError)) {
+				return sum, err
+			}
 			if s.live && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return sum, ctx.Err()
 			}
@@ -163,6 +177,16 @@ func (s sender) send(ctx context.Context, purchases iter.Seq[Purchase]) (Summary
 		return sum, ctx.Err()
 	}
 	return sum, nil
+}
+
+// score sends one purchase. A scorer that also implements PurchaseScorer
+// receives the whole purchase, so it can record private metadata without
+// changing the HTTP request.
+func (s sender) score(ctx context.Context, p Purchase) (Result, error) {
+	if observer, ok := s.scorer.(PurchaseScorer); ok {
+		return observer.ScorePurchase(ctx, p)
+	}
+	return s.scorer.Score(ctx, p.Request)
 }
 
 // rateTicker returns a channel that ticks rate times per second and the

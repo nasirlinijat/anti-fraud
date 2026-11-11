@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
@@ -44,7 +45,10 @@ func main() {
 	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
-	manager := newSimulationManager(cfg, pool)
+	manager, evaluation := newSimulationManager(cfg, pool)
+	if evaluation != nil {
+		defer evaluation.Close()
+	}
 	simulations.RegisterRoutes(mux, manager, cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
 
 	server := platform.NewServer(":"+cfg.Port, mux)
@@ -86,21 +90,28 @@ func useModel(modelPath string, handler *score.Handler, rulesetStore *rulesets.S
 		model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 }
 
-// newSimulationManager returns the manager of console simulation runs, or nil
-// when simulations are disabled. The manager scores through this server's own
-// score endpoint. It exits when the manager cannot be initialized.
-func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) *simulations.Manager {
+// newSimulationManager returns the manager of console simulation runs and
+// its connection to the evaluation database, or nils when simulations are
+// disabled. It exits when the setup fails.
+func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulations.Manager, *pgxpool.Pool) {
 	if !cfg.SimulationEnabled {
-		return nil
+		return nil, nil
 	}
 	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	evaluation, err := platform.NewPool(setupCtx, cfg.LabelsDatabaseURL)
+	if err != nil {
+		log.Fatal("invalid labels database configuration")
+	}
+	if err := labels.Preflight(setupCtx, evaluation); err != nil {
+		log.Fatal(err)
+	}
 	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
-	manager, err := simulations.New(setupCtx, pool, cfg.DatabaseURL, client)
+	manager, err := simulations.New(setupCtx, pool, cfg.DatabaseURL, client, evaluation)
 	if err != nil {
 		log.Fatalf("initialize simulations: %v", err)
 	}
-	return manager
+	return manager, evaluation
 }
 
 // shutDownOnSignal waits for the signal context to end, then drains the

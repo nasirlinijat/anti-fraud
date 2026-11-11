@@ -3,6 +3,7 @@ package platform
 import "testing"
 
 func TestSimulationFeatureConfig(t *testing.T) {
+	t.Setenv("LABELS_DATABASE_URL", "postgres://evaluation/test")
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("API_KEY", "test")
 	for _, v := range []string{"", "false", "true", "invalid"} {

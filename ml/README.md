@@ -268,7 +268,7 @@ The model catches less than one point more on its training days than on later da
 
 ## Replay through the score API
 
-`replay.py` sends IEEE-CIS purchases to a running backend through `POST /score`, in time order and in the API format, and compares the live decisions with Python. Fraud labels never reach the service; they stay in the script and in the report.
+`replay.py` sends IEEE-CIS purchases to a running backend through `POST /score`, in time order and in the API format, and compares the live decisions with Python. Fraud labels never reach the score API; they stay in the script and report, and can be imported into private evaluation tables after scoring.
 
 The live features count every purchase already saved, so the backend must start from an empty database. To keep your development data, use a separate database:
 
@@ -504,3 +504,17 @@ Test month (days 153 to 182, 85,430 purchases, 3.5% fraud), model v3, ruleset ve
 | Rules and model | 2.25% | 26.4% | 17.0% |
 
 Since v4 the replay sends `account_created_at` from `D1`, so the `new_account` rule fires on IEEE-CIS too; the rule outcomes with that mapping are tracked in AF-91. The model flagged 2.1% of purchases instead of the 1% expected from training, because its lifetime history features saw only 30 days (AF-95).
+
+### Import replay labels for evaluation
+
+After a completed replay, set the separate `LABELS_DATABASE_URL` for the replay
+database, then run from `backend`:
+
+```bash
+go run ./cmd/import-labels -run ieee-replay-1 -source ieee-cis -file ../ml/output/replay/labels.csv
+```
+
+IEEE-CIS imports keep scenario empty. Simulator replay CSVs include scenario and
+use `-source simulator`. Importing never sends score requests or changes model
+inputs. Existing training reads only transaction_id and is_fraud, so it accepts
+the added scenario column. Labels and derived CSV files must remain uncommitted.

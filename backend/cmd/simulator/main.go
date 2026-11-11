@@ -14,19 +14,22 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
 
 // options are the command-line flags.
 type options struct {
-	cfg    simulator.Config
-	url    string
-	apiKey string
-	count  int
-	rate   float64
-	start  string
-	run    string
-	dump   string
+	cfg      simulator.Config
+	url      string
+	apiKey   string
+	count    int
+	rate     float64
+	start    string
+	run      string
+	database string
+	dump     string
 }
 
 // live reports whether to send live traffic until interrupted.
@@ -36,6 +39,9 @@ func main() {
 	o := parseFlags()
 	if o.apiKey == "" && o.dump == "" {
 		log.Fatal("API key is missing: set API_KEY or pass -api-key")
+	}
+	if o.dump == "" && o.database == "" {
+		log.Fatal("LABELS_DATABASE_URL is required for scored runs")
 	}
 	o.cfg.Start = o.startTime()
 	o.cfg.Run = o.runName()
@@ -78,6 +84,7 @@ func parseFlags() options {
 	flag.IntVar(&o.cfg.Players, "players", o.cfg.Players, "number of regular players")
 	flag.DurationVar(&o.cfg.MeanGap, "gap", o.cfg.MeanGap, "mean simulated time between traffic events")
 	flag.Float64Var(&o.cfg.MissingFieldShare, "missing", o.cfg.MissingFieldShare, "share of players whose client leaves out each group of optional fields, from 0 to 1")
+	flag.StringVar(&o.database, "labels-database", os.Getenv("LABELS_DATABASE_URL"), "evaluation database (required when scoring)")
 	flag.StringVar(&o.dump, "dump", "", "write the purchases with their fraud labels to this JSON Lines file instead of sending them")
 	flag.Parse()
 	return o
@@ -132,24 +139,50 @@ func (o options) send(purchases []simulator.Purchase) bool {
 	defer stop()
 
 	client := &simulator.Client{BaseURL: o.url, APIKey: o.apiKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
+	pool := o.openLabels(ctx)
+	defer pool.Close()
+	observed := &labels.Scorer{Pool: pool, Client: client, RunID: o.cfg.Run}
 	started := time.Now()
 	onError := func(err error) { log.Print(err) }
 	var sum simulator.Summary
 	var err error
 	if o.live() {
 		log.Printf("sending live purchases to %s (seed %d, run %s), press Ctrl+C to stop", o.url, o.cfg.Seed, o.cfg.Run)
-		sum, err = simulator.RunLive(ctx, client, o.cfg, o.rate, onError)
+		sum, err = simulator.RunLive(ctx, observed, o.cfg, o.rate, onError)
 	} else {
 		log.Printf("sending %d purchases to %s (seed %d, run %s)", len(purchases), o.url, o.cfg.Seed, o.cfg.Run)
-		sum, err = simulator.Run(ctx, client, purchases, o.rate, onError)
+		sum, err = simulator.Run(ctx, observed, purchases, o.rate, onError)
 	}
 	runFailed := err != nil && err != ctx.Err()
 	if runFailed {
 		log.Printf("stopped early: %v", err)
+		log.Printf("evaluation may be pending for run %q; use import-labels -run <run-id> -recover after fixing the error", o.cfg.Run)
 	}
 	log.Printf("sent %d, failed %d in %s", sum.Sent, sum.Failed, time.Since(started).Round(time.Millisecond))
 	printSummary(sum)
 	return !runFailed && sum.Failed == 0
+}
+
+// openLabels connects to the evaluation database, checks it, and finishes
+// any labels a crashed earlier attempt of the same run left pending. It exits
+// on failure.
+func (o options) openLabels(ctx context.Context) *pgxpool.Pool {
+	pool, err := pgxpool.New(ctx, o.database)
+	if err != nil {
+		log.Fatal("invalid labels database configuration")
+	}
+	preflight, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err = labels.Preflight(preflight, pool)
+	cancel()
+	if err != nil {
+		pool.Close()
+		log.Fatal(err)
+	}
+	if _, err := labels.Recover(ctx, pool, o.cfg.Run); err != nil {
+		pool.Close()
+		log.Fatal(err)
+	}
+	return pool
 }
 
 func writeDump(path string, purchases []simulator.Purchase) error {

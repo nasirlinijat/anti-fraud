@@ -164,3 +164,12 @@ dc down && docker volume rm antifraud_db-data && dc up -d --wait
 - The gateway rejects console requests from other sites, and the console's own checks still apply behind it.
 - SSH is open only to the IP that created the instance. When your IP changes, edit the instance's security group.
 - Secrets live only in `~/anti-fraud/.env` on the server.
+
+## Evaluation credential upgrade
+
+Before enabling simulation on an existing server, add a separate random
+`LABELS_DB_PASSWORD` to its private `.env`. Deployment provisions `antifraud_labels`
+and the backend's private evaluation connection. Keep `SIMULATION_ENABLED=false`
+when evaluation credentials are absent. Host simulator and import commands need
+`LABELS_DATABASE_URL` for the same database; use private connectivity, not a public
+PostgreSQL port. Existing scoring credentials remain unable to read label tables.
