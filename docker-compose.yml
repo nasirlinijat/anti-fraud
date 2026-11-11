@@ -73,14 +73,6 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  sqlc:
-    image: sqlc/sqlc:1.31.1
-    profiles: [tools]
-    volumes:
-      - ./backend:/src
-    working_dir: /src
-    command: generate
-
   swagger-ui:
     image: swaggerapi/swagger-ui:v5.31.0
     profiles: [tools]

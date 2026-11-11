@@ -88,9 +88,9 @@ func Export(ctx context.Context, conn platform.DBTX, featureNames []string, w io
 	return sum, out.Error()
 }
 
-// modelInputsPage is a page of saved decisions after the given
+// ModelInputsPageSQL is a page of saved decisions after the given
 // (event_time, transaction_id), in that order.
-const modelInputsPage = `
+const ModelInputsPageSQL = `
 SELECT p.transaction_id, p.event_time, p.player_id, d.model_inputs, d.model_score
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
@@ -107,7 +107,7 @@ type modelInputsRow struct {
 }
 
 func listModelInputs(ctx context.Context, conn platform.DBTX, after time.Time, afterID string) ([]modelInputsRow, error) {
-	rows, err := conn.Query(ctx, modelInputsPage, after, afterID, PageSize)
+	rows, err := conn.Query(ctx, ModelInputsPageSQL, after, afterID, PageSize)
 	if err != nil {
 		return nil, err
 	}

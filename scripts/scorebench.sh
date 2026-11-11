@@ -65,4 +65,4 @@ done
 cd "$root/backend"
 SCOREBENCH_DATABASE_URL="postgres://scorebench:$password@$db_address/scorebench?sslmode=disable" \
     SCOREBENCH_API_URL="http://$api_address" SCOREBENCH_API_KEY="$api_key" SCOREBENCH_OPERATOR_KEY="$operator_key" \
-    go test -count=1 -timeout=5m -run '^TestScoreBenchmark$' -v ./internal/db
+    go test -count=1 -timeout=5m -run '^TestScoreBenchmark$' -v ./internal/queryplans

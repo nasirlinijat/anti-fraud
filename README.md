@@ -46,7 +46,6 @@ To develop the backend on the host, run `make migrate` to prepare the database, 
 | `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
-| `make generate` | Regenerates the database code from the SQL queries |
 | `make docs` | Shows the API spec in Swagger UI at http://localhost:8090 |
 | `make simulate` | Sends seeded demo purchases to the running backend (see below) |
 
@@ -233,25 +232,18 @@ The [STRIDE threat model](docs/threat-model.md) describes the local deployment's
 
 ## Database Queries
 
-Database code is generated from SQL files with [sqlc](https://sqlc.dev). Do not edit the generated files in `backend/internal/db/` by hand.
+The backend runs SQL directly with [pgx](https://github.com/jackc/pgx). Each feature package keeps its queries as string constants next to the store code that runs them, with numbered parameters (`$1`, `$2`, ...):
 
-To add a query:
+```go
+const getActiveRuleset = `
+SELECT version, review_threshold, block_threshold
+FROM rulesets
+WHERE is_active`
 
-1. Write it in a `.sql` file in `backend/queries/`, with a name line above it:
+err := conn.QueryRow(ctx, getActiveRuleset).Scan(&rs.Version, &rs.ReviewThreshold, &rs.BlockThreshold)
+```
 
-   ```sql
-   -- name: GetActiveRuleset :one
-   SELECT version, review_threshold, block_threshold
-   FROM rulesets
-   WHERE is_active;
-   ```
-
-   `:one` returns one row, `:many` returns a list, and `:exec` returns nothing.
-
-2. Run `make generate`.
-3. Commit the `.sql` file together with the generated code.
-
-sqlc reads the table definitions from `backend/migrations/`, so a query on a new table needs its migration first.
+Pass nil pointers for NULL values and scan nullable columns into pointers. A query on a new table needs its migration first. A query on the scoring or dashboard path should be added to the index check in `backend/internal/queryplans/`, which fails when PostgreSQL would answer it with a sequential scan.
 
 ## Troubleshooting
 

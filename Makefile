@@ -3,7 +3,7 @@ export
 
 TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
-.PHONY: up down db run test lint migrate generate docs simulate
+.PHONY: up down db run test lint migrate docs simulate
 
 up:
 	docker compose up -d --build --wait
@@ -32,9 +32,6 @@ lint:
 migrate:
 	docker compose run --rm migrate
 	docker compose run --rm --no-deps db-permissions
-
-generate:
-	docker compose run --rm sqlc
 
 docs:
 	@echo "Swagger UI: http://localhost:$${SWAGGER_PORT:-8090} (press Ctrl+C to stop)"

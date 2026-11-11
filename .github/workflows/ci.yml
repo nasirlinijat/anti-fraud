@@ -54,9 +54,6 @@ jobs:
             exit 1
           fi
 
-      - name: Check generated code
-        run: docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 diff
-
       - name: Vet
         run: go vet ./...
 

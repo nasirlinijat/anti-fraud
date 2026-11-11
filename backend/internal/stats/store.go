@@ -67,10 +67,10 @@ func (s *Store) Summary(ctx context.Context, window Window, maxRules int) (Summa
 	return sum, err
 }
 
-// decisionOverview counts the decisions in [$1, $2) by outcome and finds the
+// DecisionOverviewSQL counts the decisions in [$1, $2) by outcome and finds the
 // 95th percentile scoring latency and the first decision time ($1 when there
 // are none).
-const decisionOverview = `
+const DecisionOverviewSQL = `
 SELECT
     count(*) FILTER (WHERE outcome = 'allow') AS allowed,
     count(*) FILTER (WHERE outcome = 'review') AS reviewed,
@@ -83,7 +83,7 @@ FROM decisions
 WHERE decided_at >= $1::timestamptz
   AND decided_at < $2::timestamptz`
 
-// overview is a decisionOverview row.
+// overview is a DecisionOverviewSQL row.
 type overview struct {
 	Outcomes
 	latencySamples  int64
@@ -91,8 +91,8 @@ type overview struct {
 	firstDecisionAt time.Time
 }
 
-// blockedValue sums blocked amounts as text, so the total cannot overflow.
-const blockedValue = `
+// BlockedValueSQL sums blocked amounts as text, so the total cannot overflow.
+const BlockedValueSQL = `
 SELECT coalesce(sum(p.amount_minor), 0)::text AS amount_minor
 FROM decisions d
 JOIN purchases p ON p.id = d.purchase_id
@@ -100,7 +100,9 @@ WHERE d.outcome = 'block'
   AND d.decided_at >= $1::timestamptz
   AND d.decided_at < $2::timestamptz`
 
-const topFiredRules = `
+// TopFiredRulesSQL counts how often each rule fired in [$1, $2) and the
+// points it added, most frequent first.
+const TopFiredRulesSQL = `
 SELECT
     rule.name::text AS name,
     count(*) AS fired,
@@ -113,15 +115,16 @@ GROUP BY rule.name
 ORDER BY fired DESC, name
 LIMIT $3`
 
-const countReviewQueue = `
+// CountReviewQueueSQL counts the purchases still awaiting review.
+const CountReviewQueueSQL = `
 SELECT count(*)
 FROM decisions d
 WHERE d.outcome = 'review'
   AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
 
-// countModelEffects counts scored decisions, and decisions whose outcome
+// CountModelEffectsSQL counts scored decisions, and decisions whose outcome
 // differs from what the rule score alone gives.
-const countModelEffects = `
+const CountModelEffectsSQL = `
 SELECT
     count(d.model_score) AS scored,
     count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold) AS flagged,
@@ -134,7 +137,7 @@ WHERE d.decided_at >= $1::timestamptz
 func readSummary(ctx context.Context, conn platform.DBTX, window Window, maxRules int) (Summary, error) {
 	since, until := window.Since, window.Until
 	var o overview
-	err := conn.QueryRow(ctx, decisionOverview, since, until).Scan(
+	err := conn.QueryRow(ctx, DecisionOverviewSQL, since, until).Scan(
 		&o.Allow, &o.Review, &o.Block, &o.Total, &o.latencySamples, &o.p95LatencyUs, &o.firstDecisionAt,
 	)
 	if err != nil {
@@ -144,14 +147,14 @@ func readSummary(ctx context.Context, conn platform.DBTX, window Window, maxRule
 	if o.latencySamples > 0 {
 		sum.P95ScoringLatencyUs = &o.p95LatencyUs
 	}
-	if err := conn.QueryRow(ctx, blockedValue, since, until).Scan(&sum.BlockedValueMinor); err != nil {
+	if err := conn.QueryRow(ctx, BlockedValueSQL, since, until).Scan(&sum.BlockedValueMinor); err != nil {
 		return Summary{}, fmt.Errorf("sum blocked value: %w", err)
 	}
 	if sum.DecisionSeries, err = readDecisionSeries(ctx, conn, window, o); err != nil {
 		return Summary{}, fmt.Errorf("read decision buckets: %w", err)
 	}
 
-	rows, err := conn.Query(ctx, topFiredRules, since, until, int32(maxRules))
+	rows, err := conn.Query(ctx, TopFiredRulesSQL, since, until, int32(maxRules))
 	if err != nil {
 		return Summary{}, fmt.Errorf("count fired rules: %w", err)
 	}
@@ -163,10 +166,10 @@ func readSummary(ctx context.Context, conn platform.DBTX, window Window, maxRule
 		return Summary{}, fmt.Errorf("count fired rules: %w", err)
 	}
 
-	if err := conn.QueryRow(ctx, countReviewQueue).Scan(&sum.ReviewQueue); err != nil {
+	if err := conn.QueryRow(ctx, CountReviewQueueSQL).Scan(&sum.ReviewQueue); err != nil {
 		return Summary{}, fmt.Errorf("count review queue: %w", err)
 	}
-	if err := conn.QueryRow(ctx, countModelEffects, since, until).Scan(&sum.Model.Scored, &sum.Model.Flagged, &sum.Model.Cleared); err != nil {
+	if err := conn.QueryRow(ctx, CountModelEffectsSQL, since, until).Scan(&sum.Model.Scored, &sum.Model.Flagged, &sum.Model.Cleared); err != nil {
 		return Summary{}, fmt.Errorf("count model effects: %w", err)
 	}
 	return sum, nil

@@ -1,4 +1,4 @@
-package db
+package queryplans
 
 import (
 	"context"
@@ -9,6 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
 )
 
 // TestFeatureQueriesUseIndexes checks that every feature history and dashboard
@@ -39,20 +43,20 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"PlayerHistory", playerHistory, []any{at, int64(1000), "gmail.com", device, client, client, client, "player-1", "txn-1"}},
-		{"CardHistory", cardHistory, []any{at, "card-1", "txn-1"}},
-		{"IssuerHistory", issuerHistory, []any{"1001", at, "txn-1"}},
-		{"FeatureCounts", featureCounts, []any{"gmail.com", device, client, client, client}},
-		{"DecisionOverview", decisionOverview, []any{at, until}},
-		{"BlockedValue", blockedValue, []any{at, until}},
-		{"CountDecisionBuckets", countDecisionBuckets, []any{width, at, until}},
-		{"TopFiredRules", topFiredRules, []any{at, until, int32(10)}},
-		{"CountReviewQueue", countReviewQueue, nil},
-		{"CountModelEffects", countModelEffects, []any{at, until}},
-		{"ListModelInputs", listModelInputs, []any{at, "txn-1", int32(5000)}},
-		{"PlayerEarlierModelScores", playerEarlierModelScores, []any{"player-1", at, "txn-1"}},
-		{"CountDeviceDistinctCardsLastHour", countDeviceDistinctCardsLastHour, []any{"device-1", at, "card-1"}},
-		{"GetTrustedPurchaseHistory", getTrustedPurchaseHistory, []any{
+		{"PlayerHistory", features.PlayerHistorySQL, []any{at, int64(1000), "gmail.com", device, client, client, client, "player-1", "txn-1"}},
+		{"CardHistory", features.CardHistorySQL, []any{at, "card-1", "txn-1"}},
+		{"IssuerHistory", features.IssuerHistorySQL, []any{"1001", at, "txn-1"}},
+		{"FeatureCounts", features.FeatureCountsSQL, []any{"gmail.com", device, client, client, client}},
+		{"DecisionOverview", stats.DecisionOverviewSQL, []any{at, until}},
+		{"BlockedValue", stats.BlockedValueSQL, []any{at, until}},
+		{"CountDecisionBuckets", stats.CountDecisionBucketsSQL, []any{width, at, until}},
+		{"TopFiredRules", stats.TopFiredRulesSQL, []any{at, until, int32(10)}},
+		{"CountReviewQueue", stats.CountReviewQueueSQL, nil},
+		{"CountModelEffects", stats.CountModelEffectsSQL, []any{at, until}},
+		{"ListModelInputs", trainingdata.ModelInputsPageSQL, []any{at, "txn-1", int32(5000)}},
+		{"PlayerEarlierModelScores", score.PlayerEarlierModelScoresSQL, []any{"player-1", at, "txn-1"}},
+		{"CountDeviceDistinctCardsLastHour", score.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
+		{"GetTrustedPurchaseHistory", score.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
 		}},
 	}
