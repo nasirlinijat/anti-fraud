@@ -68,6 +68,7 @@ func TestActiveDefault(t *testing.T) {
 			scoring.RuleNewAccount:      {Enabled: true, Weight: 20, Limit: 24},
 			scoring.RuleCountryMismatch: {Enabled: true, Weight: 25},
 		},
+		Model: scoring.ModelSettings{Mode: scoring.ModelAssist},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Active() = %+v, want %+v", got, want)
@@ -97,6 +98,7 @@ func TestActiveAfterSwitch(t *testing.T) {
 		Rules: map[scoring.RuleName]scoring.RuleConfig{
 			scoring.RuleHighAmount: {Enabled: false, Weight: 10, Limit: 1000},
 		},
+		Model: scoring.ModelSettings{Mode: scoring.ModelAssist},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Active() = %+v, want %+v", got, want)
@@ -110,6 +112,8 @@ func TestRulesetVersionsCannotChange(t *testing.T) {
 		`DELETE FROM ruleset_rules WHERE ruleset_version = 1`,
 		`UPDATE rulesets SET block_threshold = 90 WHERE version = 1`,
 		`UPDATE rulesets SET note = 'changed' WHERE version = 1`,
+		`UPDATE rulesets SET model_mode = 'off' WHERE version = 1`,
+		`UPDATE rulesets SET model_clear_below = 0.1, model_flag_at = 0.5 WHERE version = 1`,
 		`DELETE FROM rulesets WHERE version = 1`,
 	}
 
@@ -172,6 +176,7 @@ func TestListAndVersionHistory(t *testing.T) {
 		Rules: map[scoring.RuleName]scoring.RuleConfig{
 			scoring.RuleHighAmount: {Enabled: true, Weight: 35, Limit: 60000},
 		},
+		Model: scoring.ModelSettings{Mode: scoring.ModelAssist},
 	}
 	if !reflect.DeepEqual(v50, want50) {
 		t.Errorf("Version(50) = %+v, want %+v", v50, want50)
@@ -179,5 +184,72 @@ func TestListAndVersionHistory(t *testing.T) {
 
 	if _, err := store.Version(ctx, 999999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Version(999999) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPublishModelSettings(t *testing.T) {
+	tx := txWith(t, testPool(t))
+	ctx := context.Background()
+	rules := map[scoring.RuleName]scoring.RuleConfig{scoring.RuleHighAmount: {Enabled: true, Weight: 30, Limit: 50000}}
+	publish := func(store *Store, model scoring.ModelSettings) scoring.ModelSettings {
+		t.Helper()
+		saved, err := store.Publish(ctx, scoring.Ruleset{ReviewThreshold: 50, BlockThreshold: 80, Rules: rules, Model: model}, "test-operator")
+		if err != nil {
+			t.Fatalf("Publish(%+v): %v", model, err)
+		}
+		active, err := store.Active(ctx)
+		if err != nil {
+			t.Fatalf("Active: %v", err)
+		}
+		if active.Version != saved.Version || !reflect.DeepEqual(active.Model, saved.Model) {
+			t.Fatalf("active version %d model %+v, want published version %d model %+v", active.Version, active.Model, saved.Version, saved.Model)
+		}
+		return active.Model
+	}
+	ptr := func(v float64) *float64 { return &v }
+
+	withReport := NewStore(tx)
+	withReport.UseModelThresholds(scoring.ModelPolicy{ClearBelow: 0.02, FlagAt: 0.4, PlayerBlendWeight: 0.3})
+	got := publish(withReport, scoring.ModelSettings{})
+	want := scoring.ModelSettings{Mode: scoring.ModelAssist, ClearBelow: ptr(0.02), FlagAt: ptr(0.4)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("first new version model = %+v, want assist from the active version with the report thresholds", got)
+	}
+
+	rulesOnly := NewStore(tx)
+	shadow := scoring.ModelSettings{Mode: scoring.ModelShadow, ClearBelow: ptr(0.1), FlagAt: ptr(0.6)}
+	if got := publish(rulesOnly, shadow); !reflect.DeepEqual(got, shadow) {
+		t.Errorf("published model = %+v, want %+v", got, shadow)
+	}
+	if got := publish(rulesOnly, scoring.ModelSettings{}); !reflect.DeepEqual(got, shadow) {
+		t.Errorf("model without a mode = %+v, want the active version's %+v", got, shadow)
+	}
+	if got := publish(rulesOnly, scoring.ModelSettings{Mode: scoring.ModelOff}); !reflect.DeepEqual(got, scoring.ModelSettings{Mode: scoring.ModelOff}) {
+		t.Errorf("off without thresholds and without a model = %+v, want no thresholds", got)
+	}
+	if got := publish(withReport, scoring.ModelSettings{Mode: scoring.ModelOff}); !reflect.DeepEqual(got, scoring.ModelSettings{Mode: scoring.ModelOff, ClearBelow: ptr(0.02), FlagAt: ptr(0.4)}) {
+		t.Errorf("off without thresholds = %+v, want the report thresholds", got)
+	}
+}
+
+func TestModelSettingsConstraints(t *testing.T) {
+	pool := testPool(t)
+	for _, values := range []string{
+		`'on', NULL, NULL`,
+		`'assist', 0.1, NULL`,
+		`'assist', 0.5, 0.5`,
+		`'assist', -0.1, 0.5`,
+		`'assist', 0.1, 1.1`,
+		`'assist', 'NaN', 0.5`,
+	} {
+		t.Run(values, func(t *testing.T) {
+			tx := txWith(t, pool)
+			_, err := tx.Exec(context.Background(), `INSERT INTO rulesets
+				(version, review_threshold, block_threshold, model_mode, model_clear_below, model_flag_at)
+				VALUES (97, 50, 80, `+values+`)`)
+			if err == nil {
+				t.Error("the database accepted invalid model settings")
+			}
+		})
 	}
 }

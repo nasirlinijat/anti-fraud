@@ -44,6 +44,7 @@ var testRuleset = scoring.Ruleset{
 		scoring.RuleNewAccount:      {Enabled: true, Weight: 20, Limit: 24},
 		scoring.RuleCountryMismatch: {Enabled: true, Weight: 25},
 	},
+	Model: scoring.ModelSettings{Mode: scoring.ModelAssist},
 }
 
 type fakeRulesets struct {

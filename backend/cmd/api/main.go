@@ -45,6 +45,7 @@ func main() {
 		if err := handler.UseModel(model, policy); err != nil {
 			log.Fatalf("use fraud model %s: %v", model.Version(), err)
 		}
+		rulesetStore.UseModelThresholds(policy)
 		log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
 			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 	}

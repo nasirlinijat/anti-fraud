@@ -93,6 +93,9 @@ type Ruleset struct {
 	IsActive        bool
 	CreatedAt       pgtype.Timestamptz
 	Note            string
+	ModelMode       string
+	ModelClearBelow pgtype.Float8
+	ModelFlagAt     pgtype.Float8
 }
 
 type RulesetRule struct {

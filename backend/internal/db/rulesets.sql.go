@@ -36,7 +36,7 @@ func (q *Queries) DeactivateRuleset(ctx context.Context) error {
 }
 
 const getActiveRuleset = `-- name: GetActiveRuleset :one
-SELECT version, review_threshold, block_threshold, note, created_at
+SELECT version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, created_at
 FROM rulesets
 WHERE is_active
 `
@@ -46,6 +46,9 @@ type GetActiveRulesetRow struct {
 	ReviewThreshold int32
 	BlockThreshold  int32
 	Note            string
+	ModelMode       string
+	ModelClearBelow pgtype.Float8
+	ModelFlagAt     pgtype.Float8
 	CreatedAt       pgtype.Timestamptz
 }
 
@@ -57,13 +60,16 @@ func (q *Queries) GetActiveRuleset(ctx context.Context) (GetActiveRulesetRow, er
 		&i.ReviewThreshold,
 		&i.BlockThreshold,
 		&i.Note,
+		&i.ModelMode,
+		&i.ModelClearBelow,
+		&i.ModelFlagAt,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getRuleset = `-- name: GetRuleset :one
-SELECT version, review_threshold, block_threshold, note, created_at
+SELECT version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, created_at
 FROM rulesets
 WHERE version = $1
 `
@@ -73,6 +79,9 @@ type GetRulesetRow struct {
 	ReviewThreshold int32
 	BlockThreshold  int32
 	Note            string
+	ModelMode       string
+	ModelClearBelow pgtype.Float8
+	ModelFlagAt     pgtype.Float8
 	CreatedAt       pgtype.Timestamptz
 }
 
@@ -84,14 +93,19 @@ func (q *Queries) GetRuleset(ctx context.Context, version int32) (GetRulesetRow,
 		&i.ReviewThreshold,
 		&i.BlockThreshold,
 		&i.Note,
+		&i.ModelMode,
+		&i.ModelClearBelow,
+		&i.ModelFlagAt,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const insertRuleset = `-- name: InsertRuleset :one
-INSERT INTO rulesets (version, review_threshold, block_threshold, note, is_active)
-SELECT COALESCE(MAX(version), 0) + 1, $1, $2, $3, true
+INSERT INTO rulesets (
+    version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, is_active
+)
+SELECT COALESCE(MAX(version), 0) + 1, $1, $2, $3, $4, $5, $6, true
 FROM rulesets
 RETURNING version, created_at
 `
@@ -100,6 +114,9 @@ type InsertRulesetParams struct {
 	ReviewThreshold int32
 	BlockThreshold  int32
 	Note            string
+	ModelMode       string
+	ModelClearBelow pgtype.Float8
+	ModelFlagAt     pgtype.Float8
 }
 
 type InsertRulesetRow struct {
@@ -108,7 +125,14 @@ type InsertRulesetRow struct {
 }
 
 func (q *Queries) InsertRuleset(ctx context.Context, arg InsertRulesetParams) (InsertRulesetRow, error) {
-	row := q.db.QueryRow(ctx, insertRuleset, arg.ReviewThreshold, arg.BlockThreshold, arg.Note)
+	row := q.db.QueryRow(ctx, insertRuleset,
+		arg.ReviewThreshold,
+		arg.BlockThreshold,
+		arg.Note,
+		arg.ModelMode,
+		arg.ModelClearBelow,
+		arg.ModelFlagAt,
+	)
 	var i InsertRulesetRow
 	err := row.Scan(&i.Version, &i.CreatedAt)
 	return i, err

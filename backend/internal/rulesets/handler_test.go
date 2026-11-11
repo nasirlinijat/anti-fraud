@@ -110,6 +110,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		"../../migrations/000015_add_new_device_spike_settings.up.sql",
 		"../../migrations/000016_add_ruleset_note.up.sql",
 		"../../migrations/000018_configuration_audit.up.sql",
+		"../../migrations/000019_add_model_settings_to_rulesets.up.sql",
 	} {
 		migration, err := os.ReadFile(path)
 		if err != nil {
@@ -260,6 +261,41 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 				if got.Fields["rules.new_device_spike."+field] == "" {
 					t.Errorf("missing error for %s in %s", field, rec.Body)
 				}
+			}
+		})
+	}
+}
+
+func TestPublishValidatesModelSettings(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, "test-key", testOperators(t))
+	for _, tc := range []struct {
+		model string
+		field string
+	}{
+		{`{"mode": "on"}`, "model.mode"},
+		{`{"clear_below": 0.1, "flag_at": 0.5}`, "model.mode"},
+		{`{"mode": "assist", "clear_below": 0.1}`, "model"},
+		{`{"mode": "assist", "flag_at": 0.5}`, "model"},
+		{`{"mode": "assist", "clear_below": -0.1, "flag_at": 0.5}`, "model.clear_below"},
+		{`{"mode": "assist", "clear_below": 0.1, "flag_at": 1.5}`, "model.flag_at"},
+		{`{"mode": "assist", "clear_below": 0.5, "flag_at": 0.5}`, "model.clear_below"},
+		{`{"mode": "shadow", "clear_below": 0.6, "flag_at": 0.5}`, "model.clear_below"},
+		{`{"mode": "assist", "blend": 0.5}`, "blend"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			w := rulesetRequest(mux, "POST", "/rulesets", `{
+				"review_threshold": 50, "block_threshold": 80, "rules": {}, "model": `+tc.model+`
+			}`, operatorTestKey)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
+			}
+			var got platform.ErrorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Fields[tc.field] == "" {
+				t.Errorf("missing error for %q in %v", tc.field, got.Fields)
 			}
 		})
 	}

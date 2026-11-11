@@ -34,6 +34,15 @@ type configPayload struct {
 	BlockThreshold  int32                             `json:"block_threshold"`
 	Note            string                            `json:"note"`
 	Rules           map[scoring.RuleName]*rulePayload `json:"rules"`
+	Model           *modelPayload                     `json:"model,omitempty"`
+}
+
+// modelPayload is how a version uses the fraud model. Null thresholds in a
+// response mean the version uses the thresholds of the loaded model's report.
+type modelPayload struct {
+	Mode       scoring.ModelMode `json:"mode"`
+	ClearBelow *float64          `json:"clear_below"`
+	FlagAt     *float64          `json:"flag_at"`
 }
 
 type rulePayload struct {
@@ -224,7 +233,33 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	if maxScore > math.MaxInt32 {
 		fields["rules"] = fmt.Sprintf("enabled rule weights must add up to at most %d", math.MaxInt32)
 	}
+	if p.Model != nil {
+		rs.Model = p.Model.settings(fields)
+	}
 	return rs, fields
+}
+
+// settings validates the model settings and adds problems to fields.
+func (m modelPayload) settings(fields map[string]string) scoring.ModelSettings {
+	if !m.Mode.Known() {
+		fields["model.mode"] = "must be off, shadow, or assist"
+	}
+	inRange := func(name string, v *float64) bool {
+		if v != nil && (*v < 0 || *v > 1) {
+			fields["model."+name] = "must be between 0 and 1"
+			return false
+		}
+		return true
+	}
+	rangesValid := inRange("clear_below", m.ClearBelow)
+	rangesValid = inRange("flag_at", m.FlagAt) && rangesValid
+	switch {
+	case (m.ClearBelow == nil) != (m.FlagAt == nil):
+		fields["model"] = "clear_below and flag_at must be set together"
+	case rangesValid && m.ClearBelow != nil && *m.ClearBelow >= *m.FlagAt:
+		fields["model.clear_below"] = "must be lower than flag_at"
+	}
+	return scoring.ModelSettings{Mode: m.Mode, ClearBelow: m.ClearBelow, FlagAt: m.FlagAt}
 }
 
 func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
@@ -251,6 +286,11 @@ func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
 			BlockThreshold:  int32(rs.BlockThreshold),
 			Note:            rs.Note,
 			Rules:           rules,
+			Model: &modelPayload{
+				Mode:       rs.Model.Mode,
+				ClearBelow: rs.Model.ClearBelow,
+				FlagAt:     rs.Model.FlagAt,
+			},
 		},
 	})
 }

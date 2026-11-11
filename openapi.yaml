@@ -52,6 +52,12 @@ paths:
         2. Otherwise the enabled rules of the active ruleset add points. A
            total at or above the block threshold is `block`, at or above the
            review threshold is `review`, and anything lower is `allow`.
+        3. When a fraud model is loaded, the `model.mode` of the active
+           ruleset decides how it is used. `off` computes and saves no model
+           score. `shadow` saves the score but leaves the outcome unchanged.
+           `assist` clears a `review` with a score below `clear_below` and
+           sends an `allow` with a score at or above `flag_at` to review. The
+           model never blocks a purchase in any mode.
 
         Purchases with the outcome `review` go to the review queue for an
         analyst. After authentication and validation, a retry with the same
@@ -702,6 +708,10 @@ paths:
         disabled in the new version. An optional `note` explains why the
         version was made and is saved with the version. Existing decisions
         retain their version.
+
+        Without `model`, the new version keeps the model settings of the
+        active version. Thresholds that are still missing are taken from the
+        report of the loaded model; without a loaded model they stay null.
       security:
         - OperatorKeyAuth: []
       requestBody:
@@ -990,7 +1000,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/RulesetConfig"
         - type: object
-          required: [version, note, created_at]
+          required: [version, note, created_at, model]
           properties:
             version:
               type: integer
@@ -1073,6 +1083,49 @@ components:
             card_velocity: { enabled: true, weight: 40, limit: 5 }
             new_account: { enabled: true, weight: 20, limit: 24 }
             country_mismatch: { enabled: true, weight: 25 }
+        model:
+          $ref: "#/components/schemas/ModelSettings"
+
+    ModelSettings:
+      type: object
+      description: |
+        How the version uses the fraud model. Without a loaded model
+        (MODEL_PATH is empty) the service scores with rules only, whatever the
+        mode says. The model never blocks a purchase.
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [off, shadow, assist]
+          description: |
+            `off` computes and saves no model score. `shadow` saves the model
+            score but does not change the outcome. `assist` lets the model
+            clear a review or send an allowed purchase to review. Model
+            inputs are saved in every mode.
+          example: assist
+        clear_below:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: |
+            A purchase the rules send to review is allowed when its model
+            score is below this value. Must be lower than `flag_at`, and the
+            two are set together. Null in versions published before model
+            settings existed; those use the loaded model's report.
+          example: 0.391385
+        flag_at:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: |
+            An allowed purchase goes to review when its model score is at or
+            above this value. Null in versions published before model settings
+            existed; those use the loaded model's report.
+          example: 0.994001
 
     ScoreRequest:
       type: object
@@ -1251,9 +1304,10 @@ components:
             `allow` lets the purchase through. `review` sends it to an
             analyst. `block` rejects it, because of a blocklist match or
             because the rule score reached the block threshold. When a fraud
-            model is loaded, a review with a model score below `clear_below`
-            becomes `allow`, and an allow with a model score at or above
-            `flag_at` becomes `review`. The model never blocks a purchase.
+            model is loaded and the ruleset's model mode is `assist`, a review
+            with a model score below `clear_below` becomes `allow`, and an
+            allow with a model score at or above `flag_at` becomes `review`.
+            The model never blocks a purchase.
           example: allow
         score:
           type: integer
@@ -1280,7 +1334,7 @@ components:
             model it is the higher of two percentiles: where the purchase ranks
             among validation purchases for the main model and for the
             first-fraud model. It is null when the service runs without a
-            model (MODEL_PATH is empty).
+            model (MODEL_PATH is empty) or the ruleset's model mode is `off`.
           example: 0.0074
         model_version:
           type: string
@@ -1288,7 +1342,8 @@ components:
           description: >-
             Version of the model that gave model_score, such as
             lgbm-ieee-v5-combined. It is saved with the decision. It is null
-            when the service runs without a model.
+            when the service runs without a model or the ruleset's model mode
+            is `off`.
           example: lgbm-ieee-v5-combined
 
     FiredRule:
