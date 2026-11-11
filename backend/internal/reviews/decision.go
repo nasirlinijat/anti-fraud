@@ -29,6 +29,12 @@ type decisionResponse struct {
 	DeviceBlocked bool `json:"device_blocked"`
 }
 
+// decisionRequest is the body of a review decision.
+type decisionRequest struct {
+	Decision    string `json:"decision"`
+	BlockDevice bool   `json:"block_device"`
+}
+
 func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, analystID string) {
 	id := r.PathValue("purchase_id")
 	purchaseID, err := strconv.ParseInt(id, 10, 64)
@@ -36,38 +42,8 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
 		return
 	}
-
-	var body struct {
-		Decision    string `json:"decision"`
-		BlockDevice bool   `json:"block_device"`
-	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxDecisionBytes))
-	dec.DisallowUnknownFields()
-	err = dec.Decode(&body)
-	if err == nil {
-		err = dec.Decode(new(any))
-		if err == io.EOF {
-			err = nil
-		} else if err == nil {
-			err = errors.New("multiple JSON values")
-		}
-	}
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			platform.WriteError(w, http.StatusRequestEntityTooLarge, "review decision body is too large")
-		} else {
-			platform.WriteError(w, http.StatusBadRequest, "request body must be a single review decision object")
-		}
-		return
-	}
-	if body.Decision != "approve" && body.Decision != "reject" {
-		platform.WriteError(w, http.StatusBadRequest, "decision must be approve or reject")
-		return
-	}
-
-	if body.BlockDevice && body.Decision != "reject" {
-		platform.WriteError(w, http.StatusBadRequest, "block_device is only allowed with a reject decision")
+	body, ok := readDecision(w, r)
+	if !ok {
 		return
 	}
 
@@ -77,15 +53,52 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	switch result.status {
+	writeResolution(w, result.status, decisionResponse{
+		PurchaseID:    id,
+		Decision:      body.Decision,
+		AnalystID:     analystID,
+		ResolvedAt:    result.resolvedAt.UTC(),
+		DeviceBlocked: result.deviceBlocked,
+	})
+}
+
+// readDecision reads and validates the decision body. On failure it writes
+// the error response and returns false.
+func readDecision(w http.ResponseWriter, r *http.Request) (decisionRequest, bool) {
+	var body decisionRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxDecisionBytes))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&body)
+	if err == nil {
+		err = dec.Decode(new(any))
+		if err == io.EOF {
+			err = nil
+		} else if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+	}
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		platform.WriteError(w, http.StatusRequestEntityTooLarge, "review decision body is too large")
+	case err != nil:
+		platform.WriteError(w, http.StatusBadRequest, "request body must be a single review decision object")
+	case body.Decision != "approve" && body.Decision != "reject":
+		platform.WriteError(w, http.StatusBadRequest, "decision must be approve or reject")
+	case body.BlockDevice && body.Decision != "reject":
+		platform.WriteError(w, http.StatusBadRequest, "block_device is only allowed with a reject decision")
+	default:
+		return body, true
+	}
+	return decisionRequest{}, false
+}
+
+// writeResolution writes the response for the status the store returned.
+// saved is the body sent when the decision was saved.
+func writeResolution(w http.ResponseWriter, status string, saved decisionResponse) {
+	switch status {
 	case "saved":
-		platform.WriteJSON(w, http.StatusCreated, decisionResponse{
-			PurchaseID:    id,
-			Decision:      body.Decision,
-			AnalystID:     analystID,
-			ResolvedAt:    result.resolvedAt.UTC(),
-			DeviceBlocked: result.deviceBlocked,
-		})
+		platform.WriteJSON(w, http.StatusCreated, saved)
 	case "not_found":
 		platform.WriteError(w, http.StatusNotFound, "purchase not found")
 	case "not_review":
@@ -93,7 +106,7 @@ func serveResolution(w http.ResponseWriter, r *http.Request, store reviewStore, 
 	case "already_resolved":
 		platform.WriteError(w, http.StatusConflict, "purchase has already been decided")
 	default:
-		log.Printf("unexpected review decision status %q", result.status)
+		log.Printf("unexpected review decision status %q", status)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 	}
 }
