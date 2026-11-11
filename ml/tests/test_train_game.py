@@ -41,3 +41,16 @@ def test_dumped_requests_follow_the_given_order(tmp_path):
     assert replay.dumped_requests(dump, ["b", "a"]) == [
         {"transaction_id": "b", "amount_minor": 2}, {"transaction_id": "a", "amount_minor": 1},
     ]
+
+
+def test_checks_count_flagged_legitimate_purchases():
+    import check_game
+
+    frame = pd.DataFrame({"is_fraud": [0, 0, 0, 0, 1]})
+    score = np.array([0.1, 0.6, 0.5, 0.2, 0.9])
+    assert check_game.legit_flagged(frame, score, {"flag_at": 0.5}) == 0.5
+
+
+def test_training_starts_at_day_zero_and_scores_the_first_days_apart():
+    assert train_game.SPLIT_DAYS["train"][0] == 0
+    assert 0 < train_game.FIRST_DAYS < train_game.SPLIT_DAYS["train"][1]
