@@ -363,6 +363,10 @@ func explainScorebenchReads(t *testing.T, conn *pgx.Conn, profiles [3][]scoreben
 	at := scorebenchEnd.Add(2 * time.Second)
 	p := profiles[2][0]
 	const txn = "bench-plan"
+	region := features.NoRegion
+	if p.BillingRegion != nil {
+		region = *p.BillingRegion
+	}
 	for _, q := range []struct {
 		name, sql, index string
 		args             []any
@@ -371,8 +375,10 @@ func explainScorebenchReads(t *testing.T, conn *pgx.Conn, profiles [3][]scoreben
 		{"IssuerHistory missing", features.IssuerHistorySQL, "purchases_issuer_event_time", []any{"", at, txn}},
 		{"IssuerHistory common", features.IssuerHistorySQL, "purchases_issuer_event_time", []any{"bench-common-issuer", at, txn}},
 		{"PlayerHistory", features.PlayerHistorySQL, "purchases_player_event_time", []any{
-			at, int64(10_000), *p.EmailDomain, p.DeviceName, p.ClientOS, p.ClientBrowser, p.ScreenResolution, p.PlayerID, txn}},
-		{"CardHistory", features.CardHistorySQL, "purchases_card_event_time", []any{at, p.CardToken, txn}},
+			at, int64(10_000), *p.EmailDomain, p.DeviceName, p.ClientOS, p.ClientBrowser, p.ScreenResolution, p.PlayerID, txn,
+			p.DeviceID}},
+		{"CardHistory", features.CardHistorySQL, "purchases_card_event_time", []any{at, p.CardToken, txn, region}},
+		{"DeviceIDHistory", features.DeviceIDHistorySQL, "purchases_device_event_time", []any{"bench-shared-0", at, txn}},
 		{"PlayerEarlierModelScores", score.PlayerEarlierModelScoresSQL, "purchases_player_event_time", []any{p.PlayerID, at, txn}},
 		{"CardPurchasesLastHour", score.CountCardPurchasesLastHourSQL, "purchases_card_event_time", []any{p.CardToken, at}},
 		{"DeviceDistinctCardsLastHour", score.CountDeviceCardsLastHourSQL, "purchases_device_event_time", []any{"bench-shared-0", at, p.CardToken}},
