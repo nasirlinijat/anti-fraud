@@ -25,7 +25,7 @@ services:
       REVIEW_ANALYST_KEYS: ${REVIEW_ANALYST_KEYS:-}
       OPERATOR_API_KEYS: ${OPERATOR_API_KEYS:-}
       DATABASE_URL: postgres://antifraud_api:${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}?sslmode=disable
-      MODEL_PATH: /models/lgbm-ieee-v5-combined.json
+      MODEL_PATH: /models/lgbm-game-v5.json
     ports:
       - "127.0.0.1:${PORT:?set PORT in .env}:${PORT:?set PORT in .env}"
     depends_on:
