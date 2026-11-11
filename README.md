@@ -93,17 +93,20 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-suspicious` | 0.1 | Share of events that start a special scenario, including legitimate edge cases and fraud. Use 0 for normal purchases only or 1 for special scenarios only |
 | `-players` | 300 | Number of regular players |
 | `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
+| `-missing` | 0.25 | Share of players whose client leaves out each group of optional fields: IP, device ID, device, account creation time, billing, card details, and email. A player misses the same groups on every purchase, whatever the scenario. Use 0 to send every field |
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
 | `-dump` | none | Write the purchases with their scenario and fraud label to this JSON Lines file instead of sending them. Needs a positive count and no API key. Used to train the game model, see `ml/README.md` |
 
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
+The scenario descriptions below are for a player whose client sends every field. A rule that needs a missing field does not fire.
+
 Each special scenario is equally likely when an event starts one. Some scenarios generate several purchases, so the share of special purchases can differ from the share of special events.
 
 | Pattern | What happens |
 |---|---|
-| `normal` | A regular player buys with their own card from their own country |
+| `normal` | A regular player buys with their own card from their own country: mostly an ordinary amount, sometimes a larger bundle |
 | `card_testing` | A new account tries 7 to 9 small purchases on one card from another country |
 | `account_takeover` | An established account is used for a large purchase from another country and a new device |
 | `new_account_spend` | An account created a few hours ago buys for a large amount |
@@ -115,6 +118,12 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 | `returning_player` | A player who was inactive before the run returns for an ordinary purchase |
 | `stolen_card` | A different player makes one purchase with a regular player's card |
 | `low_and_slow` | Fraud looks like one ordinary purchase from an older account and can pass the rules |
+| `expat` | A returning player who lives abroad buys with a card from their home country |
+| `new_big_spender` | A player with a new account makes a large legitimate purchase from home |
+| `family_card` | A relative uses a regular player's card from the same home connection |
+| `session_shopper` | A player with an older account makes two to four small purchases with their own card, minutes apart on the simulated timeline |
+| `slow_card_testing` | Fraud tries three to five cards with one small purchase each from an older account in the cards' country, minutes apart on the simulated timeline, and can pass the rules |
+| `quiet_takeover` | Fraud uses an established account from a new phone in the player's own country for a mid-sized amount, and can pass the rules |
 
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 

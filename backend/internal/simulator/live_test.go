@@ -23,6 +23,8 @@ func TestLiveUsesSeededSequenceWithWallClockTimes(t *testing.T) {
 	cfg := simulator.DefaultConfig()
 	cfg.Start = time.Now().UTC()
 	cfg.SuspiciousShare = 0.3
+	// The account ages below are checked on every purchase.
+	cfg.MissingFieldShare = 0
 	want := generate(t, cfg, 2_000)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -47,7 +49,7 @@ func TestLiveUsesSeededSequenceWithWallClockTimes(t *testing.T) {
 		}
 		accounts[req.PlayerID] = *req.AccountCreatedAt
 		switch want[calls].Pattern {
-		case simulator.PatternCardTesting, simulator.PatternNewAccountSpend, simulator.PatternNewCasualPlayer:
+		case simulator.PatternCardTesting, simulator.PatternNewAccountSpend, simulator.PatternNewCasualPlayer, simulator.PatternNewBigSpender:
 			age := req.EventTime.Sub(*req.AccountCreatedAt)
 			if age < 10*time.Minute || age > 13*time.Hour {
 				t.Fatalf("new account age %v is outside the live run's expected range", age)
