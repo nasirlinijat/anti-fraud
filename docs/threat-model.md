@@ -30,3 +30,15 @@ This review covers the Docker Compose stack, its AWS gateway, and the Vite devel
 
 - Limit administrator and log access, and define retention for purchase, device, and audit history.
 - Add gateway rate limits and workload monitoring before serving untrusted traffic. Body size and connection limits bound individual requests.
+
+## Simulation control
+
+Simulation routes are absent unless `SIMULATION_ENABLED=true`. Starting and
+stopping traffic requires an individual operator key; status and history use the
+service key. Console proxies preserve these credentials and same-origin checks.
+The public API hostname does not forward simulation routes. The controller uses
+a fixed loopback scoring URL, bounded rate and backfill size, a database active-run
+constraint and an advisory lock. History records the initiating and stopping
+operators. An in-flight transaction marker allows recovery after a score commits
+but before progress is checkpointed. An unresolved marker is shown explicitly;
+recovery interrupts unfinished runs and does not resume traffic automatically.

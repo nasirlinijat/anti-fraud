@@ -81,7 +81,9 @@ type Purchase struct {
 // Config controls the generated traffic. The same Config always gives the same
 // purchases.
 type Config struct {
-	Seed uint64
+	// Scenarios restricts the registry; nil preserves the existing mix.
+	Scenarios []Pattern
+	Seed      uint64
 	// Run prefixes every transaction, player, card and device ID, so that
 	// several runs can be sent to the same database.
 	Run string
@@ -111,12 +113,22 @@ func DefaultConfig() Config {
 
 // Validate reports the first invalid setting.
 func (c Config) Validate() error {
+	if c.Scenarios != nil && len(c.Scenarios) == 0 {
+		return fmt.Errorf("select at least one scenario")
+	}
+	seen := map[Pattern]bool{}
+	for _, p := range c.Scenarios {
+		if !slices.Contains(Patterns, p) || seen[p] {
+			return fmt.Errorf("unknown or duplicate scenario %q", p)
+		}
+		seen[p] = true
+	}
 	switch {
 	case c.Run == "":
 		return fmt.Errorf("run must not be empty")
 	case c.Start.IsZero():
 		return fmt.Errorf("start must be set")
-	case c.SuspiciousShare < 0 || c.SuspiciousShare > 1:
+	case math.IsNaN(c.SuspiciousShare) || c.SuspiciousShare < 0 || c.SuspiciousShare > 1:
 		return fmt.Errorf("suspicious share must be between 0 and 1, got %v", c.SuspiciousShare)
 	case c.Players < 1:
 		return fmt.Errorf("players must be at least 1, got %d", c.Players)
@@ -220,10 +232,14 @@ func (g *generator) purchases(ctx context.Context) iter.Seq[Purchase] {
 
 // Generate returns count purchases ordered by event time, then transaction ID.
 func Generate(cfg Config, count int) ([]Purchase, error) {
+	return GenerateContext(context.Background(), cfg, count)
+}
+
+// GenerateContext generates a finite backfill that can be cancelled.
+func GenerateContext(ctx context.Context, cfg Config, count int) ([]Purchase, error) {
 	if count < 0 {
 		return nil, fmt.Errorf("count must not be negative, got %d", count)
 	}
-	ctx := context.Background()
 	g, err := newGenerator(ctx, cfg, false)
 	if err != nil {
 		return nil, err
@@ -238,7 +254,7 @@ func Generate(cfg Config, count int) ([]Purchase, error) {
 			break
 		}
 	}
-	return purchases, nil
+	return purchases, ctx.Err()
 }
 
 // StartEndingAt returns the start that makes the last of count purchases
@@ -274,6 +290,23 @@ func compareIDs(a, b string) int {
 }
 
 func (g *generator) event(at time.Time) {
+	if g.cfg.Scenarios != nil {
+		var choices []int
+		for i, s := range specialScenarios {
+			if slices.Contains(g.cfg.Scenarios, s.pattern) {
+				choices = append(choices, i)
+			}
+		}
+		normal := slices.Contains(g.cfg.Scenarios, PatternNormal)
+		if normal && (len(choices) == 0 || g.rng.Float64() >= g.cfg.SuspiciousShare) {
+			g.normal(at)
+			return
+		}
+		if len(choices) > 0 {
+			specialScenarios[choices[g.rng.IntN(len(choices))]].generate(g, at)
+		}
+		return
+	}
 	if g.rng.Float64() >= g.cfg.SuspiciousShare {
 		g.normal(at)
 		return

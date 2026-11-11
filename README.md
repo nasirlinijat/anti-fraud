@@ -255,3 +255,44 @@ Pass nil pointers for NULL values and scan nullable columns into pointers. A que
 | Port `3000`, `5432`, or `8080` is used by another program | Change `FRONTEND_PORT`, `POSTGRES_PORT`, or `PORT` in `.env`. For the host backend, also update `DATABASE_URL` to match `POSTGRES_PORT` |
 | Compose startup fails | Check `docker compose ps -a` and `docker compose logs migrate backend frontend` |
 | You want an empty database | Run `docker compose down -v`, which deletes the local database data, then `docker compose up -d --build --wait` |
+
+## Console simulation API
+
+Set `SIMULATION_ENABLED=true` and configure an individual operator key to enable
+console-managed traffic. Restart the backend after changing the setting. It defaults
+to false, including production. These routes are available through the console host;
+the public production API hostname does not expose them.
+
+`POST /simulations` uses an operator key and accepts, for example:
+
+```json
+{"request_id":"backfill-42-first","mode":"backfill","seed":42,"rate":5,"count":500,"scenarios":["normal","card_testing"]}
+```
+
+It returns 202 with the run ID and a Location header. For live traffic use
+`mode: "live"` and omit count. Poll `GET /simulations/{id}` with the service key,
+or `GET /simulations?limit=20` for history; pass its `next_cursor` as `before`
+for the next page. `POST /simulations/{id}/stop` uses an operator key and drains
+the current purchase. Stopping an already finished run is safe.
+
+Matching start retries with the same operator and request_id return the original
+run with 200, including after completion. Changed settings or another active run
+return 409. Rates are 1–50 purchases/second; backfills allow up to 10,000 purchases
+and default to 500. Seeds are nonnegative JavaScript-safe integers. Omitted
+scenarios select all patterns. Normal plus special scenarios keeps the existing
+10 percent special-event share; without normal, every event starts one of the
+selected special scenarios. Bursts can produce unequal purchase shares.
+
+History and counters are saved in PostgreSQL. `sent` counts saved decisions and
+is the sum of allowed, reviewed and blocked. The worker records an in-flight
+transaction before scoring and checkpoints its result afterwards. On recovery it
+reconciles that transaction against saved decisions and marks unfinished runs
+`interrupted`; it does not automatically continue their traffic. `pending: true`
+means an outcome still cannot be confirmed. A new run needs a new request_id.
+Database failures stop dispatch until recovery. Only console-managed runs share
+the active-run guard; separately launched CLI simulators are not controlled.
+
+A seed determines traffic given the same generator settings and time anchor.
+Actual outcomes also depend on existing history, blocklists, rules and model.
+Backfill should use a clean demonstration database when comparing results.
+This API does not reset data or write fraud labels.

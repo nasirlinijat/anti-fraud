@@ -3,6 +3,7 @@ package platform
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -11,8 +12,9 @@ const defaultPort = "8080"
 
 // Config holds the settings read from environment variables.
 type Config struct {
-	Port        string
-	DatabaseURL string
+	SimulationEnabled bool
+	Port              string
+	DatabaseURL       string
 	// ModelPath is the fraud model file. When it is empty, scoring uses rules only.
 	ModelPath string
 	// APIKey authenticates requests to the score endpoint.
@@ -41,6 +43,13 @@ func LoadConfig() (Config, error) {
 	}
 	if strings.IndexFunc(cfg.APIKey, isSpaceOrControl) >= 0 {
 		return Config{}, fmt.Errorf("API_KEY must not contain whitespace or control characters")
+	}
+	if raw := os.Getenv("SIMULATION_ENABLED"); raw != "" {
+		var err error
+		cfg.SimulationEnabled, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("SIMULATION_ENABLED must be a boolean")
+		}
 	}
 	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
 	if err != nil {

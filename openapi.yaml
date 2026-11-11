@@ -24,6 +24,8 @@ servers:
     description: Local development server.
 
 tags:
+  - name: Simulations
+    description: Control simulation runs when explicitly enabled.
   - name: Score
     description: Score a purchase.
   - name: Stats
@@ -37,6 +39,103 @@ tags:
     description: Read and publish scoring configuration.
 
 paths:
+  /simulations:
+    post:
+      tags: [Simulations]
+      operationId: startSimulation
+      summary: Start a durable simulation run
+      description: |
+        Available only when SIMULATION_ENABLED=true. Only one console-managed run
+        can be starting, running or stopping. Purchases use POST /score.
+        A matching request_id for the same operator returns the original run;
+        changing its settings returns 409. Runs are interrupted after restart.
+      security: [{OperatorKeyAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SimulationSettings'}
+      responses:
+        '202':
+          description: Run durably accepted. Location points to its status.
+          headers:
+            Location: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRun'}
+        '200':
+          description: Matching start retry; the original run is returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRun'}
+        '400': {description: Invalid JSON or settings.}
+        '401': {description: Missing or invalid operator key.}
+        '404': {description: Simulation feature disabled.}
+        '409': {description: Active run conflict (includes active_run_id when available), or request_id settings conflict.}
+        '503': {description: Operator access, database or simulation controller unavailable.}
+    get:
+      tags: [Simulations]
+      operationId: listSimulations
+      summary: Read simulation history
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {in: query, name: before, description: Previous next_cursor value., schema: {type: string}}
+      responses:
+        '200':
+          description: Runs newest first, with a cursor and available scenario names.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, available_scenarios]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/SimulationRun'}}
+                  next_cursor: {type: string}
+                  available_scenarios: {type: array, items: {type: string}}
+        '400': {description: Invalid cursor or limit.}
+        '401': {description: Missing or invalid service key.}
+        '404': {description: Simulation feature disabled.}
+        '503': {description: Database unavailable.}
+  /simulations/{id}:
+    get:
+      tags: [Simulations]
+      operationId: getSimulation
+      summary: Read durable simulation progress
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Saved run snapshot.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRun'}
+        '401': {description: Missing or invalid service key.}
+        '404': {description: Unknown run or disabled feature.}
+        '503': {description: Database unavailable.}
+  /simulations/{id}/stop:
+    post:
+      tags: [Simulations]
+      operationId: stopSimulation
+      summary: Stop a simulation after settling its in-flight purchase
+      security: [{OperatorKeyAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      responses:
+        '202':
+          description: Stop requested; poll until terminal. Repeated stops are safe.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRun'}
+        '200':
+          description: Run already terminal.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationRun'}
+        '401': {description: Missing or invalid operator key.}
+        '404': {description: Unknown run or disabled feature.}
+        '503': {description: Operator access or database unavailable.}
   /score:
     post:
       tags: [Score]
@@ -837,6 +936,44 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    SimulationSettings:
+      type: object
+      additionalProperties: false
+      required: [request_id, mode]
+      properties:
+        request_id: {type: string, minLength: 1, maxLength: 128}
+        mode: {type: string, enum: [live, backfill]}
+        seed: {type: integer, minimum: 0, maximum: 9007199254740991, default: 1}
+        rate: {type: number, minimum: 1, maximum: 50, default: 5}
+        count:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Backfill defaults to 500; live must be zero or omitted.
+        scenarios:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Omit for all patterns. With normal selected, 10 percent of events start a selected special scenario. Without normal all events use selected special scenarios.
+          items:
+            type: string
+            enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow]
+    SimulationRun:
+      type: object
+      required: [id, settings, status, created_at, finished_at, sent, failed, allowed, reviewed, blocked, pending]
+      properties:
+        id: {type: string}
+        settings: {$ref: '#/components/schemas/SimulationSettings'}
+        status: {type: string, enum: [starting, running, stopping, completed, stopped, failed, interrupted]}
+        created_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        sent: {type: integer, format: int64, minimum: 0}
+        failed: {type: integer, format: int64, minimum: 0}
+        allowed: {type: integer, format: int64, minimum: 0}
+        reviewed: {type: integer, format: int64, minimum: 0}
+        blocked: {type: integer, format: int64, minimum: 0}
+        pending: {type: boolean, description: An in-flight outcome is not checkpointed. Can remain true after interruption if no saved decision is found.}
+        error: {type: string}
     ReviewResolution:
       type: object
       required: [purchase_id, decision, analyst_id, resolved_at, device_blocked]
