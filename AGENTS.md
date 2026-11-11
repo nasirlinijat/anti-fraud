@@ -43,7 +43,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Area | Decision |
 |---|---|
 | Backend shape | Modular monolith in Go |
-| Code layout | Package by feature, with a pure scoring core that has no SQL or HTTP |
+| Code layout | Layers: transport (HTTP) → services (business logic) → storage (SQL), with domain types in models and a pure scoring core that has no SQL or HTTP. Features not moved yet stay package by feature |
 | Database access | Raw SQL run with the pgx driver, kept as constants in each feature package |
 | Schema changes | Versioned SQL migration files applied with golang-migrate |
 | Rule configuration | Versioned rulesets in the database. A stored version never changes: a change adds a new version and makes it the only active one, in one transaction |
@@ -60,10 +60,13 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 
 ```
 backend/
-├── cmd/api/main.go     Wiring only
+├── cmd/api/main.go     Wiring only: stores → services → handlers
 └── internal/
+    ├── transport/      HTTP handlers: decode, validate, map results to status codes
+    ├── services/score/ Score flow: saved decision, blocklist, model inputs, model, rules, save
+    ├── storage/        SQL for purchases and decisions
+    ├── models/         Domain types shared by the layers (Purchase, Decision)
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
-    ├── score/          Score flow and HTTP handler
     ├── rulesets/       Rule configuration
     ├── reviews/        Review queue and decisions
     ├── blocklist/      Blocklist entries
@@ -75,7 +78,9 @@ backend/
     └── platform/       Config, database pool, error helper
 ```
 
-Each feature package registers its own routes, so `main.go` contains only wiring.
+Each feature registers its own routes, so `main.go` contains only wiring.
+
+Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Scoring follows this layout; the other features move to it one at a time.
 
 ### 3.3 Model Data Pipeline
 

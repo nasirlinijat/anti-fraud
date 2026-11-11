@@ -1,4 +1,4 @@
-package score
+package transport
 
 import (
 	"context"
@@ -13,10 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 func TestScoreTrustedHistoryLookup(t *testing.T) {
@@ -55,7 +57,7 @@ func TestScoreTrustedHistoryLookup(t *testing.T) {
 func TestTrustedHistoryWithPostgres(t *testing.T) {
 	tx := testTx(t)
 	ctx := t.Context()
-	store := NewStore(tx)
+	store := storage.NewPurchaseStore(tx)
 	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	candidate := minimalPurchase("history-m")
 	candidate.EventTime = at
@@ -88,7 +90,7 @@ func TestTrustedHistoryWithPostgres(t *testing.T) {
 		if row.id == "other-player" {
 			p.PlayerID = "other-player"
 		}
-		id, err := store.Save(ctx, p, Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: row.outcome}})
+		id, err := store.Save(ctx, p, models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: row.outcome}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,13 +120,13 @@ func TestTrustedHistoryWithPostgres(t *testing.T) {
 }
 
 type trustedHistoryStore struct {
-	*Store
+	*storage.PurchaseStore
 	calls int
 }
 
-func (s *trustedHistoryStore) TrustedHistory(ctx context.Context, p Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error) {
+func (s *trustedHistoryStore) TrustedHistory(ctx context.Context, p models.Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error) {
 	s.calls++
-	return s.Store.TrustedHistory(ctx, p, windowDays)
+	return s.PurchaseStore.TrustedHistory(ctx, p, windowDays)
 }
 
 // spikeServer serves the ruleset, review and score routes from one
@@ -139,14 +141,14 @@ type spikeServer struct {
 func newSpikeServer(t *testing.T) spikeServer {
 	t.Helper()
 	tx := testTx(t)
-	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: rulesets.NewStore(tx), purchases: &trustedHistoryStore{Store: NewStore(tx)}}
+	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: rulesets.NewStore(tx), purchases: &trustedHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}}
 	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"test","key":"review-test-key"}]`, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rulesets.RegisterRoutes(srv.mux, srv.rules, testKey, testOperators(t))
 	reviews.RegisterRoutes(srv.mux, reviews.NewStore(tx), keys, false)
-	RegisterRoutes(srv.mux, NewHandler(srv.rules, blocklist.NewStore(tx), srv.purchases), testKey)
+	registerScore(srv.mux, newHandler(srv.rules, blocklist.NewStore(tx), srv.purchases), testKey)
 	return srv
 }
 
@@ -168,7 +170,7 @@ func (srv spikeServer) saveTrustedPurchases(t *testing.T, rulesetVersion int, at
 		p := minimalPurchase(fmt.Sprintf("spike-trusted-%d", i))
 		p.EventTime, p.DeviceID, p.AmountMinor = at.Add(-time.Hour), ptr("trusted"), 400
 		var err error
-		reviewID, err = srv.purchases.Save(t.Context(), p, Decision{RulesetVersion: rulesetVersion, Result: scoring.Result{Outcome: outcome}})
+		reviewID, err = srv.purchases.Save(t.Context(), p, models.Decision{RulesetVersion: rulesetVersion, Result: scoring.Result{Outcome: outcome}})
 		if err != nil {
 			t.Fatal(err)
 		}

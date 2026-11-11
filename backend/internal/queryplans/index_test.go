@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
 )
@@ -56,9 +56,9 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CountReviewQueue", stats.CountReviewQueueSQL, nil},
 		{"CountModelEffects", stats.CountModelEffectsSQL, []any{at, until}},
 		{"ListModelInputs", trainingdata.ModelInputsPageSQL, []any{at, "txn-1", int32(5000)}},
-		{"PlayerEarlierModelScores", score.PlayerEarlierModelScoresSQL, []any{"player-1", at, "txn-1"}},
-		{"CountDeviceDistinctCardsLastHour", score.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
-		{"GetTrustedPurchaseHistory", score.TrustedPurchaseHistorySQL, []any{
+		{"PlayerEarlierModelScores", storage.PlayerEarlierModelScoresSQL, []any{"player-1", at, "txn-1"}},
+		{"CountDeviceDistinctCardsLastHour", storage.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
+		{"GetTrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
 		}},
 	}

@@ -17,10 +17,12 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulations"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
 
 func main() {
@@ -39,9 +41,9 @@ func main() {
 	platform.RegisterHealthRoutes(mux, pool)
 	rulesetStore := rulesets.NewStore(pool)
 	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey, cfg.OperatorKeys)
-	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
-	useModel(cfg.ModelPath, handler, rulesetStore)
-	score.RegisterRoutes(mux, handler, cfg.APIKey)
+	scoreService := scoresvc.NewService(rulesetStore, blocklist.NewStore(pool), storage.NewPurchaseStore(pool))
+	useModel(cfg.ModelPath, scoreService, rulesetStore)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
 	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
@@ -67,9 +69,9 @@ func main() {
 }
 
 // useModel loads the fraud model and its policy and gives them to the score
-// handler and the ruleset store. Without a model path the rules decide alone.
+// service and the ruleset store. Without a model path the rules decide alone.
 // It exits when the model cannot be loaded or used.
-func useModel(modelPath string, handler *score.Handler, rulesetStore *rulesets.Store) {
+func useModel(modelPath string, service *scoresvc.Service, rulesetStore *rulesets.Store) {
 	if modelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
 		return
@@ -82,7 +84,7 @@ func useModel(modelPath string, handler *score.Handler, rulesetStore *rulesets.S
 	if err != nil {
 		log.Fatalf("load fraud model policy: %v", err)
 	}
-	if err := handler.UseModel(model, policy); err != nil {
+	if err := service.UseModel(model, policy); err != nil {
 		log.Fatalf("use fraud model %s: %v", model.Version(), err)
 	}
 	rulesetStore.UseModelThresholds(policy)

@@ -15,7 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -254,7 +255,7 @@ func readCSV(t *testing.T, path string) ([]string, []map[string]string) {
 // purchaseFromIEEE converts a test row in IEEE-CIS format into a purchase the
 // way the replay does: event_time counts seconds from the Unix epoch, and the
 // player and card IDs are built as in ml/features.py.
-func purchaseFromIEEE(t *testing.T, row map[string]string) score.Purchase {
+func purchaseFromIEEE(t *testing.T, row map[string]string) models.Purchase {
 	t.Helper()
 	optional := func(column string) *string {
 		if row[column] == "" {
@@ -290,7 +291,7 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) score.Purchase {
 		card = append(card, key(column))
 	}
 
-	p := score.Purchase{
+	p := models.Purchase{
 		TransactionID:        row["TransactionID"],
 		EventTime:            time.Unix(seconds, 0).UTC(),
 		AmountMinor:          int64(math.Round(amount * 100)),
@@ -339,7 +340,7 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) score.Purchase {
 func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
-	store := score.NewStore(tx)
+	store := storage.NewPurchaseStore(tx)
 
 	_, transactions := readCSV(t, transactionsPath)
 	header, expected := readCSV(t, expectedPath)
@@ -373,7 +374,7 @@ func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 			}
 		}
 
-		_, err = store.Save(ctx, p, score.Decision{
+		_, err = store.Save(ctx, p, models.Decision{
 			RulesetVersion: 1,
 			Result:         scoring.Result{Outcome: scoring.OutcomeAllow},
 			ModelInputs:    features.Map(values),
@@ -393,10 +394,10 @@ type countRow struct {
 func TestRunningTotals(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
-	store := score.NewStore(tx)
+	store := storage.NewPurchaseStore(tx)
 
 	at := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
-	purchases := []score.Purchase{
+	purchases := []models.Purchase{
 		{TransactionID: "a", PlayerID: "p1", EmailDomain: ptr("gmail.com"), DeviceName: ptr("Windows")},
 		{TransactionID: "b", PlayerID: "p1", EmailDomain: ptr("gmail.com"), DeviceName: ptr("Windows")},
 		{TransactionID: "c", PlayerID: "p2", EmailDomain: ptr("gmail.com")},
@@ -410,7 +411,7 @@ func TestRunningTotals(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FeatureHistory: %v", err)
 		}
-		d := score.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}, FeatureHistory: h}
+		d := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}, FeatureHistory: h}
 		if _, err := store.Save(ctx, p, d); err != nil {
 			t.Fatalf("Save: %v", err)
 		}

@@ -14,7 +14,9 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
+	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 )
 
 type rejectUnexpectedReviewAccess struct{}
@@ -321,7 +323,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	ctx := context.Background()
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
-	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), score.NewStore(tx)), serviceTestKey)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {
 		t.Helper()
