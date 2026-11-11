@@ -598,8 +598,9 @@ paths:
       summary: Get the evidence behind a purchase awaiting review
       description: >-
         Returns one purchase marked for review with its rule score, fired rules
-        and points, the version of the ruleset that scored it, and the model
-        score when one was recorded.
+        and points, the version of the ruleset that scored it, the model
+        score when one was recorded, the player's recent purchases before this
+        one, and activity on the same device.
       security:
         - AnalystKeyAuth: []
       parameters:
@@ -815,13 +816,57 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version]
+          required: [ruleset_version, player_purchases, device_activity]
           properties:
             ruleset_version:
               type: integer
               format: int32
               description: The ruleset version that scored the purchase.
               example: 2
+            player_purchases:
+              type: array
+              maxItems: 5
+              description: Up to 5 recent purchases by the same player before this one, newest first.
+              items:
+                $ref: "#/components/schemas/CasePlayerPurchase"
+            device_activity:
+              $ref: "#/components/schemas/CaseDeviceActivity"
+
+    CasePlayerPurchase:
+      type: object
+      required: [transaction_id, event_time, amount_minor, outcome]
+      properties:
+        transaction_id:
+          type: string
+        event_time:
+          type: string
+          format: date-time
+          description: The purchase time in UTC.
+        amount_minor:
+          type: string
+          description: The integer amount in minor units as a decimal string.
+        outcome:
+          type: string
+          enum: [allow, review, block]
+
+    CaseDeviceActivity:
+      type: object
+      nullable: true
+      description: Activity on the same device up to this purchase, or null when the purchase carried no device_id.
+      required: [purchases, distinct_cards, last_seen_at]
+      properties:
+        purchases:
+          type: integer
+          format: int64
+          minimum: 1
+        distinct_cards:
+          type: integer
+          format: int64
+          minimum: 1
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Latest purchase time on this device up to this purchase, in UTC.
 
     Ruleset:
       allOf:

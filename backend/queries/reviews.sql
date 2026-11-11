@@ -22,3 +22,24 @@ END::text AS status,
 -- name: GetPurchaseDeviceID :one
 -- Returns the device ID of a purchase, or NULL when it carried none.
 SELECT device_id FROM purchases WHERE id = sqlc.arg(purchase_id);
+
+-- name: ListCasePlayerPurchases :many
+-- Lists the player's recent purchases before the given one, newest first.
+SELECT p.transaction_id, p.event_time, p.amount_minor, d.outcome
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = sqlc.arg(player_id)
+  AND (p.event_time, p.transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text)
+ORDER BY p.event_time DESC, p.transaction_id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: GetCaseDeviceActivity :one
+-- Summarizes activity on the same device up to the given purchase.
+SELECT
+    count(*) AS purchases,
+    count(DISTINCT card_token) AS distinct_cards,
+    max(event_time)::timestamptz AS last_seen_at
+FROM purchases
+WHERE device_id IS NOT NULL
+  AND device_id = sqlc.arg(device_id)::text
+  AND (event_time, transaction_id) <= (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text);

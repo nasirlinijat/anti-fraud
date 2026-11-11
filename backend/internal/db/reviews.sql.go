@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getCaseDeviceActivity = `-- name: GetCaseDeviceActivity :one
+SELECT
+    count(*) AS purchases,
+    count(DISTINCT card_token) AS distinct_cards,
+    max(event_time)::timestamptz AS last_seen_at
+FROM purchases
+WHERE device_id IS NOT NULL
+  AND device_id = $1::text
+  AND (event_time, transaction_id) <= ($2::timestamptz, $3::text)
+`
+
+type GetCaseDeviceActivityParams struct {
+	DeviceID      string
+	EventTime     pgtype.Timestamptz
+	TransactionID string
+}
+
+type GetCaseDeviceActivityRow struct {
+	Purchases     int64
+	DistinctCards int64
+	LastSeenAt    pgtype.Timestamptz
+}
+
+// Summarizes activity on the same device up to the given purchase.
+func (q *Queries) GetCaseDeviceActivity(ctx context.Context, arg GetCaseDeviceActivityParams) (GetCaseDeviceActivityRow, error) {
+	row := q.db.QueryRow(ctx, getCaseDeviceActivity, arg.DeviceID, arg.EventTime, arg.TransactionID)
+	var i GetCaseDeviceActivityRow
+	err := row.Scan(&i.Purchases, &i.DistinctCards, &i.LastSeenAt)
+	return i, err
+}
+
 const getPurchaseDeviceID = `-- name: GetPurchaseDeviceID :one
 SELECT device_id FROM purchases WHERE id = $1
 `
@@ -21,6 +52,61 @@ func (q *Queries) GetPurchaseDeviceID(ctx context.Context, purchaseID int64) (pg
 	var device_id pgtype.Text
 	err := row.Scan(&device_id)
 	return device_id, err
+}
+
+const listCasePlayerPurchases = `-- name: ListCasePlayerPurchases :many
+SELECT p.transaction_id, p.event_time, p.amount_minor, d.outcome
+FROM purchases p
+JOIN decisions d ON d.purchase_id = p.id
+WHERE p.player_id = $1
+  AND (p.event_time, p.transaction_id) < ($2::timestamptz, $3::text)
+ORDER BY p.event_time DESC, p.transaction_id DESC
+LIMIT $4
+`
+
+type ListCasePlayerPurchasesParams struct {
+	PlayerID      string
+	EventTime     pgtype.Timestamptz
+	TransactionID string
+	PageLimit     int32
+}
+
+type ListCasePlayerPurchasesRow struct {
+	TransactionID string
+	EventTime     pgtype.Timestamptz
+	AmountMinor   int64
+	Outcome       string
+}
+
+// Lists the player's recent purchases before the given one, newest first.
+func (q *Queries) ListCasePlayerPurchases(ctx context.Context, arg ListCasePlayerPurchasesParams) ([]ListCasePlayerPurchasesRow, error) {
+	rows, err := q.db.Query(ctx, listCasePlayerPurchases,
+		arg.PlayerID,
+		arg.EventTime,
+		arg.TransactionID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCasePlayerPurchasesRow
+	for rows.Next() {
+		var i ListCasePlayerPurchasesRow
+		if err := rows.Scan(
+			&i.TransactionID,
+			&i.EventTime,
+			&i.AmountMinor,
+			&i.Outcome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveReview = `-- name: ResolveReview :one

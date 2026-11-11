@@ -222,6 +222,10 @@ func TestCaseSerializesEvidence(t *testing.T) {
 				FiredRules: []scoring.FiredRule{{Name: scoring.RuleHighAmount, Points: 30}, {Name: scoring.RuleCardVelocity, Points: 40}},
 			},
 			RulesetVersion: 3,
+			PlayerPurchases: []PlayerPurchase{
+				{TransactionID: "prev", EventTime: at.Add(-2 * time.Minute), AmountMinor: 1200, Outcome: scoring.OutcomeAllow},
+			},
+			DeviceActivity: &DeviceActivity{Purchases: 2, DistinctCards: 1, LastSeenAt: at.Add(-time.Minute)},
 		}, nil
 	})
 	w := requestCase(t, store, "/reviews/9007199254740993", queueTestKey)
@@ -236,7 +240,11 @@ func TestCaseSerializesEvidence(t *testing.T) {
 		got.PlayerID != "player" || got.RuleScore != 70 || got.RulesetVersion != 3 ||
 		got.EventTime.Format(time.RFC3339) != "2026-11-09T09:59:00Z" || got.QueuedAt.Format(time.RFC3339) != "2026-11-09T10:00:00Z" ||
 		got.ModelScore == nil || *got.ModelScore != score || got.ModelVersion == nil || *got.ModelVersion != version ||
-		len(got.FiredRules) != 2 || got.FiredRules[1].Name != scoring.RuleCardVelocity || got.FiredRules[1].Points != 40 {
+		len(got.FiredRules) != 2 || got.FiredRules[1].Name != scoring.RuleCardVelocity || got.FiredRules[1].Points != 40 ||
+		len(got.PlayerPurchases) != 1 || got.PlayerPurchases[0].TransactionID != "prev" || got.PlayerPurchases[0].AmountMinor != "1200" ||
+		got.PlayerPurchases[0].Outcome != scoring.OutcomeAllow || got.PlayerPurchases[0].EventTime.Format(time.RFC3339) != "2026-11-09T09:58:00Z" ||
+		got.DeviceActivity == nil || got.DeviceActivity.Purchases != 2 || got.DeviceActivity.DistinctCards != 1 ||
+		got.DeviceActivity.LastSeenAt.Format(time.RFC3339) != "2026-11-09T09:59:00Z" {
 		t.Fatalf("unexpected case: %+v", got)
 	}
 }
@@ -271,8 +279,10 @@ func TestCaseWithoutModelScoreOrRules(t *testing.T) {
 		t.Fatalf("status = %d, err = %v, body = %s", w.Code, err, w.Body)
 	}
 	rules, isList := body["fired_rules"].([]any)
-	if body["model_score"] != nil || body["model_version"] != nil || !isList || len(rules) != 0 {
-		t.Fatalf("expected null model fields and an empty rule list: %s", w.Body)
+	purchases, isPurchasesList := body["player_purchases"].([]any)
+	if body["model_score"] != nil || body["model_version"] != nil || !isList || len(rules) != 0 ||
+		!isPurchasesList || len(purchases) != 0 || body["device_activity"] != nil {
+		t.Fatalf("expected null model fields and empty history: %s", w.Body)
 	}
 }
 
