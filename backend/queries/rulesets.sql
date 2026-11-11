@@ -1,10 +1,10 @@
 -- name: GetActiveRuleset :one
-SELECT version, review_threshold, block_threshold, note, created_at
+SELECT version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, created_at
 FROM rulesets
 WHERE is_active;
 
 -- name: GetRuleset :one
-SELECT version, review_threshold, block_threshold, note, created_at
+SELECT version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, created_at
 FROM rulesets
 WHERE version = $1;
 
@@ -26,8 +26,10 @@ SELECT pg_advisory_xact_lock(27149, 1);
 UPDATE rulesets SET is_active = false WHERE is_active;
 
 -- name: InsertRuleset :one
-INSERT INTO rulesets (version, review_threshold, block_threshold, note, is_active)
-SELECT COALESCE(MAX(version), 0) + 1, $1, $2, $3, true
+INSERT INTO rulesets (
+    version, review_threshold, block_threshold, note, model_mode, model_clear_below, model_flag_at, is_active
+)
+SELECT COALESCE(MAX(version), 0) + 1, $1, $2, $3, $4, $5, $6, true
 FROM rulesets
 RETURNING version, created_at;
 

@@ -5,6 +5,41 @@ import (
 	"math"
 )
 
+// ModelMode says whether a ruleset version uses the fraud model.
+type ModelMode string
+
+const (
+	// ModelOff computes and saves no model score.
+	ModelOff ModelMode = "off"
+	// ModelShadow saves the model score but leaves the outcome unchanged.
+	ModelShadow ModelMode = "shadow"
+	// ModelAssist lets the model clear a review or add one.
+	ModelAssist ModelMode = "assist"
+)
+
+// Known reports whether m is one of the model modes.
+func (m ModelMode) Known() bool {
+	return m == ModelOff || m == ModelShadow || m == ModelAssist
+}
+
+// ModelSettings is the model part of a ruleset version. ClearBelow and FlagAt
+// are both nil or both set; nil means the thresholds from the loaded model's
+// report.
+type ModelSettings struct {
+	Mode       ModelMode
+	ClearBelow *float64
+	FlagAt     *float64
+}
+
+// Policy returns the loaded model's policy with the thresholds of s, when s
+// has them.
+func (s ModelSettings) Policy(loaded ModelPolicy) ModelPolicy {
+	if s.ClearBelow != nil && s.FlagAt != nil {
+		loaded.ClearBelow, loaded.FlagAt = *s.ClearBelow, *s.FlagAt
+	}
+	return loaded
+}
+
 // ModelPolicy decides how the fraud model score changes the rule outcome.
 // Scores run from 0 to 1.
 type ModelPolicy struct {
