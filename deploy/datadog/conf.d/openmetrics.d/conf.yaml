@@ -1,0 +1,17 @@
+ad_identifiers:
+  - caddy
+
+init_config:
+
+instances:
+  - openmetrics_endpoint: "http://%%host%%:2019/metrics"
+    namespace: antifraud.gateway
+    collect_histogram_buckets: false
+    rename_labels:
+      host: site
+    tags:
+      - service:anti-fraud-gateway
+    metrics:
+      - caddy_http_requests: requests
+      - caddy_http_request_duration_seconds: request.duration
+      - caddy_http_requests_in_flight: requests.in_flight
