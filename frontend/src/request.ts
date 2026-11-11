@@ -1,6 +1,7 @@
 export interface ErrorResponse {
   error: string
   fields?: Record<string, string>
+  active_run_id?: string
 }
 
 type Failure = 'http' | 'network' | 'timeout' | 'response'
@@ -9,12 +10,14 @@ export class ApiError extends Error {
   readonly kind: Failure
   readonly status?: number
   readonly fields?: ErrorResponse['fields']
+  readonly activeRunId?: string
 
-  constructor(kind: Failure, message: string, status?: number, fields?: ErrorResponse['fields']) {
+  constructor(kind: Failure, message: string, status?: number, fields?: ErrorResponse['fields'], activeRunId?: string) {
     super(message)
     this.kind = kind
     this.status = status
     this.fields = fields
+    this.activeRunId = activeRunId
   }
 }
 
@@ -29,12 +32,13 @@ const REQUEST_TIMEOUT_MS = 10_000
 
 function readError(body: unknown, status: number): ErrorResponse {
   if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
+    const active = 'active_run_id' in body && typeof body.active_run_id === 'string' ? { active_run_id: body.active_run_id } : {}
     const fields = 'fields' in body ? body.fields : undefined
     if (fields && typeof fields === 'object' && !Array.isArray(fields) &&
       Object.values(fields).every(value => typeof value === 'string')) {
-      return { error: body.error, fields: fields as Record<string, string> }
+      return { error: body.error, fields: fields as Record<string, string>, ...active }
     }
-    return { error: body.error }
+    return { error: body.error, ...active }
   }
   return { error: `The backend answered with status ${status}.` }
 }
@@ -52,11 +56,11 @@ export async function request<T>(path: string, options: RequestOptions<T> = {}):
     response = await fetch(path, { ...init, signal: controller.signal })
     if (!response.ok || (expectedStatus !== undefined && response.status !== expectedStatus)) {
       const body: unknown = await response.json().catch(() => null)
-      const { error, fields } = readError(body, response.status)
+      const { error, fields, active_run_id } = readError(body, response.status)
       const message = response.status === 401 && auth === 'service'
         ? `${error.endsWith('.') ? error : `${error}.`} Check API_KEY in .env and restart the console and backend.`
         : error
-      throw new ApiError('http', message, response.status, fields)
+      throw new ApiError('http', message, response.status, fields, active_run_id)
     }
     const result = read ? await read(response) : await response.json() as T
     controller.signal.throwIfAborted()

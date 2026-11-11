@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage'
 import ReviewQueue from './ReviewQueue'
 import RulesetPage from './pages/RulesetPage'
 import TesterPage from './pages/TesterPage'
+import SimulatorPage from './pages/SimulatorPage'
 import { usePolling } from './usePolling'
 
 type Status = 'checking' | 'ready' | 'unavailable'
@@ -15,6 +16,7 @@ const pages = [
   { path: '/dashboard', title: 'Dashboard', element: <DashboardPage /> },
   { path: '/blocklist', title: 'Blocklist', element: <BlocklistPage /> },
   { path: '/tester', title: 'Tester', element: <TesterPage /> },
+  { path: '/simulator', title: 'Simulator', element: <SimulatorPage /> },
   { path: '/reviews', title: 'Review queue', element: <ReviewQueue /> },
   { path: '/rulesets', title: 'Rulesets', element: <RulesetPage /> },
 ]
