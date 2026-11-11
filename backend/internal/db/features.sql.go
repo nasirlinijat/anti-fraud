@@ -115,13 +115,24 @@ func (q *Queries) FeatureCounts(ctx context.Context, arg FeatureCountsParams) ([
 }
 
 const issuerHistory = `-- name: IssuerHistory :one
+WITH issuer_purchases AS (
+    SELECT player_id, billing_region, email_domain
+    FROM purchases
+    WHERE coalesce(card_issuer, '') = $1::text
+      AND (event_time, transaction_id) < ($2::timestamptz, $3::text)
+      AND issuer_history_fits_index(card_issuer, transaction_id, player_id, billing_region, email_domain)
+    UNION ALL
+    SELECT player_id, billing_region, email_domain
+    FROM purchases
+    WHERE coalesce(card_issuer, '') = $1::text
+      AND (event_time, transaction_id) < ($2::timestamptz, $3::text)
+      AND NOT issuer_history_fits_index(card_issuer, transaction_id, player_id, billing_region, email_domain)
+)
 SELECT
     count(DISTINCT player_id) AS players,
     count(DISTINCT coalesce(billing_region, 'none')) AS billing_regions,
     count(DISTINCT coalesce(email_domain, 'none')) AS email_domains
-FROM purchases
-WHERE coalesce(card_issuer, '') = $1::text
-  AND (event_time, transaction_id) < ($2::timestamptz, $3::text)
+FROM issuer_purchases
 `
 
 type IssuerHistoryParams struct {

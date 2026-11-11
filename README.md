@@ -119,6 +119,30 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 
+## Scoring load test
+
+Run this from the repository root with a local Docker engine, Go, and curl:
+
+```bash
+./scripts/scorebench.sh
+```
+
+The script builds the API image and starts a disposable PostgreSQL 18 instance and API on loopback ports. It applies the migrations, loads 500,000 synthetic purchases and matching decisions spanning 120 days, and initializes all six feature-count groups. The API uses the restricted database role. A separate operator key publishes ruleset version 2 with the seeded settings plus device card count and new device spike enabled, preserving the model settings in assist mode. Scoring uses the service key and the Compose model, `lgbm-ieee-v5-combined`.
+
+Seed 42 selects returning players, cards, and devices for 100 warm-up requests and 1,000 timed requests. The timed mix is 800 routine purchases, 100 on shared devices, and 100 large purchases on unseen devices. Across those groups, 100 requests have a missing issuer and 100 use a common issuer. The client sends one request at a time in event order and measures through the end of the HTTP response body. The script checks that the timed decisions were saved, verifies both new rules fired, and requires p95 below 50 ms. It removes the benchmark containers, database volume, and network at exit.
+
+### Local results
+
+Measured on November 11, 2026, on an Apple M4 with 10 CPU cores and 16 GiB RAM, macOS 26.6.2, Docker Engine 29.8.1 with 10 CPUs and 7.75 GiB allocated, and PostgreSQL 18.6. The baseline used `99d3398`. The covering-index change first reduced p95 to 40.76 ms and 39.21 ms on that same base. The final runs below include `main` at `35cc6c5`, migration `000020`, the restricted API database role, and operator authentication.
+
+| Run | HTTP p50 | HTTP p95 | HTTP p99 |
+|---|---:|---:|---:|
+| Baseline | 19.05 ms | 94.13 ms | 121.46 ms |
+| Final 1 | 7.25 ms | 38.37 ms | 40.57 ms |
+| Final 2 | 8.27 ms | 41.39 ms | 66.62 ms |
+
+Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run. `pg_stat_statements` ranked issuer history first by mean and total execution time. Its mean was 28.09 ms in the baseline and 10.30 ms and 11.47 ms in the final runs. `EXPLAIN (ANALYZE, BUFFERS)` showed index-only scans for the typical, missing, and common issuer samples. The player, card, model history, device-card count, and trusted-purchase history plans used their indexes with no sequential scans. The issuer query still counts distinct values across both indexes. Rows with wide text use the index with the original keys.
+
 ## Ruleset API
 
 Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.

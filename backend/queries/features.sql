@@ -36,13 +36,24 @@ WHERE card_token = sqlc.arg(card_token)
 -- name: IssuerHistory :one
 -- Summarizes the card issuer's purchases that come before the given one. A
 -- missing issuer is grouped as the empty string.
+WITH issuer_purchases AS (
+    SELECT player_id, billing_region, email_domain
+    FROM purchases
+    WHERE coalesce(card_issuer, '') = sqlc.arg(card_issuer)::text
+      AND (event_time, transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text)
+      AND issuer_history_fits_index(card_issuer, transaction_id, player_id, billing_region, email_domain)
+    UNION ALL
+    SELECT player_id, billing_region, email_domain
+    FROM purchases
+    WHERE coalesce(card_issuer, '') = sqlc.arg(card_issuer)::text
+      AND (event_time, transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text)
+      AND NOT issuer_history_fits_index(card_issuer, transaction_id, player_id, billing_region, email_domain)
+)
 SELECT
     count(DISTINCT player_id) AS players,
     count(DISTINCT coalesce(billing_region, 'none')) AS billing_regions,
     count(DISTINCT coalesce(email_domain, 'none')) AS email_domains
-FROM purchases
-WHERE coalesce(card_issuer, '') = sqlc.arg(card_issuer)::text
-  AND (event_time, transaction_id) < (sqlc.arg(event_time)::timestamptz, sqlc.arg(transaction_id)::text);
+FROM issuer_purchases;
 
 -- name: FeatureCounts :many
 -- Reads the running totals for all purchases, the email domain, the device name
