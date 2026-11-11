@@ -26,7 +26,7 @@ From the repository root, use Docker with the Compose plugin to run the console.
    docker compose down
    ```
 
-Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to score, stats, blocklist, and ruleset requests. Review requests use the analyst key entered in the console.
+Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to scoring, statistics, and configuration reads. Review requests and configuration writes use the individual key entered in the console.
 
 ## Deployment
 
@@ -121,7 +121,7 @@ The simulator keeps pattern names local and prints the score API's actual outcom
 
 ## Ruleset API
 
-Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. All ruleset endpoints require the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
+Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
 
 Device card count starts off. To enable it, publish a new ruleset with `device_card_count` enabled. The Rulesets page suggests 5 distinct cards in 60 minutes, including the current card, and a weight of 20 points. Before rolling back to a version of the service that predates this rule, publish a new ruleset that omits `device_card_count`.
 
@@ -161,7 +161,7 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key to scoring, statistics, and configuration reads. It forwards individual analyst keys for reviews and individual operator keys for configuration writes. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Command | What it does |
 |---|---|
@@ -196,6 +196,14 @@ REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"
 Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
 ## Security
+
+Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.
+
+```dotenv
+OPERATOR_API_KEYS=[{"operator_id":"operator-1","key":"replace-with-an-individual-key"}]
+```
+
+When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASSWORD` to `.env` before starting the stack. Keep the existing `POSTGRES_USER` and `POSTGRES_PASSWORD` for migrations and backups. If you run the backend on the host, update `DATABASE_URL` to use `antifraud_api` and the runtime password.
 
 The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 

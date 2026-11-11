@@ -339,7 +339,7 @@ paths:
         IP addresses are stored in canonical form, so `::ffff:203.0.113.9`
         is saved as `203.0.113.9`.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       requestBody:
         required: true
         content:
@@ -379,13 +379,13 @@ paths:
                   value: must be an IPv4 or IPv6 address
                   reason: is required
         "401":
-          description: The API key is missing or wrong.
+          description: The operator key is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid API key
+                error: missing or invalid operator key
         "409":
           description: The same type and value are already on the blocklist.
           content:
@@ -410,6 +410,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
 
   /blocklist/{id}:
     delete:
@@ -418,7 +420,7 @@ paths:
       summary: Remove a blocklist entry
       description: The value is no longer blocked from the next scored purchase on.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -439,13 +441,13 @@ paths:
               example:
                 error: the entry ID must be a positive integer
         "401":
-          description: The API key is missing or wrong.
+          description: The operator key is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid API key
+                error: missing or invalid operator key
         "404":
           description: No entry has this ID.
           content:
@@ -462,6 +464,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
 
   /reviews:
     get:
@@ -699,7 +703,7 @@ paths:
         version was made and is saved with the version. Existing decisions
         retain their version.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       requestBody:
         required: true
         content:
@@ -720,11 +724,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid API key.
+          description: Missing or invalid operator key.
         "413":
           description: The request body exceeds 65536 bytes.
         "500":
           description: The ruleset could not be published.
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
 
   /rulesets/active:
     get:
@@ -799,7 +805,20 @@ components:
       name: X-API-Key
       description: The individual key assigned to the analyst in REVIEW_ANALYST_KEYS.
 
+    OperatorKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: The individual key assigned to the operator in OPERATOR_API_KEYS.
+
   responses:
+    OperatorAccessUnavailable:
+      description: No operator keys are configured.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
     ReviewAccessUnavailable:
       description: No analyst keys are configured.
       content:

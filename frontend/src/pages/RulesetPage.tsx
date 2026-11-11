@@ -139,6 +139,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
   const [selectedVersion, setSelectedVersion] = useState(initial.version)
   const [selectedRuleset, setSelectedRuleset] = useState<Ruleset | null>(initial)
   const [selectedError, setSelectedError] = useState<string | null>(null)
+  const [operatorKey, setOperatorKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [checkingActive, setCheckingActive] = useState(false)
   const [checkError, setCheckError] = useState<string | null>(null)
@@ -195,7 +196,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (saving || checkingActive || readOnly) return
+    if (saving || checkingActive || readOnly || !operatorKey.trim()) return
     setNotice('')
     setCheckError(null)
     const errors: FieldErrors = {}
@@ -206,7 +207,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
     }
     setError(null)
     setSaving(true)
-    const result = await publishRuleset(config)
+    const result = await publishRuleset(config, operatorKey.trim())
     setSaving(false)
     if (!result.ok) {
       setError(result.error)
@@ -362,7 +363,14 @@ function RulesetForm({ initial, history, time, onPublished }: {
             </ErrorState>
           )}
           {!readOnly && (
-            <button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</button>
+            <div className="field">
+              <label htmlFor="ruleset-operator-key">Operator key</label>
+              <input id="ruleset-operator-key" type="password" autoComplete="off" value={operatorKey}
+                disabled={saving} onChange={(event) => setOperatorKey(event.target.value)} />
+            </div>
+          )}
+          {!readOnly && (
+            <button type="submit" disabled={saving || checkingActive || !operatorKey.trim()}>{saving ? 'Publishing…' : 'Publish new version'}</button>
           )}
         </form>
       )}

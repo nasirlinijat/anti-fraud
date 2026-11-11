@@ -12,6 +12,10 @@
 		method POST DELETE
 		header_regexp Sec-Fetch-Site ^(cross-site|same-site)$
 	}
+	@configurationWrite {
+		method POST DELETE
+		path /blocklist /blocklist/* /rulesets
+	}
 	@service path /score /stats /blocklist /blocklist/* /rulesets /rulesets/*
 	@pass path /health /ready /reviews /reviews/*
 
@@ -21,6 +25,7 @@
 		respond @foreignOrigin 403
 		respond @crossSiteWrite 403
 
+		reverse_proxy @configurationWrite backend:{$BACKEND_PORT}
 		reverse_proxy @service backend:{$BACKEND_PORT} {
 			header_up X-API-Key {env.API_KEY}
 			header_down -X-API-Key

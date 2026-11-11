@@ -22,11 +22,11 @@ const maxDeviceSpikeWindowDays = 3650
 const maxNoteRunes = 500
 
 // RegisterRoutes exposes the active ruleset, version history, and version publishing.
-func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string) {
+func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string, operators platform.OperatorKeys) {
 	mux.Handle("GET /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.list)))
 	mux.Handle("GET /rulesets/active", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getActive)))
 	mux.Handle("GET /rulesets/{version}", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getVersion)))
-	mux.Handle("POST /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.publish)))
+	mux.Handle("POST /rulesets", platform.RequireOperator(operators, store.publish))
 }
 
 type configPayload struct {
@@ -86,7 +86,7 @@ func (s *Store) getVersion(w http.ResponseWriter, r *http.Request) {
 	writeRuleset(w, http.StatusOK, rs)
 }
 
-func (s *Store) publish(w http.ResponseWriter, r *http.Request) {
+func (s *Store) publish(w http.ResponseWriter, r *http.Request, operatorID string) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	var payload *configPayload
@@ -109,7 +109,7 @@ func (s *Store) publish(w http.ResponseWriter, r *http.Request) {
 		platform.WriteJSON(w, http.StatusBadRequest, platform.ErrorResponse{Error: "invalid request", Fields: fields})
 		return
 	}
-	rs, err := s.Publish(r.Context(), rs)
+	rs, err := s.Publish(r.Context(), rs, operatorID)
 	if err != nil {
 		log.Printf("%v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")

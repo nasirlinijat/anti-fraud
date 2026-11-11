@@ -13,7 +13,7 @@ Internet ──► Caddy gateway (80, 443)
 | Host | Who uses it | Protection |
 |---|---|---|
 | `api.<ip>.sslip.io` | Game shops, the simulator, `replay.py` | `X-API-Key` header with `API_KEY`. Only `/score`, `/health` and `/ready` are open |
-| `console.<ip>.sslip.io` | The team and analysts | Browser login (`CONSOLE_USER` and its password), plus each analyst's own key on the review queue |
+| `console.<ip>.sslip.io` | The team and analysts | Browser login (`CONSOLE_USER` and its password), plus individual keys for analyst decisions and operator configuration writes |
 
 [sslip.io](https://sslip.io) is a free DNS service: `api.3-120-10-20.sslip.io` resolves to `3.120.10.20`, so no domain is needed. With a real domain, point two DNS records at the server and put those names in `CONSOLE_HOST` and `API_HOST`.
 
@@ -60,8 +60,10 @@ FRONTEND_PORT=3000
 POSTGRES_PORT=5432
 API_KEY=$(openssl rand -hex 32)
 REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-1","key":"$(openssl rand -hex 32)"},{"analyst_id":"analyst-2","key":"$(openssl rand -hex 32)"}]
+OPERATOR_API_KEYS=[{"operator_id":"operator-1","key":"$(openssl rand -hex 32)"}]
 POSTGRES_USER=antifraud
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
+RUNTIME_DB_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=antifraud
 MODEL_FILE=lgbm-ieee-v5-combined.json
 CONSOLE_HOST=console.$DASHED.sslip.io
@@ -74,9 +76,11 @@ echo "$CONSOLE_PASSWORD" > console-password.txt
 chmod 600 console-password.txt
 ```
 
-`console-password.txt` holds the console login for the team. `API_KEY` and the analyst keys are in `.env`; share them through a password manager, never in Git or chat. `deploy/env.production.example` lists every setting.
+`console-password.txt` holds the console login for the team. `API_KEY` and the individual analyst and operator keys are in `.env`; share them through a password manager, never in Git or chat. `deploy/env.production.example` lists every setting.
 
 ## 3. Deploy
+
+For an existing server, add a new `RUNTIME_DB_PASSWORD` and individual `OPERATOR_API_KEYS` to `~/anti-fraud/.env` before upgrading. Generate the runtime password with `openssl rand -hex 24` and each operator key with `openssl rand -hex 32`. Keep the existing PostgreSQL administrator credentials and volume. Compose applies migrations with the administrator, then provisions the restricted API role on the same database. Configuration writes return 503 until operator keys are configured.
 
 From the repository root on your computer:
 
@@ -121,6 +125,12 @@ alias dc='docker compose -p antifraud --env-file ../.env -f docker-compose.yml -
 dc ps
 dc logs -f backend
 dc restart backend
+```
+
+The database administrator can inspect recent configuration changes. Each row identifies the actor, action, target, and server time. Blocklist events also retain the entry details, so restrict access to the audit table and backups.
+
+```bash
+dc exec -T db psql -U antifraud -d antifraud -c   'SELECT recorded_at, actor_kind, actor_id, action, resource_id FROM configuration_audit_events ORDER BY id DESC LIMIT 25'
 ```
 
 Back up the database:

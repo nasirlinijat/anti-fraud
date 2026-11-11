@@ -20,7 +20,7 @@ export class ApiError extends Error {
 
 interface RequestOptions<T> extends Omit<RequestInit, 'signal'> {
   signal?: AbortSignal
-  auth?: 'service' | 'analyst' | 'none'
+  auth?: 'service' | 'analyst' | 'operator' | 'none'
   expectedStatus?: number
   read?: (response: Response) => Promise<T>
 }

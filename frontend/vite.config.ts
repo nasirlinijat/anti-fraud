@@ -42,7 +42,16 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/health': backendUrl,
         '/ready': backendUrl,
-        [serviceRoutes]: { target: backendUrl, headers: { 'X-API-Key': env.API_KEY ?? '' } },
+        [serviceRoutes]: {
+          target: backendUrl,
+          configure(proxy) {
+            proxy.on('proxyReq', (outgoing, incoming) => {
+              if (incoming.method === 'GET' || incoming.method === 'HEAD' || /^\/score(?:[/?]|$)/.test(incoming.url ?? '')) {
+                outgoing.setHeader('X-API-Key', env.API_KEY ?? '')
+              }
+            })
+          },
+        },
         // Forward the key entered in the review queue.
         [reviewRoutes]: backendUrl,
       },

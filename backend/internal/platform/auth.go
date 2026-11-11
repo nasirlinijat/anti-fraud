@@ -29,3 +29,21 @@ func RequireAPIKey(key string, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// RequireOperator authenticates configuration writes and supplies the operator ID.
+func RequireOperator(keys OperatorKeys, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !keys.Configured() {
+			WriteError(w, http.StatusServiceUnavailable, "operator access is not configured")
+			return
+		}
+		if values := r.Header.Values(APIKeyHeader); len(values) == 1 {
+			if id := keys.identity(values[0]); id != "" {
+				next(w, r, id)
+				return
+			}
+		}
+		WriteError(w, http.StatusUnauthorized, "missing or invalid operator key")
+	}
+}

@@ -125,10 +125,11 @@ export async function listRulesets(signal?: AbortSignal): Promise<RulesetSummary
   return result.versions
 }
 
-export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
+export function publishRuleset(config: RulesetConfig, operatorKey: string): Promise<Saved<Ruleset>> {
   return save(() => request('/rulesets', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: 'operator',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
     body: JSON.stringify(config, (_key, value: unknown) => {
       if (typeof value !== 'bigint') return value
       const number = Number(value)
@@ -140,22 +141,23 @@ export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
   }))
 }
 
-// The proxy adds the API key to the blocklist requests.
+// The proxy adds the service key to blocklist reads.
 export async function listBlocklist(signal?: AbortSignal): Promise<BlocklistEntry[]> {
   const result = await request<{ entries: BlocklistEntry[] }>('/blocklist', { signal })
   return result.entries
 }
 
-export function addBlocklistEntry(entry: { type: string; value: string; reason: string }): Promise<Saved<BlocklistEntry>> {
+export function addBlocklistEntry(entry: { type: string; value: string; reason: string }, operatorKey: string): Promise<Saved<BlocklistEntry>> {
   return save(() => request<BlocklistEntry>('/blocklist', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: 'operator',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
     body: JSON.stringify(entry),
   }))
 }
 
-export function removeBlocklistEntry(id: number): Promise<Saved<null>> {
-  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', read: async () => null }))
+export function removeBlocklistEntry(id: number, operatorKey: string): Promise<Saved<null>> {
+  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', auth: 'operator', headers: { 'X-API-Key': operatorKey }, read: async () => null }))
 }
 
 export type ScoreResult =

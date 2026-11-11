@@ -17,6 +17,17 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
+const operatorTestKey = "operator-key"
+
+func testOperators(t *testing.T) platform.OperatorKeys {
+	t.Helper()
+	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"ruleset-operator","key":"`+operatorTestKey+`"}]`, "test-key", platform.AnalystKeys{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
 func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set(platform.APIKeyHeader, key)
@@ -27,7 +38,7 @@ func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptes
 
 func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key")
+	RegisterRoutes(mux, nil, "test-key", testOperators(t))
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/rulesets"},
 		{"GET", "/rulesets/active"},
@@ -48,7 +59,7 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 		"review_threshold": 50, "block_threshold": 40,
 		"note": "`+strings.Repeat("n", 501)+`",
 		"rules": {"high_amount": {"enabled": true, "weight": -1}, "unknown": {}}
-	}`, "test-key")
+	}`, operatorTestKey)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -68,7 +79,7 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 			"high_amount": {"enabled": true, "weight": 2147483647, "limit": 1000},
 			"country_mismatch": {"enabled": true, "weight": 1}
 		}
-	}`, "test-key")
+	}`, operatorTestKey)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("overflowing rule score status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -98,6 +109,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		"../../migrations/000002_create_rulesets.up.sql",
 		"../../migrations/000015_add_new_device_spike_settings.up.sql",
 		"../../migrations/000016_add_ruleset_note.up.sql",
+		"../../migrations/000018_configuration_audit.up.sql",
 	} {
 		migration, err := os.ReadFile(path)
 		if err != nil {
@@ -109,13 +121,16 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(isolated), "test-key")
+	RegisterRoutes(mux, NewStore(isolated), "test-key", testOperators(t))
 	const requests = 4
+	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
+		t.Fatalf("service key publishing status = %d, want 401", w.Code)
+	}
 	responses := make(chan *httptest.ResponseRecorder, requests)
 	for i := range requests {
 		go func() {
 			body := fmt.Sprintf(`{"review_threshold":40,"block_threshold":70,"note":"  note %d  ","rules":{"high_amount":{"enabled":true,"weight":%d,"limit":1000}}}`, i, 10+i)
-			responses <- rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
+			responses <- rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
 		}()
 	}
 	type versionedConfig struct {
@@ -179,6 +194,15 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 		t.Errorf("GET /rulesets/999 status = %d, want 404", missing.Code)
 	}
 
+	var audited int
+	if err := isolated.QueryRow(ctx, `
+        SELECT count(*) FROM configuration_audit_events a
+        JOIN rulesets r ON r.version = a.resource_id
+        WHERE a.action = 'ruleset.publish' AND a.actor_id = 'ruleset-operator'
+    `).Scan(&audited); err != nil || audited != requests {
+		t.Fatalf("audited publications = %d, error = %v, want %d", audited, err, requests)
+	}
+
 	var oldWeight int
 	err = isolated.QueryRow(ctx, `SELECT weight FROM ruleset_rules WHERE ruleset_version = 1 AND rule_name = 'high_amount'`).Scan(&oldWeight)
 	if err != nil || oldWeight != 30 {
@@ -188,7 +212,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 
 func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key")
+	RegisterRoutes(mux, nil, "test-key", testOperators(t))
 	for _, tc := range []struct {
 		name  string
 		rules string
@@ -202,7 +226,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{%s}}`, tc.rules)
-			rec := rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
 			var got platform.ErrorResponse
 			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Fields[tc.field] == "" {
 				t.Errorf("status = %d, body = %s, want 400 with %s", rec.Code, rec.Body, tc.field)
@@ -213,7 +237,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 
 func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key")
+	RegisterRoutes(mux, nil, "test-key", testOperators(t))
 	for _, tc := range []struct {
 		name, rule string
 		fields     []string
@@ -227,7 +251,7 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{"new_device_spike":%s}}`, tc.rule)
-			rec := rulesetRequest(mux, "POST", "/rulesets", body, "test-key")
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
 			var got platform.ErrorResponse
 			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
 				t.Fatalf("status = %d, body = %s, want 400", rec.Code, rec.Body)

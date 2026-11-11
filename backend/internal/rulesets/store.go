@@ -113,7 +113,7 @@ func (s *Store) loadRuleset(
 }
 
 // Publish saves a new version and activates it in the same transaction.
-func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Ruleset, error) {
+func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset, operatorID string) (scoring.Ruleset, error) {
 	err := pgx.BeginFunc(ctx, s.conn, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		if err := q.LockRulesetsForPublish(ctx); err != nil {
@@ -144,6 +144,12 @@ func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Rulese
 			}); err != nil {
 				return fmt.Errorf("insert rule %q: %w", name, err)
 			}
+		}
+		if err := q.AuditRulesetPublication(ctx, db.AuditRulesetPublicationParams{
+			OperatorID: operatorID,
+			Version:    int64(saved.Version),
+		}); err != nil {
+			return fmt.Errorf("record ruleset publication: %w", err)
 		}
 		rs.Version = int(saved.Version)
 		rs.CreatedAt = saved.CreatedAt.Time.UTC()

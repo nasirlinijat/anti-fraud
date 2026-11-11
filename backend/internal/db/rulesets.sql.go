@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const auditRulesetPublication = `-- name: AuditRulesetPublication :exec
+INSERT INTO configuration_audit_events (actor_kind, actor_id, action, resource_id)
+VALUES ('operator', $1, 'ruleset.publish', $2)
+`
+
+type AuditRulesetPublicationParams struct {
+	OperatorID string
+	Version    int64
+}
+
+func (q *Queries) AuditRulesetPublication(ctx context.Context, arg AuditRulesetPublicationParams) error {
+	_, err := q.db.Exec(ctx, auditRulesetPublication, arg.OperatorID, arg.Version)
+	return err
+}
+
 const deactivateRuleset = `-- name: DeactivateRuleset :exec
 UPDATE rulesets SET is_active = false WHERE is_active
 `
@@ -208,7 +223,7 @@ func (q *Queries) ListRulesets(ctx context.Context) ([]ListRulesetsRow, error) {
 }
 
 const lockRulesetsForPublish = `-- name: LockRulesetsForPublish :exec
-LOCK TABLE rulesets IN SHARE ROW EXCLUSIVE MODE
+SELECT pg_advisory_xact_lock(27149, 1)
 `
 
 // Serialize publishers without blocking readers of the current ruleset.

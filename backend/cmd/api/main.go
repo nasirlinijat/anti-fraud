@@ -29,7 +29,7 @@ func main() {
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
 	rulesetStore := rulesets.NewStore(pool)
-	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey)
+	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey, cfg.OperatorKeys)
 	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
 	if cfg.ModelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
@@ -51,7 +51,7 @@ func main() {
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
 	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
-	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey)
+	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
 
 	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
 	log.Fatal(platform.NewServer(":"+cfg.Port, mux).ListenAndServe())
