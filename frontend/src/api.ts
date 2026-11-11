@@ -216,13 +216,16 @@ export interface ReviewCase extends Review {
 export interface QueuePage {
   items: Review[]
   next_cursor: string | null
+  model_enabled: boolean
 }
 
+export type ReviewSort = 'rule_score' | 'model_score'
 export type Decision = 'approve' | 'reject'
 
-export function listReviews(analystKey: string, cursor: string | null, signal: AbortSignal): Promise<QueuePage> {
-  const path = cursor === null ? '/reviews' : `/reviews?${new URLSearchParams({ cursor })}`
-  return request(path, { auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal })
+export function listReviews(analystKey: string, sort: ReviewSort, cursor: string | null, signal: AbortSignal): Promise<QueuePage> {
+  const params = new URLSearchParams({ sort })
+  if (cursor !== null) params.set('cursor', cursor)
+  return request(`/reviews?${params}`, { auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal })
 }
 
 export function getReviewCase(analystKey: string, purchaseId: string, signal: AbortSignal): Promise<ReviewCase> {

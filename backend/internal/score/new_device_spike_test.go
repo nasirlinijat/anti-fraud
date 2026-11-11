@@ -137,7 +137,7 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	rulesets.RegisterRoutes(mux, ruleStore, testKey)
-	reviews.RegisterRoutes(mux, reviews.NewStore(tx), keys)
+	reviews.RegisterRoutes(mux, reviews.NewStore(tx), keys, false)
 	RegisterRoutes(mux, NewHandler(ruleStore, blocklist.NewStore(tx), purchaseStore), testKey)
 	request := func(method, path, body, key string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))

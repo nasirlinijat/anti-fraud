@@ -17,10 +17,10 @@ import (
 
 const queueTestKey = "queue-test-key"
 
-type queueFunc func(context.Context, int, *queueCursor) ([]QueueItem, error)
+type queueFunc func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error)
 
-func (fn queueFunc) queue(ctx context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
-	return fn(ctx, limit, after)
+func (fn queueFunc) queue(ctx context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
+	return fn(ctx, limit, order, after)
 }
 
 type caseFunc func(context.Context, int64) (CaseItem, error)
@@ -64,7 +64,7 @@ func requestCase(t *testing.T, store caseReader, target, key string) *httptest.R
 func requestReviewRead(t *testing.T, store reviewStore, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, store, testAnalystKeys(t))
+	RegisterRoutes(mux, store, testAnalystKeys(t), true)
 	r := httptest.NewRequest(http.MethodGet, target, nil)
 	if key != "" {
 		r.Header.Set(platform.APIKeyHeader, key)
@@ -90,6 +90,7 @@ func readQueuePage(t *testing.T, w *httptest.ResponseRecorder) queueResponse {
 }
 
 func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
+	ruleCursor := encodeCursor(byRuleScore, queueCursor{decidedAt: time.Now(), purchaseID: 1, scoreKey: -60})
 	for _, tc := range []struct {
 		name   string
 		target string
@@ -99,13 +100,16 @@ func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
 		{"missing key", "/reviews", "", http.StatusUnauthorized},
 		{"wrong key", "/reviews?cursor=!", "wrong", http.StatusUnauthorized},
 		{"service key", "/reviews", serviceTestKey, http.StatusUnauthorized},
+		{"unknown sort", "/reviews?sort=unknown", queueTestKey, http.StatusBadRequest},
+		{"cursor from another sort", "/reviews?sort=model_score&cursor=" + ruleCursor, queueTestKey, http.StatusBadRequest},
+		{"repeated sort", "/reviews?sort=rule_score&sort=model_score", queueTestKey, http.StatusBadRequest},
 		{"empty cursor", "/reviews?cursor=", queueTestKey, http.StatusBadRequest},
 		{"malformed cursor", "/reviews?cursor=!", queueTestKey, http.StatusBadRequest},
 		{"repeated cursor", "/reviews?cursor=a&cursor=b", queueTestKey, http.StatusBadRequest},
 		{"oversized cursor", "/reviews?cursor=" + strings.Repeat("a", 129), queueTestKey, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := queueFunc(func(context.Context, int, *queueCursor) ([]QueueItem, error) {
+			store := queueFunc(func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
 				t.Fatal("rejected request queried the store")
 				return nil, nil
 			})
@@ -121,12 +125,12 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	zero := 0.0
 	version := "lgbm-ieee-v5-combined"
 	at := time.Date(2026, 11, 9, 10, 0, 0, 123456000, time.FixedZone("UTC+4", 4*60*60))
-	store := queueFunc(func(_ context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
-		if limit != 101 {
-			t.Fatalf("store limit = %d, want 101", limit)
+	store := queueFunc(func(_ context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
+		if limit != 101 || order != byRuleScore {
+			t.Fatalf("unexpected queue request: limit=%d order=%s", limit, order)
 		}
 		if after != nil {
-			if !after.decidedAt.Equal(at) || after.purchaseID != 9007199254740993 {
+			if !after.decidedAt.Equal(at) || after.purchaseID != 9007199254740993 || after.scoreKey != -60 {
 				t.Fatalf("decoded cursor = %+v", after)
 			}
 			return nil, nil
@@ -144,7 +148,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	})
 	w := requestQueue(t, store, "/reviews", queueTestKey)
 	page := readQueuePage(t, w)
-	if len(page.Items) != 2 || page.NextCursor != nil {
+	if len(page.Items) != 2 || page.NextCursor != nil || !page.ModelEnabled {
 		t.Fatalf("unexpected page: %+v", page)
 	}
 	first := page.Items[0]
@@ -161,16 +165,16 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 		t.Fatalf("unexpected second review: %+v", second)
 	}
 
-	cursor := encodeCursor(queueCursor{decidedAt: at, purchaseID: 9007199254740993})
+	cursor := encodeCursor(byRuleScore, queueCursor{decidedAt: at, purchaseID: 9007199254740993, scoreKey: -60})
 	w = requestQueue(t, store, "/reviews?cursor="+cursor, queueTestKey)
 	readQueuePage(t, w)
-	if got := strings.TrimSpace(w.Body.String()); got != `{"items":[],"next_cursor":null}` {
+	if got := strings.TrimSpace(w.Body.String()); got != `{"items":[],"next_cursor":null,"model_enabled":true}` {
 		t.Fatalf("empty page = %s", got)
 	}
 }
 
 func TestQueueHidesStoreErrors(t *testing.T) {
-	store := queueFunc(func(context.Context, int, *queueCursor) ([]QueueItem, error) {
+	store := queueFunc(func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
 		return nil, errors.New("private database details")
 	})
 	w := requestQueue(t, store, "/reviews", queueTestKey)

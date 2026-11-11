@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 const pageSize = 100
 
 type queueReader interface {
-	queue(context.Context, int, *queueCursor) ([]QueueItem, error)
+	queue(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error)
 }
 
 type caseReader interface {
@@ -32,9 +33,9 @@ type reviewStore interface {
 }
 
 // RegisterRoutes exposes the queue, case evidence, and decisions to authenticated analysts.
-func RegisterRoutes(mux *http.ServeMux, store reviewStore, keys platform.AnalystKeys) {
+func RegisterRoutes(mux *http.ServeMux, store reviewStore, keys platform.AnalystKeys, modelEnabled bool) {
 	mux.HandleFunc("GET /reviews", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
-		serveQueue(w, r, store)
+		serveQueue(w, r, store, modelEnabled)
 	}))
 	mux.HandleFunc("GET /reviews/{purchase_id}", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
 		serveCase(w, r, store)
@@ -97,17 +98,31 @@ type caseResponse struct {
 }
 
 type queueResponse struct {
-	Items      []reviewResponse `json:"items"`
-	NextCursor *string          `json:"next_cursor"`
+	Items        []reviewResponse `json:"items"`
+	NextCursor   *string          `json:"next_cursor"`
+	ModelEnabled bool             `json:"model_enabled"`
 }
 
-func serveQueue(w http.ResponseWriter, r *http.Request, store queueReader) {
-	after, err := parseCursor(r.URL.RawQuery)
+func serveQueue(w http.ResponseWriter, r *http.Request, store queueReader, modelEnabled bool) {
+	params, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		platform.WriteError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	order := byRuleScore
+	if values, present := params["sort"]; present {
+		if len(values) != 1 || (queueOrder(values[0]) != byRuleScore && queueOrder(values[0]) != byModelScore) {
+			platform.WriteError(w, http.StatusBadRequest, "invalid sort order")
+			return
+		}
+		order = queueOrder(values[0])
+	}
+	after, err := parseCursor(params["cursor"], order)
 	if err != nil {
 		platform.WriteError(w, http.StatusBadRequest, "invalid cursor")
 		return
 	}
-	rows, err := store.queue(r.Context(), pageSize+1, after)
+	rows, err := store.queue(r.Context(), pageSize+1, order, after)
 	if err != nil {
 		log.Printf("read review queue: %v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
@@ -117,15 +132,14 @@ func serveQueue(w http.ResponseWriter, r *http.Request, store queueReader) {
 	var nextCursor *string
 	if len(rows) > pageSize {
 		rows = rows[:pageSize]
-		last := rows[pageSize-1]
-		token := encodeCursor(queueCursor{decidedAt: last.DecidedAt, purchaseID: last.PurchaseID})
+		token := encodeCursor(order, cursorFor(order, rows[pageSize-1]))
 		nextCursor = &token
 	}
 	items := make([]reviewResponse, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, newReviewResponse(row))
 	}
-	platform.WriteJSON(w, http.StatusOK, queueResponse{Items: items, NextCursor: nextCursor})
+	platform.WriteJSON(w, http.StatusOK, queueResponse{Items: items, NextCursor: nextCursor, ModelEnabled: modelEnabled})
 }
 
 func serveCase(w http.ResponseWriter, r *http.Request, store caseReader) {
@@ -189,18 +203,16 @@ func newReviewResponse(row QueueItem) reviewResponse {
 	}
 }
 
-func encodeCursor(cursor queueCursor) string {
-	value := cursor.decidedAt.UTC().Format(time.RFC3339Nano) + "|" + strconv.FormatInt(cursor.purchaseID, 10)
+func encodeCursor(order queueOrder, cursor queueCursor) string {
+	value := strings.Join([]string{
+		string(order), cursor.decidedAt.UTC().Format(time.RFC3339Nano),
+		strconv.FormatInt(cursor.purchaseID, 10), strconv.FormatFloat(cursor.scoreKey, 'g', -1, 64),
+	}, "|")
 	return base64.RawURLEncoding.EncodeToString([]byte(value))
 }
 
-func parseCursor(rawQuery string) (*queueCursor, error) {
-	params, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		return nil, err
-	}
-	values, present := params["cursor"]
-	if !present {
+func parseCursor(values []string, order queueOrder) (*queueCursor, error) {
+	if len(values) == 0 {
 		return nil, nil
 	}
 	if len(values) != 1 || len(values[0]) > 128 {
@@ -210,17 +222,25 @@ func parseCursor(rawQuery string) (*queueCursor, error) {
 	if err != nil {
 		return nil, err
 	}
-	timestamp, id, ok := strings.Cut(string(data), "|")
-	if !ok {
-		return nil, errors.New("missing cursor separator")
+	parts := strings.Split(string(data), "|")
+	if len(parts) != 4 || queueOrder(parts[0]) != order {
+		return nil, errors.New("cursor does not match sort order")
 	}
-	decidedAt, err := time.Parse(time.RFC3339Nano, timestamp)
+	decidedAt, err := time.Parse(time.RFC3339Nano, parts[1])
 	if err != nil {
 		return nil, err
 	}
-	purchaseID, err := strconv.ParseInt(id, 10, 64)
+	purchaseID, err := strconv.ParseInt(parts[2], 10, 64)
 	if err != nil || purchaseID <= 0 {
 		return nil, errors.New("invalid cursor purchase ID")
 	}
-	return &queueCursor{decidedAt: decidedAt.UTC(), purchaseID: purchaseID}, nil
+	scoreKey, err := strconv.ParseFloat(parts[3], 64)
+	validScore := scoreKey >= -math.MaxInt32 && scoreKey <= 0 && scoreKey == math.Trunc(scoreKey)
+	if order == byModelScore {
+		validScore = scoreKey >= -1 && (scoreKey <= 0 || scoreKey == 1)
+	}
+	if err != nil || !validScore {
+		return nil, errors.New("invalid cursor score")
+	}
+	return &queueCursor{decidedAt: decidedAt.UTC(), purchaseID: purchaseID, scoreKey: scoreKey}, nil
 }

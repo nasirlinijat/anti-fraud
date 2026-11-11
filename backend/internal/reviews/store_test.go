@@ -123,6 +123,56 @@ func TestQueueRespectsLimit(t *testing.T) {
 	}
 }
 
+func TestQueuePagesInBothScoreOrders(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	at := time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+	high, low := 0.9, 0.0
+	insert := func(name string, rule int, model *float64, time time.Time) int64 {
+		t.Helper()
+		id := insertDecision(t, tx, name, "review", time, model, "[]")
+		if _, err := tx.Exec(ctx, "UPDATE decisions SET rule_score = $1 WHERE purchase_id = $2", rule, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := insert("sort-a", 70, nil, at)
+	b := insert("sort-b", 50, &high, at)
+	c := insert("sort-c", 70, &high, at)
+	d := insert("sort-d", 90, &low, at.Add(time.Minute))
+	e := insert("sort-e", 70, nil, at)
+	f := insert("sort-f", 70, nil, at.Add(time.Minute))
+
+	store := NewStore(tx)
+	for _, tc := range []struct {
+		order queueOrder
+		want  []int64
+	}{
+		{byRuleScore, []int64{d, a, c, e, f, b}},
+		{byModelScore, []int64{b, c, d, a, e, f}},
+	} {
+		t.Run(string(tc.order), func(t *testing.T) {
+			var cursor *queueCursor
+			var got []int64
+			for range tc.want {
+				rows, err := store.queue(ctx, 1, tc.order, cursor)
+				if err != nil || len(rows) != 1 {
+					t.Fatalf("queue page: rows=%v err=%v", rows, err)
+				}
+				got = append(got, rows[0].PurchaseID)
+				last := cursorFor(tc.order, rows[0])
+				cursor, err = parseCursor([]string{encodeCursor(tc.order, last)}, tc.order)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("purchase order = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCaseReturnsEvidenceOfReviewPurchase(t *testing.T) {
 	tx := testTx(t)
 	at := time.Date(2000, 1, 1, 9, 10, 0, 0, time.UTC)

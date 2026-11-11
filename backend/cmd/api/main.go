@@ -28,7 +28,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
-	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys)
 	rulesetStore := rulesets.NewStore(pool)
 	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey)
 	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
@@ -50,6 +49,7 @@ func main() {
 			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 	}
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
+	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey)
 

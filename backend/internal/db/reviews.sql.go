@@ -109,6 +109,156 @@ func (q *Queries) ListCasePlayerPurchases(ctx context.Context, arg ListCasePlaye
 	return items, nil
 }
 
+const listReviewQueue = `-- name: ListReviewQueue :many
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      $1::integer IS NULL
+      OR (-d.rule_score, d.decided_at, d.purchase_id) > (
+          $1::integer, $2::timestamptz, $3::bigint
+      )
+  )
+ORDER BY -d.rule_score, d.decided_at, d.purchase_id
+LIMIT $4
+`
+
+type ListReviewQueueParams struct {
+	AfterScore      pgtype.Int4
+	AfterDecidedAt  pgtype.Timestamptz
+	AfterPurchaseID pgtype.Int8
+	PageLimit       int32
+}
+
+type ListReviewQueueRow struct {
+	PurchaseID    int64
+	TransactionID string
+	EventTime     pgtype.Timestamptz
+	AmountMinor   int64
+	PlayerID      string
+	DeviceID      pgtype.Text
+	RuleScore     int32
+	ModelScore    pgtype.Float8
+	ModelVersion  pgtype.Text
+	FiredRules    []byte
+	DecidedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ListReviewQueue(ctx context.Context, arg ListReviewQueueParams) ([]ListReviewQueueRow, error) {
+	rows, err := q.db.Query(ctx, listReviewQueue,
+		arg.AfterScore,
+		arg.AfterDecidedAt,
+		arg.AfterPurchaseID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReviewQueueRow
+	for rows.Next() {
+		var i ListReviewQueueRow
+		if err := rows.Scan(
+			&i.PurchaseID,
+			&i.TransactionID,
+			&i.EventTime,
+			&i.AmountMinor,
+			&i.PlayerID,
+			&i.DeviceID,
+			&i.RuleScore,
+			&i.ModelScore,
+			&i.ModelVersion,
+			&i.FiredRules,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviewQueueByModel = `-- name: ListReviewQueueByModel :many
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      $1::double precision IS NULL
+      OR (COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id) > (
+          $1::double precision, $2::timestamptz, $3::bigint
+      )
+  )
+ORDER BY COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id
+LIMIT $4
+`
+
+type ListReviewQueueByModelParams struct {
+	AfterScore      pgtype.Float8
+	AfterDecidedAt  pgtype.Timestamptz
+	AfterPurchaseID pgtype.Int8
+	PageLimit       int32
+}
+
+type ListReviewQueueByModelRow struct {
+	PurchaseID    int64
+	TransactionID string
+	EventTime     pgtype.Timestamptz
+	AmountMinor   int64
+	PlayerID      string
+	DeviceID      pgtype.Text
+	RuleScore     int32
+	ModelScore    pgtype.Float8
+	ModelVersion  pgtype.Text
+	FiredRules    []byte
+	DecidedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ListReviewQueueByModel(ctx context.Context, arg ListReviewQueueByModelParams) ([]ListReviewQueueByModelRow, error) {
+	rows, err := q.db.Query(ctx, listReviewQueueByModel,
+		arg.AfterScore,
+		arg.AfterDecidedAt,
+		arg.AfterPurchaseID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReviewQueueByModelRow
+	for rows.Next() {
+		var i ListReviewQueueByModelRow
+		if err := rows.Scan(
+			&i.PurchaseID,
+			&i.TransactionID,
+			&i.EventTime,
+			&i.AmountMinor,
+			&i.PlayerID,
+			&i.DeviceID,
+			&i.RuleScore,
+			&i.ModelScore,
+			&i.ModelVersion,
+			&i.FiredRules,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveReview = `-- name: ResolveReview :one
 WITH candidate AS (
     SELECT d.purchase_id, d.outcome

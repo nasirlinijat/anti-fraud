@@ -1,3 +1,35 @@
+-- name: ListReviewQueue :many
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      sqlc.narg(after_score)::integer IS NULL
+      OR (-d.rule_score, d.decided_at, d.purchase_id) > (
+          sqlc.narg(after_score)::integer, sqlc.narg(after_decided_at)::timestamptz, sqlc.narg(after_purchase_id)::bigint
+      )
+  )
+ORDER BY -d.rule_score, d.decided_at, d.purchase_id
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListReviewQueueByModel :many
+SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
+FROM decisions d
+JOIN purchases p ON p.id = d.purchase_id
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND (
+      sqlc.narg(after_score)::double precision IS NULL
+      OR (COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id) > (
+          sqlc.narg(after_score)::double precision, sqlc.narg(after_decided_at)::timestamptz, sqlc.narg(after_purchase_id)::bigint
+      )
+  )
+ORDER BY COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id
+LIMIT sqlc.arg(page_limit);
+
 -- name: ResolveReview :one
 WITH candidate AS (
     SELECT d.purchase_id, d.outcome
