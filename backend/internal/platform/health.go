@@ -36,6 +36,7 @@ func RegisterHealthRoutes(mux *http.ServeMux, db Pinger) {
 
 func writeStatus(w http.ResponseWriter, code int, status string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	w.Write([]byte(`{"status":"` + status + `"}`))
 }

@@ -69,8 +69,12 @@ func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
 	var req addRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || dec.Decode(&struct{}{}) != io.EOF {
-		platform.WriteError(w, http.StatusBadRequest, "request body must be one JSON object with type, value and reason")
+	if err := dec.Decode(&req); err != nil {
+		writeAddDecodeError(w, err)
+		return
+	}
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		writeAddDecodeError(w, err)
 		return
 	}
 
@@ -93,6 +97,15 @@ func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusCreated, saved)
+}
+
+func writeAddDecodeError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		platform.WriteError(w, http.StatusRequestEntityTooLarge, "request body must not exceed 4096 bytes")
+		return
+	}
+	platform.WriteError(w, http.StatusBadRequest, "request body must be one JSON object with type, value and reason")
 }
 
 func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {

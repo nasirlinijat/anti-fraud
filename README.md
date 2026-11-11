@@ -157,12 +157,12 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Starts the development server with hot reload |
-| `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
+| `npm run check` | Runs the linter (oxlint), TypeScript type check, and proxy tests |
 | `npm run build` | Type checks and builds the production files into `frontend/dist/` |
 
 ## Console pages
@@ -190,6 +190,10 @@ REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"
 ```
 
 Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
+
+## Security
+
+The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 
 ## Database Queries
 
