@@ -1,4 +1,4 @@
-package reviews
+package transport
 
 import (
 	"context"
@@ -6,36 +6,48 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 const queueTestKey = "queue-test-key"
 
-type queueFunc func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error)
+type queueFunc func(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error)
 
-func (fn queueFunc) queue(ctx context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
+func (fn queueFunc) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor) ([]models.QueueItem, error) {
 	return fn(ctx, limit, order, after)
 }
 
-type caseFunc func(context.Context, int64) (CaseItem, error)
+type caseFunc func(context.Context, int64) (models.CaseItem, error)
 
-func (fn caseFunc) Case(ctx context.Context, id int64) (CaseItem, error) {
+func (fn caseFunc) Case(ctx context.Context, id int64) (models.CaseItem, error) {
 	return fn(ctx, id)
 }
 
 // Tests provide only the read method the request is expected to call.
+type queueReader interface {
+	Queue(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error)
+}
+
+type caseReader interface {
+	Case(context.Context, int64) (models.CaseItem, error)
+}
+
 type fakeReviewReads struct {
 	queueReader
 	caseReader
 }
 
-func (fakeReviewReads) resolve(context.Context, int64, string, string, bool) (resolution, error) {
+func (fakeReviewReads) Resolve(context.Context, int64, string, string, bool) (models.Resolution, error) {
 	panic("unexpected decision request")
 }
 
@@ -61,10 +73,10 @@ func requestCase(t *testing.T, store caseReader, target, key string) *httptest.R
 	return requestReviewRead(t, fakeReviewReads{caseReader: store}, target, key)
 }
 
-func requestReviewRead(t *testing.T, store reviewStore, target, key string) *httptest.ResponseRecorder {
+func requestReviewRead(t *testing.T, store review.Store, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, store, testAnalystKeys(t), true)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(store), true), testAnalystKeys(t))
 	r := httptest.NewRequest(http.MethodGet, target, nil)
 	if key != "" {
 		r.Header.Set(platform.APIKeyHeader, key)
@@ -90,7 +102,7 @@ func readQueuePage(t *testing.T, w *httptest.ResponseRecorder) queueResponse {
 }
 
 func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
-	ruleCursor := encodeCursor(byRuleScore, queueCursor{decidedAt: time.Now(), purchaseID: 1, scoreKey: -60})
+	ruleCursor := encodeCursor(models.QueueByRuleScore, models.QueueCursor{DecidedAt: time.Now(), PurchaseID: 1, ScoreKey: -60})
 	for _, tc := range []struct {
 		name   string
 		target string
@@ -109,7 +121,7 @@ func TestQueueRejectsUnauthorizedAndInvalidCursors(t *testing.T) {
 		{"oversized cursor", "/reviews?cursor=" + strings.Repeat("a", 129), queueTestKey, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := queueFunc(func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
+			store := queueFunc(func(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error) {
 				t.Fatal("rejected request queried the store")
 				return nil, nil
 			})
@@ -125,17 +137,17 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 	zero := 0.0
 	version := "lgbm-ieee-v5-combined"
 	at := time.Date(2026, 11, 9, 10, 0, 0, 123456000, time.FixedZone("UTC+4", 4*60*60))
-	store := queueFunc(func(_ context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
-		if limit != 101 || order != byRuleScore {
+	store := queueFunc(func(_ context.Context, limit int, order models.QueueOrder, after *models.QueueCursor) ([]models.QueueItem, error) {
+		if limit != 101 || order != models.QueueByRuleScore {
 			t.Fatalf("unexpected queue request: limit=%d order=%s", limit, order)
 		}
 		if after != nil {
-			if !after.decidedAt.Equal(at) || after.purchaseID != 9007199254740993 || after.scoreKey != -60 {
+			if !after.DecidedAt.Equal(at) || after.PurchaseID != 9007199254740993 || after.ScoreKey != -60 {
 				t.Fatalf("decoded cursor = %+v", after)
 			}
 			return nil, nil
 		}
-		return []QueueItem{
+		return []models.QueueItem{
 			{
 				PurchaseID: 9007199254740993, TransactionID: "first", PlayerID: "player",
 				EventTime: at.Add(-time.Minute), DecidedAt: at, AmountMinor: 9223372036854775807, RuleScore: 60,
@@ -165,7 +177,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 		t.Fatalf("unexpected second review: %+v", second)
 	}
 
-	cursor := encodeCursor(byRuleScore, queueCursor{decidedAt: at, purchaseID: 9007199254740993, scoreKey: -60})
+	cursor := encodeCursor(models.QueueByRuleScore, models.QueueCursor{DecidedAt: at, PurchaseID: 9007199254740993, ScoreKey: -60})
 	w = requestQueue(t, store, "/reviews?cursor="+cursor, queueTestKey)
 	readQueuePage(t, w)
 	if got := strings.TrimSpace(w.Body.String()); got != `{"items":[],"next_cursor":null,"model_enabled":true}` {
@@ -174,7 +186,7 @@ func TestQueueSerializesReviewAndEmptyPage(t *testing.T) {
 }
 
 func TestQueueHidesStoreErrors(t *testing.T) {
-	store := queueFunc(func(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
+	store := queueFunc(func(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error) {
 		return nil, errors.New("private database details")
 	})
 	w := requestQueue(t, store, "/reviews", queueTestKey)
@@ -199,9 +211,9 @@ func TestCaseRejectsUnauthorizedAndInvalidIDs(t *testing.T) {
 		{"too large", "/reviews/9223372036854775808", queueTestKey, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := caseFunc(func(context.Context, int64) (CaseItem, error) {
+			store := caseFunc(func(context.Context, int64) (models.CaseItem, error) {
 				t.Fatal("rejected request queried the store")
-				return CaseItem{}, nil
+				return models.CaseItem{}, nil
 			})
 			w := requestCase(t, store, tc.target, tc.key)
 			if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
@@ -215,21 +227,21 @@ func TestCaseSerializesEvidence(t *testing.T) {
 	score := 0.42
 	version := "lgbm-ieee-v5-combined"
 	at := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
-	store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
+	store := caseFunc(func(_ context.Context, id int64) (models.CaseItem, error) {
 		if id != 9007199254740993 {
 			t.Fatalf("store ID = %d", id)
 		}
-		return CaseItem{
-			QueueItem: QueueItem{
+		return models.CaseItem{
+			QueueItem: models.QueueItem{
 				PurchaseID: id, TransactionID: "txn", PlayerID: "player", EventTime: at.Add(-time.Minute), DecidedAt: at,
 				AmountMinor: 2500, RuleScore: 70, ModelScore: &score, ModelVersion: &version,
 				FiredRules: []scoring.FiredRule{{Name: scoring.RuleHighAmount, Points: 30}, {Name: scoring.RuleCardVelocity, Points: 40}},
 			},
 			RulesetVersion: 3,
-			PlayerPurchases: []PlayerPurchase{
+			PlayerPurchases: []models.PlayerPurchase{
 				{TransactionID: "prev", EventTime: at.Add(-2 * time.Minute), AmountMinor: 1200, Outcome: scoring.OutcomeAllow},
 			},
-			DeviceActivity: &DeviceActivity{Purchases: 2, DistinctCards: 1, LastSeenAt: at.Add(-time.Minute)},
+			DeviceActivity: &models.DeviceActivity{Purchases: 2, DistinctCards: 1, LastSeenAt: at.Add(-time.Minute)},
 		}, nil
 	})
 	w := requestCase(t, store, "/reviews/9007199254740993", queueTestKey)
@@ -257,8 +269,8 @@ func TestCaseShowsDeviceID(t *testing.T) {
 	device := "device-1"
 	for name, want := range map[string]*string{"with device": &device, "without device": nil} {
 		t.Run(name, func(t *testing.T) {
-			store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
-				return CaseItem{QueueItem: QueueItem{PurchaseID: id, DeviceID: want}, RulesetVersion: 1}, nil
+			store := caseFunc(func(_ context.Context, id int64) (models.CaseItem, error) {
+				return models.CaseItem{QueueItem: models.QueueItem{PurchaseID: id, DeviceID: want}, RulesetVersion: 1}, nil
 			})
 			var body map[string]any
 			w := requestCase(t, store, "/reviews/7", queueTestKey)
@@ -274,8 +286,8 @@ func TestCaseShowsDeviceID(t *testing.T) {
 }
 
 func TestCaseWithoutModelScoreOrRules(t *testing.T) {
-	store := caseFunc(func(_ context.Context, id int64) (CaseItem, error) {
-		return CaseItem{QueueItem: QueueItem{PurchaseID: id, TransactionID: "txn"}, RulesetVersion: 1}, nil
+	store := caseFunc(func(_ context.Context, id int64) (models.CaseItem, error) {
+		return models.CaseItem{QueueItem: models.QueueItem{PurchaseID: id, TransactionID: "txn"}, RulesetVersion: 1}, nil
 	})
 	w := requestCase(t, store, "/reviews/7", queueTestKey)
 	var body map[string]any
@@ -291,14 +303,16 @@ func TestCaseWithoutModelScoreOrRules(t *testing.T) {
 }
 
 func TestCaseNotFoundAndStoreErrors(t *testing.T) {
-	notFound := caseFunc(func(context.Context, int64) (CaseItem, error) { return CaseItem{}, ErrNotFound })
+	notFound := caseFunc(func(context.Context, int64) (models.CaseItem, error) {
+		return models.CaseItem{}, models.ErrReviewNotFound
+	})
 	w := requestCase(t, notFound, "/reviews/5", queueTestKey)
 	if w.Code != http.StatusNotFound || strings.TrimSpace(w.Body.String()) != `{"error":"review case not found"}` {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
 	}
 
-	failing := caseFunc(func(context.Context, int64) (CaseItem, error) {
-		return CaseItem{}, errors.New("private database details")
+	failing := caseFunc(func(context.Context, int64) (models.CaseItem, error) {
+		return models.CaseItem{}, errors.New("private database details")
 	})
 	w = requestCase(t, failing, "/reviews/5", queueTestKey)
 	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
@@ -313,19 +327,19 @@ func TestQueuePaginationAgainstPostgres(t *testing.T) {
 	for i := range 201 {
 		decidedAt := at.Add(time.Duration(i/3) * time.Microsecond)
 		if i == 99 {
-			insertDecision(t, tx, "page-allow", "allow", decidedAt, nil, `[]`)
-			insertDecision(t, tx, "page-block", "block", decidedAt, nil, `[]`)
+			insertReviewDecision(t, tx, "page-allow", "allow", decidedAt, nil, `[]`)
+			insertReviewDecision(t, tx, "page-block", "block", decidedAt, nil, `[]`)
 		}
-		id := insertDecision(t, tx, "page-review-"+strconv.Itoa(i), "review", decidedAt, nil, `[]`)
+		id := insertReviewDecision(t, tx, "page-review-"+strconv.Itoa(i), "review", decidedAt, nil, `[]`)
 		want = append(want, strconv.FormatInt(id, 10))
 	}
 
-	store := NewStore(tx)
+	store := storage.NewReviewStore(tx)
 	target := "/reviews"
-	for start := 0; start < len(want); start += pageSize {
+	for start := 0; start < len(want); start += review.PageSize {
 		page := readQueuePage(t, requestQueue(t, store, target, queueTestKey))
-		count := min(pageSize, len(want)-start)
-		if len(page.Items) < count || len(page.Items) > pageSize {
+		count := min(review.PageSize, len(want)-start)
+		if len(page.Items) < count || len(page.Items) > review.PageSize {
 			t.Fatalf("page starting at %d returned %d rows, expected at least %d", start, len(page.Items), count)
 		}
 		for i, id := range want[start : start+count] {
@@ -339,5 +353,55 @@ func TestQueuePaginationAgainstPostgres(t *testing.T) {
 			}
 			target = "/reviews?cursor=" + *page.NextCursor
 		}
+	}
+}
+
+func TestQueuePagesInBothScoreOrders(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	at := time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+	high, low := 0.9, 0.0
+	insert := func(name string, rule int, model *float64, time time.Time) int64 {
+		t.Helper()
+		id := insertReviewDecision(t, tx, name, "review", time, model, "[]")
+		if _, err := tx.Exec(ctx, "UPDATE decisions SET rule_score = $1 WHERE purchase_id = $2", rule, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := insert("sort-a", 70, nil, at)
+	b := insert("sort-b", 50, &high, at)
+	c := insert("sort-c", 70, &high, at)
+	d := insert("sort-d", 90, &low, at.Add(time.Minute))
+	e := insert("sort-e", 70, nil, at)
+	f := insert("sort-f", 70, nil, at.Add(time.Minute))
+
+	store := storage.NewReviewStore(tx)
+	for _, tc := range []struct {
+		order models.QueueOrder
+		want  []int64
+	}{
+		{models.QueueByRuleScore, []int64{d, a, c, e, f, b}},
+		{models.QueueByModelScore, []int64{b, c, d, a, e, f}},
+	} {
+		t.Run(string(tc.order), func(t *testing.T) {
+			var cursor *models.QueueCursor
+			var got []int64
+			for range tc.want {
+				rows, err := store.Queue(ctx, 1, tc.order, cursor)
+				if err != nil || len(rows) != 1 {
+					t.Fatalf("queue page: rows=%v err=%v", rows, err)
+				}
+				got = append(got, rows[0].PurchaseID)
+				last := review.CursorFor(tc.order, rows[0])
+				cursor, err = parseCursor([]string{encodeCursor(tc.order, last)}, tc.order)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("purchase order = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
