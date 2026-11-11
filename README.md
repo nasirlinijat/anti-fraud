@@ -28,6 +28,10 @@ From the repository root, use Docker with the Compose plugin to run the console.
 
 Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to score, stats, blocklist, and ruleset requests. Review requests use the analyst key entered in the console.
 
+## Deployment
+
+The production setup runs on one AWS EC2 server with Docker Compose and HTTPS. See [deploy/README.md](deploy/README.md).
+
 ## Development commands
 
 The Make targets require GNU Make. Install Go 1.26.5 or newer to run the backend, tests, or simulator on the host.
