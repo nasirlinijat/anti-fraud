@@ -125,23 +125,38 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 	return result, nil
 }
 
-// Queue returns up to limit purchases marked for review, the earliest decided first.
+// Queue returns up to limit purchases marked for review, highest rule score first.
 func (s *Store) Queue(ctx context.Context, limit int) ([]QueueItem, error) {
-	return s.queue(ctx, limit, nil)
+	return s.queue(ctx, limit, byRuleScore, nil)
 }
+
+type queueOrder string
+
+const (
+	byRuleScore  queueOrder = "rule_score"
+	byModelScore queueOrder = "model_score"
+)
 
 type queueCursor struct {
 	decidedAt  time.Time
 	purchaseID int64
+	scoreKey   float64
 }
 
-func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
-	params := db.ListReviewQueueParams{PageLimit: int32(limit)}
-	if after != nil {
-		params.AfterDecidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
-		params.AfterPurchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
+func cursorFor(order queueOrder, item QueueItem) queueCursor {
+	// Match the ascending score keys in the SQL, including the key for NULL.
+	key := -float64(item.RuleScore)
+	if order == byModelScore {
+		key = 1
+		if item.ModelScore != nil {
+			key = -*item.ModelScore
+		}
 	}
-	rows, err := s.q.ListReviewQueue(ctx, params)
+	return queueCursor{decidedAt: item.DecidedAt, purchaseID: item.PurchaseID, scoreKey: key}
+}
+
+func (s *Store) queue(ctx context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
+	rows, err := s.queueRows(ctx, int32(limit), order, after)
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}
@@ -156,6 +171,35 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (s *Store) queueRows(ctx context.Context, limit int32, order queueOrder, after *queueCursor) ([]db.ListReviewQueueRow, error) {
+	var decidedAt pgtype.Timestamptz
+	var purchaseID pgtype.Int8
+	var score float64
+	if after != nil {
+		decidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
+		purchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
+		score = after.scoreKey
+	}
+	if order == byRuleScore {
+		return s.q.ListReviewQueue(ctx, db.ListReviewQueueParams{
+			PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
+			AfterScore: pgtype.Int4{Int32: int32(score), Valid: after != nil},
+		})
+	}
+	rows, err := s.q.ListReviewQueueByModel(ctx, db.ListReviewQueueByModelParams{
+		PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
+		AfterScore: pgtype.Float8{Float64: score, Valid: after != nil},
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]db.ListReviewQueueRow, len(rows))
+	for i, row := range rows {
+		result[i] = db.ListReviewQueueRow(row)
+	}
+	return result, nil
 }
 
 // Case returns the purchase with the given ID if it is under review. It

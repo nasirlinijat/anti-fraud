@@ -463,11 +463,19 @@ paths:
       operationId: listReviews
       summary: List purchases awaiting review
       description: >-
-        Returns up to 100 purchases, ordered by when they entered the review
-        queue, oldest first. Follow next_cursor to reach the next page.
+        Returns up to 100 purchases, highest score first. Ties go to the oldest
+        queued purchase, then the lowest purchase ID. Model sorting puts
+        missing scores last. Follow next_cursor with the same sort order.
       security:
         - AnalystKeyAuth: []
       parameters:
+        - in: query
+          name: sort
+          description: Score used to order the queue.
+          schema:
+            type: string
+            enum: [rule_score, model_score]
+            default: rule_score
         - in: query
           name: cursor
           description: Opaque next_cursor from a previous response. Omit for the first page.
@@ -488,7 +496,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewPage"
         "400":
-          description: The cursor is malformed.
+          description: The sort order or cursor is invalid, or the cursor belongs to a different sort order.
           content:
             application/json:
               schema:
@@ -817,7 +825,7 @@ components:
 
     ReviewPage:
       type: object
-      required: [items, next_cursor]
+      required: [items, next_cursor, model_enabled]
       properties:
         items:
           type: array
@@ -828,6 +836,9 @@ components:
           type: string
           nullable: true
           description: Cursor for the next page, or null if this is the last page.
+        model_enabled:
+          type: boolean
+          description: Whether the scoring service currently has a model loaded.
 
     ReviewItem:
       type: object

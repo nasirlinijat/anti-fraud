@@ -17,11 +17,13 @@ test('preserves score validation errors and sends the request once', async ({ mo
 test('distinguishes service and analyst authentication failures', async ({ mock }) => {
   const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'invalid key' }, { status: 401 }))
   await assert.rejects(request('/stats'), { status: 401, message: /Check API_KEY/ })
-  await assert.rejects(listReviews('test-analyst', 'opaque+/=', new AbortController().signal), {
+  await assert.rejects(listReviews('test-analyst', 'model_score', 'opaque+/=', new AbortController().signal), {
     status: 401, message: 'invalid key',
   })
   const [path, options] = fetch.mock.calls[1].arguments
-  assert.equal(new URL(path, 'http://localhost').searchParams.get('cursor'), 'opaque+/=')
+  const query = new URL(path, 'http://localhost').searchParams
+  assert.equal(query.get('cursor'), 'opaque+/=')
+  assert.equal(query.get('sort'), 'model_score')
   assert.equal(new Headers(options.headers).get('X-API-Key'), 'test-analyst')
 })
 
