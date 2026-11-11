@@ -93,7 +93,7 @@ const MaxFailuresInRow = 20
 // run continues, unless MaxFailuresInRow purchases in a row fail. Run stops
 // early when ctx is cancelled.
 func Run(ctx context.Context, s Scorer, purchases []Purchase, rate float64, onError func(error)) (Summary, error) {
-	return send(ctx, s, slices.Values(purchases), rate, onError, false)
+	return sender{scorer: s, rate: rate, onError: onError}.send(ctx, slices.Values(purchases))
 }
 
 // RunLive sends seeded purchases until ctx is cancelled or the failure limit
@@ -104,25 +104,26 @@ func RunLive(ctx context.Context, s Scorer, cfg Config, rate float64, onError fu
 	if err != nil {
 		return Summary{}, err
 	}
-	return send(ctx, s, g.purchases(ctx), rate, onError, true)
+	return sender{scorer: s, rate: rate, onError: onError, live: true}.send(ctx, g.purchases(ctx))
 }
 
-func send(ctx context.Context, s Scorer, purchases iter.Seq[Purchase], rate float64, onError func(error), live bool) (Summary, error) {
-	sum := Summary{Outcomes: map[Pattern]map[string]int{}}
-	if rate < 0 {
-		return sum, fmt.Errorf("rate must not be negative, got %v", rate)
-	}
+// sender holds the settings of one send loop.
+type sender struct {
+	scorer  Scorer
+	rate    float64
+	onError func(error)
+	// live stamps each purchase with the current time before scoring it, and
+	// runs until the context is cancelled.
+	live bool
+}
 
-	var tick <-chan time.Time
-	if rate != 0 {
-		interval := float64(time.Second) / rate
-		if !(interval >= 1 && interval < float64(math.MaxInt64)) {
-			return sum, fmt.Errorf("rate must be finite and give a representable positive interval, got %v", rate)
-		}
-		ticker := time.NewTicker(time.Duration(interval))
-		defer ticker.Stop()
-		tick = ticker.C
+func (s sender) send(ctx context.Context, purchases iter.Seq[Purchase]) (Summary, error) {
+	sum := Summary{Outcomes: map[Pattern]map[string]int{}}
+	tick, stop, err := rateTicker(s.rate)
+	if err != nil {
+		return sum, err
 	}
+	defer stop()
 
 	failuresInRow := 0
 	for p := range purchases {
@@ -137,17 +138,17 @@ func send(ctx context.Context, s Scorer, purchases iter.Seq[Purchase], rate floa
 			return sum, err
 		}
 
-		if live {
+		if s.live {
 			p.Request.EventTime = time.Now().UTC()
 		}
-		res, err := s.Score(ctx, p.Request)
+		res, err := s.scorer.Score(ctx, p.Request)
 		if err != nil {
-			if live && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			if s.live && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return sum, ctx.Err()
 			}
 			sum.Failed++
-			if onError != nil {
-				onError(err)
+			if s.onError != nil {
+				s.onError(err)
 			}
 			failuresInRow++
 			if failuresInRow == MaxFailuresInRow {
@@ -156,14 +157,35 @@ func send(ctx context.Context, s Scorer, purchases iter.Seq[Purchase], rate floa
 			continue
 		}
 		failuresInRow = 0
-		sum.Sent++
-		if sum.Outcomes[p.Pattern] == nil {
-			sum.Outcomes[p.Pattern] = map[string]int{}
-		}
-		sum.Outcomes[p.Pattern][res.Outcome]++
+		sum.record(p.Pattern, res.Outcome)
 	}
-	if live {
+	if s.live {
 		return sum, ctx.Err()
 	}
 	return sum, nil
+}
+
+// rateTicker returns a channel that ticks rate times per second and the
+// function that stops it. The channel is nil for rate 0, which means no wait.
+func rateTicker(rate float64) (<-chan time.Time, func(), error) {
+	if rate < 0 {
+		return nil, func() {}, fmt.Errorf("rate must not be negative, got %v", rate)
+	}
+	if rate == 0 {
+		return nil, func() {}, nil
+	}
+	interval := float64(time.Second) / rate
+	if !(interval >= 1 && interval < float64(math.MaxInt64)) {
+		return nil, func() {}, fmt.Errorf("rate must be finite and give a representable positive interval, got %v", rate)
+	}
+	ticker := time.NewTicker(time.Duration(interval))
+	return ticker.C, ticker.Stop, nil
+}
+
+func (sum *Summary) record(pattern Pattern, outcome string) {
+	sum.Sent++
+	if sum.Outcomes[pattern] == nil {
+		sum.Outcomes[pattern] = map[string]int{}
+	}
+	sum.Outcomes[pattern][outcome]++
 }
