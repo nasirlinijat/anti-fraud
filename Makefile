@@ -17,8 +17,9 @@ db:
 run: migrate
 	cd backend && go run ./cmd/api
 
+# Packages share one test database, so their tests run one package at a time.
 test: migrate
-	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./...
+	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -p 1 ./...
 
 lint:
 	@unformatted="$$(gofmt -l backend)"; \

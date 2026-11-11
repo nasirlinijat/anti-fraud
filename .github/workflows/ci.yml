@@ -75,7 +75,8 @@ jobs:
       - name: Test
         env:
           TEST_RUNTIME_DATABASE_URL: postgres://antifraud_api:ci-runtime-password@localhost:5432/antifraud?sslmode=disable
-        run: go test -race ./...
+        # Packages share one test database, so their tests run one package at a time.
+        run: go test -race -p 1 ./...
 
       - name: Verify modules
         run: go mod verify
