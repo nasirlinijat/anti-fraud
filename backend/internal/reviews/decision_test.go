@@ -14,9 +14,9 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
-	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 )
 
 type rejectUnexpectedReviewAccess struct{}

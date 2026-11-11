@@ -18,8 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 const (
