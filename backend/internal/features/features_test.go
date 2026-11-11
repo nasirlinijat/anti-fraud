@@ -154,6 +154,35 @@ func testTx(t *testing.T) pgx.Tx {
 	return tx
 }
 
+func TestIssuerHistoryCountsWideAndNarrowRowsTogether(t *testing.T) {
+	tx := testTx(t)
+	ctx := t.Context()
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	// A wide region would not fit as a covering-index payload.
+	_, err := tx.Exec(ctx, `
+		WITH wide AS (SELECT string_agg(md5(i::text), '' ORDER BY i) AS region FROM generate_series(1, 128) g(i))
+		INSERT INTO purchases (transaction_id, event_time, amount_minor, player_id, card_token, card_issuer, billing_region, email_domain)
+		SELECT id, $1::timestamptz + delta, 1000, player, 'card', issuer, fixture.region, email
+		FROM wide
+		CROSS JOIN LATERAL (VALUES
+		    ('issuer-narrow', interval '-1 minute', 'player-1', NULL, 'US', 'example.test'),
+		    ('issuer-wide', interval '-1 minute', 'player-1', '', wide.region, 'example.test'),
+		    ('issuer-wide-repeat', interval '-1 minute', 'player-2', NULL, wide.region, NULL),
+		    ('issuer-other', interval '-1 minute', 'player-3', 'different', wide.region, 'other.test'),
+		    ('issuer-future', interval '1 minute', 'player-4', NULL, 'future', 'future.test')
+		) AS fixture(id, delta, player, issuer, region, email)`, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := features.NewStore(tx).History(ctx, features.Input{
+		TransactionID: "issuer-probe", EventTime: at, PlayerID: "probe", CardToken: "card",
+	})
+	want := features.IssuerHistory{Players: 2, BillingRegions: 2, EmailDomains: 2}
+	if err != nil || got.Issuer != want {
+		t.Errorf("issuer history = %+v, %v, want %+v", got.Issuer, err, want)
+	}
+}
+
 func readCSV(t *testing.T, path string) ([]string, []map[string]string) {
 	t.Helper()
 	file, err := os.Open(path)
