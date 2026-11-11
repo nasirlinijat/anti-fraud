@@ -15,8 +15,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulations"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
@@ -44,7 +44,7 @@ func main() {
 	scoreService := scoresvc.NewService(rulesetStore, blocklist.NewStore(pool), storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetStore)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
-	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
 	manager, evaluation := newSimulationManager(cfg, pool)

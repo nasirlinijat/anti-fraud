@@ -1,4 +1,4 @@
-package reviews
+package transport
 
 import (
 	"context"
@@ -12,25 +12,26 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
 
 type rejectUnexpectedReviewAccess struct{}
 
-func (rejectUnexpectedReviewAccess) queue(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
+func (rejectUnexpectedReviewAccess) Queue(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error) {
 	panic("unexpected queue read")
 }
 
-func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (CaseItem, error) {
+func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (models.CaseItem, error) {
 	panic("unexpected case read")
 }
 
-func (rejectUnexpectedReviewAccess) resolve(context.Context, int64, string, string, bool) (resolution, error) {
-	panic("unexpected resolution write")
+func (rejectUnexpectedReviewAccess) Resolve(context.Context, int64, string, string, bool) (models.Resolution, error) {
+	panic("unexpected models.Resolution write")
 }
 
 func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
@@ -45,7 +46,7 @@ func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest
 
 func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, platform.AnalystKeys{}, false)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.AnalystKeys{})
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
@@ -60,7 +61,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 
 func TestReviewDecisionRejectsInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, testAnalystKeys(t), false)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), testAnalystKeys(t))
 	const target = "/reviews/1/decision"
 	const body = `{"decision":"approve"}`
 	for _, tc := range []struct {
@@ -151,7 +152,7 @@ func checkSavedDecision(t *testing.T, tx pgx.Tx, rec *httptest.ResponseRecorder,
 	err := tx.QueryRow(context.Background(), "SELECT analyst_id, decision, resolved_at FROM review_resolutions WHERE purchase_id = $1", want.id).
 		Scan(&analystID, &decision, &resolvedAt)
 	if err != nil || analystID != want.analyst || decision != want.decision || !resolvedAt.Equal(saved.ResolvedAt) {
-		t.Fatalf("stored resolution = %q %q %v, err = %v", analystID, decision, resolvedAt, err)
+		t.Fatalf("stored models.Resolution = %q %q %v, err = %v", analystID, decision, resolvedAt, err)
 	}
 }
 
@@ -167,7 +168,7 @@ func checkScoreKept(t *testing.T, tx pgx.Tx, purchaseID int64, score float64) {
 		WHERE d.purchase_id = $1`, purchaseID).Scan(&modelVersion, &originalOutcome, &modelScore, &originalResolution)
 	if err != nil || modelVersion != testModelVersion || originalOutcome != "review" ||
 		modelScore != score || originalResolution != "approve" {
-		t.Fatalf("saved score or resolution was changed: %q %q %v %q, err = %v",
+		t.Fatalf("saved score or models.Resolution was changed: %q %q %v %q, err = %v",
 			modelVersion, originalOutcome, modelScore, originalResolution, err)
 	}
 }
@@ -176,11 +177,11 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	tx := testTx(t)
 	at := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 	score := 0.7
-	first := insertDecision(t, tx, "resolution-first", "review", at, &score, `[]`)
-	second := insertDecision(t, tx, "resolution-second", "review", at, nil, `[]`)
-	allowed := insertDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
+	first := insertReviewDecision(t, tx, "resolution-first", "review", at, &score, `[]`)
+	second := insertReviewDecision(t, tx, "resolution-second", "review", at, nil, `[]`)
+	allowed := insertReviewDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
 	until := time.Now().UTC()
 	before := readReviewStats(t, tx, at, until)
 	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
@@ -220,7 +221,7 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	}
 	after := readReviewStats(t, tx, at, until)
 	if after.queue != before.queue-2 || after.outcomes != before.outcomes || after.model != before.model {
-		t.Fatalf("unexpected stats after resolution: queue %d → %d, outcomes %+v → %+v, model %+v → %+v",
+		t.Fatalf("unexpected stats after Resolution: queue %d → %d, outcomes %+v → %+v, model %+v → %+v",
 			before.queue, after.queue, before.outcomes, after.outcomes, before.model, after.model)
 	}
 	checkScoreKept(t, tx, first, score)
@@ -230,7 +231,7 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 // device.
 func insertDeviceReview(t *testing.T, tx pgx.Tx, txnID, device string) int64 {
 	t.Helper()
-	id := insertDecision(t, tx, txnID, "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
+	id := insertReviewDecision(t, tx, txnID, "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
 	if _, err := tx.Exec(context.Background(), `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
 		t.Fatalf("set device ID: %v", err)
 	}
@@ -246,19 +247,10 @@ func deviceBlocked(t *testing.T, tx pgx.Tx, device string) bool {
 	return found
 }
 
-func countRows(t *testing.T, tx pgx.Tx, query string) int {
-	t.Helper()
-	var n int
-	if err := tx.QueryRow(context.Background(), query).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
 func TestRejectCanBlockTheDevice(t *testing.T) {
 	tx := testTx(t)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
 	decide := func(id int64, body string) *httptest.ResponseRecorder {
 		return postDecision(mux, id, queueTestKey, body)
 	}
@@ -303,7 +295,7 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 	}
 
 	// A purchase without a device is rejected and nothing is blocked.
-	noDevice := insertDecision(t, tx, "block-no-device", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
+	noDevice := insertReviewDecision(t, tx, "block-no-device", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
 	if rec := decide(noDevice, reject); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"device_blocked":false`) {
 		t.Fatalf("rejection without a device = %d %s", rec.Code, rec.Body)
 	}
@@ -322,8 +314,8 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
-	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
+	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {
 		t.Helper()
@@ -343,7 +335,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 		t.Fatalf("before the rejection: %s, want allow", got)
 	}
 
-	id := insertDecision(t, tx, "e2e-review", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
+	id := insertReviewDecision(t, tx, "e2e-review", "review", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), nil, `[]`)
 	if _, err := tx.Exec(ctx, `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
 		t.Fatalf("set device ID: %v", err)
 	}
@@ -359,4 +351,29 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	if got := scoreFrom("e2e-other-device", "device-unrelated"); !strings.Contains(got, `"outcome":"allow"`) {
 		t.Fatalf("a different device: %s, want allow", got)
 	}
+}
+
+const testModelVersion = "lgbm-test"
+
+// insertDecision adds a purchase and its decision. The decision times are in
+// 2000 so the test rows come before any other rows in the queue.
+func insertReviewDecision(t *testing.T, tx pgx.Tx, txnID, outcome string, decidedAt time.Time, modelScore *float64, firedRules string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO purchases (transaction_id, event_time, amount_minor, player_id, card_token)
+		VALUES ($1, '2000-01-01 08:00:00+00', 2500, 'player-' || $1, 'card-1')
+		RETURNING id`, txnID).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert purchase %s: %v", txnID, err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO decisions (purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score, model_version, decided_at)
+		VALUES ($1, 1, $2, 60, $3, '{}', $4, CASE WHEN $4::float8 IS NULL THEN NULL ELSE $6 END, $5)`,
+		id, outcome, firedRules, modelScore, decidedAt, testModelVersion)
+	if err != nil {
+		t.Fatalf("insert decision for %s: %v", txnID, err)
+	}
+	return id
 }
