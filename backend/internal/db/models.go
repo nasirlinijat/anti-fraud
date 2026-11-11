@@ -82,6 +82,7 @@ type Ruleset struct {
 	BlockThreshold  int32
 	IsActive        bool
 	CreatedAt       pgtype.Timestamptz
+	Note            string
 }
 
 type RulesetRule struct {

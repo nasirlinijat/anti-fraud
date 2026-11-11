@@ -650,33 +650,40 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
-  /rulesets/active:
+  /rulesets:
     get:
       tags: [Rulesets]
-      operationId: getActiveRuleset
-      summary: Read the active ruleset
+      operationId: listRulesets
+      summary: List ruleset versions
+      description: Returns all published ruleset versions, newest first, with their version number, optional note, and creation time.
       security:
         - ApiKeyAuth: []
       responses:
         "200":
-          description: The current version and its settings.
+          description: All ruleset versions.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ruleset"
+                type: object
+                required: [versions]
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RulesetSummary"
         "401":
           description: Missing or invalid API key.
         "500":
-          description: The ruleset could not be read.
-
-  /rulesets:
+          description: The ruleset history could not be read.
     post:
       tags: [Rulesets]
       operationId: publishRuleset
       summary: Publish and activate a new ruleset version
       description: |
         Submit the complete configuration. Rules absent from `rules` are
-        disabled in the new version. Existing decisions retain their version.
+        disabled in the new version. An optional `note` explains why the
+        version was made and is saved with the version. Existing decisions
+        retain their version.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -704,6 +711,64 @@ paths:
           description: The request body exceeds 65536 bytes.
         "500":
           description: The ruleset could not be published.
+
+  /rulesets/active:
+    get:
+      tags: [Rulesets]
+      operationId: getActiveRuleset
+      summary: Read the active ruleset
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: The current version and its settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "401":
+          description: Missing or invalid API key.
+        "500":
+          description: The ruleset could not be read.
+
+  /rulesets/{version}:
+    get:
+      tags: [Rulesets]
+      operationId: getRuleset
+      summary: Read a ruleset version
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        "200":
+          description: The requested ruleset version and its settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "400":
+          description: The version is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+        "404":
+          description: No ruleset has this version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The ruleset could not be read.
 
 components:
   securitySchemes:
@@ -868,16 +933,40 @@ components:
           format: date-time
           description: Latest purchase time on this device up to this purchase, in UTC.
 
+    RulesetSummary:
+      type: object
+      required: [version, note, created_at]
+      properties:
+        version:
+          type: integer
+          format: int32
+          example: 2
+        note:
+          type: string
+          description: Optional note saved when the version was published, or empty string when omitted.
+          example: Lower review threshold for weekend promo
+        created_at:
+          type: string
+          format: date-time
+          description: When the version was published, in UTC.
+
     Ruleset:
       allOf:
         - $ref: "#/components/schemas/RulesetConfig"
         - type: object
-          required: [version]
+          required: [version, note, created_at]
           properties:
             version:
               type: integer
               format: int32
               example: 2
+            note:
+              type: string
+              example: Lower review threshold for weekend promo
+            created_at:
+              type: string
+              format: date-time
+              description: When the version was published, in UTC.
 
     RulesetConfig:
       type: object
@@ -894,6 +983,11 @@ components:
           minimum: 1
           description: Must be greater than `review_threshold`.
           example: 80
+        note:
+          type: string
+          maxLength: 500
+          description: Optional note explaining why this version was published. Trimmed before saving.
+          example: Lower review threshold for weekend promo
         rules:
           type: object
           description: |
