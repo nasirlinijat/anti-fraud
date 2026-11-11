@@ -56,6 +56,7 @@ type response struct {
 	Summary
 }
 
+// ServeHTTP returns the dashboard numbers for the period in the query.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	period := r.URL.Query().Get("period")
 	if period == "" {

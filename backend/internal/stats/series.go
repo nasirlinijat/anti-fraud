@@ -9,6 +9,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
+// DecisionBucket counts the decisions of each outcome in one time bucket.
 type DecisionBucket struct {
 	Start  time.Time `json:"start"`
 	Allow  int64     `json:"allow"`
@@ -16,6 +17,7 @@ type DecisionBucket struct {
 	Block  int64     `json:"block"`
 }
 
+// DecisionSeries is the decision counts of a period, in buckets of equal width.
 type DecisionSeries struct {
 	BucketSeconds int64            `json:"bucket_seconds"`
 	Buckets       []DecisionBucket `json:"buckets"`
