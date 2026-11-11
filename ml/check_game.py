@@ -64,9 +64,12 @@ def legit_flagged(frame, score, thresholds):
     return round(float((score[legit] >= thresholds["flag_at"]).mean()), 4)
 
 
-def leave_one_out(training, validation, test, checkpoints, full):
+def leave_one_out(split, checkpoints, full):
     """Trains without each fraud scenario in turn. The scenario is left out of
-    validation too, so the thresholds never see it."""
+    validation too, so the thresholds never see it. split holds the training,
+    validation and test days; full is the result of the model trained on
+    every scenario."""
+    training, validation, test = split
     rows = []
     for scenario in sorted(training.loc[training["is_fraud"] == 1, "pattern"].unique()):
         model, thresholds = fit(
@@ -103,7 +106,7 @@ def main():
     report = {"data": "simulated game traffic", "review_rate": REVIEW_RATE, "trained_on_every_scenario": full}
     print(f"full model ready, {time.time() - started:.0f}s")
 
-    report["leave_one_scenario_out"] = leave_one_out(training, validation, test, checkpoints, full)
+    report["leave_one_scenario_out"] = leave_one_out((training, validation, test), checkpoints, full)
 
     # A world's first days are what the service sees on an empty database.
     world = train_game.load(args.second_world)
