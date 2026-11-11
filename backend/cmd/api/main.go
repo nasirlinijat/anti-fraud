@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
@@ -38,42 +39,74 @@ func main() {
 	rulesetStore := rulesets.NewStore(pool)
 	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey, cfg.OperatorKeys)
 	handler := score.NewHandler(rulesetStore, blocklist.NewStore(pool), score.NewStore(pool))
-	if cfg.ModelPath == "" {
-		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
-	} else {
-		model, err := lgbm.LoadScorer(cfg.ModelPath)
-		if err != nil {
-			log.Fatalf("load fraud model: %v", err)
-		}
-		policy, err := lgbm.LoadPolicy(lgbm.ReportPath(cfg.ModelPath))
-		if err != nil {
-			log.Fatalf("load fraud model policy: %v", err)
-		}
-		if err := handler.UseModel(model, policy); err != nil {
-			log.Fatalf("use fraud model %s: %v", model.Version(), err)
-		}
-		rulesetStore.UseModelThresholds(policy)
-		log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
-			model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
-	}
+	useModel(cfg.ModelPath, handler, rulesetStore)
 	score.RegisterRoutes(mux, handler, cfg.APIKey)
 	reviews.RegisterRoutes(mux, reviews.NewStore(pool), cfg.AnalystKeys, cfg.ModelPath != "")
 	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
-
-	var manager *simulations.Manager
-	if cfg.SimulationEnabled {
-		setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		manager, err = simulations.New(setupCtx, pool, cfg.DatabaseURL, &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}})
-		cancel()
-		if err != nil {
-			log.Fatalf("initialize simulations: %v", err)
-		}
-	}
+	manager := newSimulationManager(cfg, pool)
 	simulations.RegisterRoutes(mux, manager, cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
+
 	server := platform.NewServer(":"+cfg.Port, mux)
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	done := shutDownOnSignal(signalCtx, server, manager)
+	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
+	err = server.ListenAndServe()
+	if !errors.Is(err, http.ErrServerClosed) {
+		stop()
+	}
+	<-done
+	if !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("serve: %v", err)
+	}
+}
+
+// useModel loads the fraud model and its policy and gives them to the score
+// handler and the ruleset store. Without a model path the rules decide alone.
+// It exits when the model cannot be loaded or used.
+func useModel(modelPath string, handler *score.Handler, rulesetStore *rulesets.Store) {
+	if modelPath == "" {
+		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
+		return
+	}
+	model, err := lgbm.LoadScorer(modelPath)
+	if err != nil {
+		log.Fatalf("load fraud model: %v", err)
+	}
+	policy, err := lgbm.LoadPolicy(lgbm.ReportPath(modelPath))
+	if err != nil {
+		log.Fatalf("load fraud model policy: %v", err)
+	}
+	if err := handler.UseModel(model, policy); err != nil {
+		log.Fatalf("use fraud model %s: %v", model.Version(), err)
+	}
+	rulesetStore.UseModelThresholds(policy)
+	log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
+		model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
+}
+
+// newSimulationManager returns the manager of console simulation runs, or nil
+// when simulations are disabled. The manager scores through this server's own
+// score endpoint. It exits when the manager cannot be initialized.
+func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) *simulations.Manager {
+	if !cfg.SimulationEnabled {
+		return nil
+	}
+	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
+	manager, err := simulations.New(setupCtx, pool, cfg.DatabaseURL, client)
+	if err != nil {
+		log.Fatalf("initialize simulations: %v", err)
+	}
+	return manager
+}
+
+// shutDownOnSignal waits for the signal context to end, then drains the
+// running simulation and shuts the server down. The returned channel is closed
+// when that is done.
+func shutDownOnSignal(signalCtx context.Context, server *http.Server, manager *simulations.Manager) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -92,13 +125,5 @@ func main() {
 			_ = server.Close()
 		}
 	}()
-	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
-	err = server.ListenAndServe()
-	if !errors.Is(err, http.ErrServerClosed) {
-		stop()
-	}
-	<-done
-	if !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("serve: %v", err)
-	}
+	return done
 }

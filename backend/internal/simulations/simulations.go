@@ -174,7 +174,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	}
 }
 
-// RegisterRoutes registers nothing when simulations are disabled.
+// bounded gives every simulation request five seconds to finish.
 func bounded(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -183,6 +183,9 @@ func bounded(next http.Handler) http.Handler {
 	})
 }
 
+// RegisterRoutes registers the simulation routes: starting and stopping a run
+// need an operator key, reading needs the service key. It registers nothing
+// when simulations are disabled.
 func RegisterRoutes(mux *http.ServeMux, m *Manager, enabled bool, key string, operators platform.OperatorKeys) {
 	if !enabled {
 		return
@@ -196,24 +199,13 @@ func failure(w http.ResponseWriter, err error) {
 	log.Printf("simulation operation: %v", err)
 	platform.WriteError(w, 503, "simulation service unavailable")
 }
+
+// runByRequestSQL finds the run an operator started with a request ID.
+const runByRequestSQL = `SELECT ` + columns + ` FROM simulation_runs WHERE operator_id=$1 AND request_id=$2`
+
 func (m *Manager) start(w http.ResponseWriter, r *http.Request, operator string) {
-	s := Settings{Seed: 1, Rate: 5, Scenarios: slices.Clone(simulator.Patterns)}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&s); err != nil {
-		platform.WriteError(w, 400, "invalid simulation request")
-		return
-	}
-	var extra any
-	if dec.Decode(&extra) != io.EOF {
-		platform.WriteError(w, 400, "expected one JSON object")
-		return
-	}
-	if s.Mode == "backfill" && s.Count == 0 {
-		s.Count = 500
-	}
-	if fields := s.validate(); len(fields) > 0 {
-		platform.WriteJSON(w, 400, platform.ErrorResponse{Error: "invalid request", Fields: fields})
+	s, ok := readSettings(w, r)
+	if !ok {
 		return
 	}
 	m.mu.Lock()
@@ -222,17 +214,7 @@ func (m *Manager) start(w http.ResponseWriter, r *http.Request, operator string)
 		platform.WriteError(w, 503, "simulation service is shutting down")
 		return
 	}
-	old, err := scan(m.pool.QueryRow(r.Context(), `SELECT `+columns+` FROM simulation_runs WHERE operator_id=$1 AND request_id=$2`, operator, s.RequestID))
-	if err == nil {
-		if !reflect.DeepEqual(old.Settings, s) {
-			platform.WriteError(w, 409, "request_id was used with different settings")
-			return
-		}
-		platform.WriteJSON(w, 200, old)
-		return
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		failure(w, err)
+	if respondWithEarlierRun(w, m.pool.QueryRow(r.Context(), runByRequestSQL, operator, s.RequestID), s) {
 		return
 	}
 	c, ok, err := m.lock(r.Context())
@@ -241,15 +223,7 @@ func (m *Manager) start(w http.ResponseWriter, r *http.Request, operator string)
 		return
 	}
 	if !ok {
-		active, e := scan(m.pool.QueryRow(r.Context(), `SELECT `+columns+` FROM simulation_runs WHERE status IN ('starting','running','stopping')`))
-		if e != nil {
-			platform.WriteError(w, 409, "another simulation controller is active")
-			return
-		}
-		platform.WriteJSON(w, 409, struct {
-			Error       string `json:"error"`
-			ActiveRunID string `json:"active_run_id"`
-		}{"a simulation is already active", active.ID})
+		m.respondActive(w, r)
 		return
 	}
 	keep := false
@@ -263,17 +237,7 @@ func (m *Manager) start(w http.ResponseWriter, r *http.Request, operator string)
 		return
 	}
 	// Another process may have committed this idempotency key before releasing ownership.
-	old, err = scan(c.QueryRow(r.Context(), `SELECT `+columns+` FROM simulation_runs WHERE operator_id=$1 AND request_id=$2`, operator, s.RequestID))
-	if err == nil {
-		if !reflect.DeepEqual(old.Settings, s) {
-			platform.WriteError(w, 409, "request_id was used with different settings")
-			return
-		}
-		platform.WriteJSON(w, 200, old)
-		return
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		failure(w, err)
+	if respondWithEarlierRun(w, c.QueryRow(r.Context(), runByRequestSQL, operator, s.RequestID), s) {
 		return
 	}
 	body, _ := json.Marshal(s)
@@ -291,6 +255,65 @@ func (m *Manager) start(w http.ResponseWriter, r *http.Request, operator string)
 	w.Header().Set("Location", "/simulations/"+id)
 	platform.WriteJSON(w, 202, run)
 }
+
+// readSettings reads and validates the settings of a new run. On failure it
+// writes the error response and returns false.
+func readSettings(w http.ResponseWriter, r *http.Request) (Settings, bool) {
+	s := Settings{Seed: 1, Rate: 5, Scenarios: slices.Clone(simulator.Patterns)}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
+		platform.WriteError(w, 400, "invalid simulation request")
+		return Settings{}, false
+	}
+	var extra any
+	if dec.Decode(&extra) != io.EOF {
+		platform.WriteError(w, 400, "expected one JSON object")
+		return Settings{}, false
+	}
+	if s.Mode == "backfill" && s.Count == 0 {
+		s.Count = 500
+	}
+	if fields := s.validate(); len(fields) > 0 {
+		platform.WriteJSON(w, 400, platform.ErrorResponse{Error: "invalid request", Fields: fields})
+		return Settings{}, false
+	}
+	return s, true
+}
+
+// respondWithEarlierRun handles a request ID that was used before: it returns
+// that run for the same settings and a conflict for different ones. row is the
+// result of runByRequestSQL. It returns false when there is no earlier run and
+// nothing was written.
+func respondWithEarlierRun(w http.ResponseWriter, row pgx.Row, s Settings) bool {
+	old, err := scan(row)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false
+	case err != nil:
+		failure(w, err)
+	case !reflect.DeepEqual(old.Settings, s):
+		platform.WriteError(w, 409, "request_id was used with different settings")
+	default:
+		platform.WriteJSON(w, 200, old)
+	}
+	return true
+}
+
+// respondActive writes the conflict for a start while another run holds the
+// controller lock, with that run's ID when it can be read.
+func (m *Manager) respondActive(w http.ResponseWriter, r *http.Request) {
+	active, err := scan(m.pool.QueryRow(r.Context(), `SELECT `+columns+` FROM simulation_runs WHERE status IN ('starting','running','stopping')`))
+	if err != nil {
+		platform.WriteError(w, 409, "another simulation controller is active")
+		return
+	}
+	platform.WriteJSON(w, 409, struct {
+		Error       string `json:"error"`
+		ActiveRunID string `json:"active_run_id"`
+	}{"a simulation is already active", active.ID})
+}
+
 func (m *Manager) read(w http.ResponseWriter, r *http.Request) {
 	run, err := m.get(r.Context(), r.PathValue("id"))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -394,6 +417,10 @@ type trackedScorer struct {
 	fatal  error
 }
 
+// Score sends one purchase. It saves the transaction ID as pending before the
+// request and counts the outcome after it, so an interrupted run can be
+// reconciled. An error it cannot recover from is kept in fatal and cancels the
+// run.
 func (t *trackedScorer) Score(ctx context.Context, req simulator.Request) (simulator.Result, error) {
 	if ctx.Err() != nil {
 		return simulator.Result{}, ctx.Err()
@@ -437,6 +464,43 @@ func (t *trackedScorer) Score(ctx context.Context, req simulator.Request) (simul
 	}
 	return result, err
 }
+
+// sendRun sends the run's purchases through the scorer: live traffic until
+// ctx is cancelled, or a backfill of generated purchases.
+func sendRun(ctx context.Context, scorer simulator.Scorer, run Run) error {
+	cfg := simulator.DefaultConfig()
+	cfg.Run = run.ID
+	cfg.Seed = run.Settings.Seed
+	cfg.Scenarios = run.Settings.Scenarios
+	cfg.Start = run.CreatedAt.UTC()
+	if run.Settings.Mode == "live" {
+		_, err := simulator.RunLive(ctx, scorer, cfg, run.Settings.Rate, nil)
+		return err
+	}
+	purchases, err := simulator.GenerateContext(ctx, cfg, run.Settings.Count)
+	if err != nil || len(purchases) == 0 {
+		return err
+	}
+	endAt(purchases, run.CreatedAt)
+	_, err = simulator.Run(ctx, scorer, purchases, run.Settings.Rate, nil)
+	return err
+}
+
+// endAt shifts the purchases in time so that the last one happens at end. The
+// score API rejects event times in the future, so a backfill ends when the run
+// was created.
+func endAt(purchases []simulator.Purchase, end time.Time) {
+	shift := end.Sub(purchases[len(purchases)-1].Request.EventTime)
+	for i := range purchases {
+		p := &purchases[i].Request
+		p.EventTime = p.EventTime.Add(shift)
+		if p.AccountCreatedAt != nil {
+			v := p.AccountCreatedAt.Add(shift)
+			p.AccountCreatedAt = &v
+		}
+	}
+}
+
 func (m *Manager) work(ctx context.Context, c *pgx.Conn, run Run) {
 	defer m.wg.Done()
 	defer c.Close(context.Background())
@@ -448,31 +512,8 @@ func (m *Manager) work(ctx context.Context, c *pgx.Conn, run Run) {
 		}
 		m.mu.Unlock()
 	}
-	cfg := simulator.DefaultConfig()
-	cfg.Run = run.ID
-	cfg.Seed = run.Settings.Seed
-	cfg.Scenarios = run.Settings.Scenarios
-	cfg.Start = run.CreatedAt.UTC()
 	tracker := &trackedScorer{m: m, c: c, id: run.ID, cancel: cancel}
-	var err error
-	if run.Settings.Mode == "live" {
-		_, err = simulator.RunLive(ctx, tracker, cfg, run.Settings.Rate, nil)
-	} else {
-		var purchases []simulator.Purchase
-		purchases, err = simulator.GenerateContext(ctx, cfg, run.Settings.Count)
-		if err == nil && len(purchases) > 0 {
-			shift := run.CreatedAt.Sub(purchases[len(purchases)-1].Request.EventTime)
-			for i := range purchases {
-				p := &purchases[i].Request
-				p.EventTime = p.EventTime.Add(shift)
-				if p.AccountCreatedAt != nil {
-					v := p.AccountCreatedAt.Add(shift)
-					p.AccountCreatedAt = &v
-				}
-			}
-			_, err = simulator.Run(ctx, tracker, purchases, run.Settings.Rate, nil)
-		}
-	}
+	err := sendRun(ctx, tracker, run)
 	status, message := "completed", ""
 	if ctx.Err() != nil {
 		status = "stopped"

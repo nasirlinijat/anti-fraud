@@ -12,12 +12,12 @@ export class ApiError extends Error {
   readonly fields?: ErrorResponse['fields']
   readonly activeRunId?: string
 
-  constructor(kind: Failure, message: string, status?: number, fields?: ErrorResponse['fields'], activeRunId?: string) {
+  constructor(kind: Failure, message: string, status?: number, details: { fields?: ErrorResponse['fields']; activeRunId?: string } = {}) {
     super(message)
     this.kind = kind
     this.status = status
-    this.fields = fields
-    this.activeRunId = activeRunId
+    this.fields = details.fields
+    this.activeRunId = details.activeRunId
   }
 }
 
@@ -60,7 +60,7 @@ export async function request<T>(path: string, options: RequestOptions<T> = {}):
       const message = response.status === 401 && auth === 'service'
         ? `${error.endsWith('.') ? error : `${error}.`} Check API_KEY in .env and restart the console and backend.`
         : error
-      throw new ApiError('http', message, response.status, fields, active_run_id)
+      throw new ApiError('http', message, response.status, { fields, activeRunId: active_run_id })
     }
     const result = read ? await read(response) : await response.json() as T
     controller.signal.throwIfAborted()
