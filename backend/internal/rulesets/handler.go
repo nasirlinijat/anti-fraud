@@ -181,50 +181,7 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 			continue
 		}
 
-		var config scoring.RuleConfig
-		if rule.Enabled == nil {
-			fields[field+".enabled"] = "is required"
-		} else {
-			config.Enabled = *rule.Enabled
-		}
-		if rule.Weight == nil || *rule.Weight < 0 {
-			fields[field+".weight"] = "must be a non-negative integer"
-		} else {
-			config.Weight = int(*rule.Weight)
-		}
-		switch {
-		case rule.Limit == nil:
-			if name != scoring.RuleCountryMismatch {
-				fields[field+".limit"] = "is required"
-			}
-		case (name == scoring.RuleDeviceCardCount || name == scoring.RuleNewDeviceSpike) && *rule.Limit <= 0:
-			fields[field+".limit"] = "must be a positive integer"
-		case *rule.Limit < 0:
-			fields[field+".limit"] = "must be a non-negative integer"
-		case name == scoring.RuleNewAccount && *rule.Limit > math.MaxInt64/int64(time.Hour):
-			fields[field+".limit"] = "exceeds the maximum account age in hours"
-		default:
-			config.Limit = *rule.Limit
-		}
-		if name == scoring.RuleNewDeviceSpike {
-			if rule.WindowDays == nil || *rule.WindowDays < 1 || *rule.WindowDays > maxDeviceSpikeWindowDays {
-				fields[field+".window_days"] = fmt.Sprintf("must be an integer from 1 to %d", maxDeviceSpikeWindowDays)
-			} else {
-				config.WindowDays = *rule.WindowDays
-			}
-			if rule.MinAmountMinor == nil || *rule.MinAmountMinor <= 0 {
-				fields[field+".min_amount_minor"] = "must be a positive integer in minor units"
-			} else {
-				config.MinAmountMinor = *rule.MinAmountMinor
-			}
-			if rule.AmountMultiplier == nil || *rule.AmountMultiplier < 2 {
-				fields[field+".amount_multiplier"] = "must be an integer of at least 2"
-			} else {
-				config.AmountMultiplier = *rule.AmountMultiplier
-			}
-		} else if rule.WindowDays != nil || rule.MinAmountMinor != nil || rule.AmountMultiplier != nil {
-			fields[field] = "window_days, min_amount_minor, and amount_multiplier are only supported for new_device_spike"
-		}
+		config := rule.config(name, field, fields)
 		if config.Enabled {
 			maxScore += int64(config.Weight)
 		}
@@ -237,6 +194,69 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 		rs.Model = p.Model.settings(fields)
 	}
 	return rs, fields
+}
+
+// config validates one rule and converts it. Problems are added to fields
+// under the rule's field name.
+func (rule *rulePayload) config(name scoring.RuleName, field string, fields map[string]string) scoring.RuleConfig {
+	var config scoring.RuleConfig
+	if rule.Enabled == nil {
+		fields[field+".enabled"] = "is required"
+	} else {
+		config.Enabled = *rule.Enabled
+	}
+	if rule.Weight == nil || *rule.Weight < 0 {
+		fields[field+".weight"] = "must be a non-negative integer"
+	} else {
+		config.Weight = int(*rule.Weight)
+	}
+	config.Limit = rule.limit(name, field, fields)
+	if name == scoring.RuleNewDeviceSpike {
+		rule.spikeSettings(&config, field, fields)
+	} else if rule.WindowDays != nil || rule.MinAmountMinor != nil || rule.AmountMultiplier != nil {
+		fields[field] = "window_days, min_amount_minor, and amount_multiplier are only supported for new_device_spike"
+	}
+	return config
+}
+
+// limit returns the rule's limit, or zero with a problem added to fields.
+// Only country_mismatch may leave the limit out.
+func (rule *rulePayload) limit(name scoring.RuleName, field string, fields map[string]string) int64 {
+	switch {
+	case rule.Limit == nil:
+		if name != scoring.RuleCountryMismatch {
+			fields[field+".limit"] = "is required"
+		}
+	case (name == scoring.RuleDeviceCardCount || name == scoring.RuleNewDeviceSpike) && *rule.Limit <= 0:
+		fields[field+".limit"] = "must be a positive integer"
+	case *rule.Limit < 0:
+		fields[field+".limit"] = "must be a non-negative integer"
+	case name == scoring.RuleNewAccount && *rule.Limit > math.MaxInt64/int64(time.Hour):
+		fields[field+".limit"] = "exceeds the maximum account age in hours"
+	default:
+		return *rule.Limit
+	}
+	return 0
+}
+
+// spikeSettings validates the settings that only new_device_spike has and
+// copies the valid ones to config.
+func (rule *rulePayload) spikeSettings(config *scoring.RuleConfig, field string, fields map[string]string) {
+	if rule.WindowDays == nil || *rule.WindowDays < 1 || *rule.WindowDays > maxDeviceSpikeWindowDays {
+		fields[field+".window_days"] = fmt.Sprintf("must be an integer from 1 to %d", maxDeviceSpikeWindowDays)
+	} else {
+		config.WindowDays = *rule.WindowDays
+	}
+	if rule.MinAmountMinor == nil || *rule.MinAmountMinor <= 0 {
+		fields[field+".min_amount_minor"] = "must be a positive integer in minor units"
+	} else {
+		config.MinAmountMinor = *rule.MinAmountMinor
+	}
+	if rule.AmountMultiplier == nil || *rule.AmountMultiplier < 2 {
+		fields[field+".amount_multiplier"] = "must be an integer of at least 2"
+	} else {
+		config.AmountMultiplier = *rule.AmountMultiplier
+	}
 }
 
 // settings validates the model settings and adds problems to fields.
