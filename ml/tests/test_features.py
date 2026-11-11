@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -180,3 +181,43 @@ def test_split_follows_days_and_skips_warm_up():
     assert validation["day"].min() == 136 and validation["day"].max() == 152
     assert test["day"].min() == 153
     assert set(train.index).isdisjoint(validation.index) and set(validation.index).isdisjoint(test.index)
+
+
+def write_dump(path, purchases):
+    lines = []
+    for index, (pattern, fraud, request) in enumerate(purchases):
+        request = {"transaction_id": f"sim-txn-{index}", "card_issuer": "1500", "card_network": "visa",
+                   "card_country": "AZ", "card_category": "226", "billing_region": "310", "email_domain": "gmail.com",
+                   "device_type": "mobile", "device_name": "Pixel 7", **request}
+        lines.append(json.dumps({"pattern": pattern, "is_fraud": fraud, "request": request}))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_load_requests_keeps_the_request_ids_and_labels(tmp_path):
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
+                           "card_token": "c1", "account_created_at": "2025-12-22T12:00:00Z"}),
+        ("stolen_card", True, {"event_time": "2026-01-03T09:30:00Z", "amount_minor": 20000, "player_id": "p2",
+                               "card_token": "c1", "billing_distance": 12.5}),
+        ("normal", False, {"event_time": "2026-01-02T08:00:00Z", "amount_minor": 500, "player_id": "p1",
+                           "card_token": "c1", "account_created_at": "2025-12-22T12:00:00Z"}),
+    ])
+    raw = features.load_requests(dump)
+
+    assert list(raw["TransactionID"]) == ["sim-txn-0", "sim-txn-2", "sim-txn-1"]
+    assert list(raw["player_id"]) == ["p1", "p1", "p2"] and list(raw["card_id"]) == ["c1", "c1", "c1"]
+    assert list(raw["pattern"]) == ["normal", "normal", "stolen_card"] and list(raw["isFraud"]) == [0, 0, 1]
+    assert list(raw["day"]) == [0, 1, 2] and raw["TransactionDT"].iloc[0] == 10 * 3600
+    # Whole days between the account's creation and the purchase; missing without it.
+    assert raw["D1"].iloc[0] == 9 and raw["D1"].iloc[1] == 10 and np.isnan(raw["D1"].iloc[2])
+    # A code that is not a number is missing, as in the service.
+    assert raw["card3"].isna().all() and list(raw["card1"]) == [1500, 1500, 1500]
+
+    built = features.build(raw.copy())
+    assert list(built["player_txn_count"]) == [0, 1, 0]
+    # Players seen with the card before, the buyer included.
+    assert list(built["card_distinct_players"]) == [0, 1, 1]
+    assert list(built["card_country"]) == [-1, -1, -1] and list(built["card_issuer_code"]) == [1500, 1500, 1500]
+    assert list(built["billing_distance"]) == [-1, -1, 12.5]
+    assert list(built["player_id"]) == ["p1", "p1", "p2"] and list(built["is_fraud"]) == [0, 0, 1]
