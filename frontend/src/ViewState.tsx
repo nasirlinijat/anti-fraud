@@ -35,23 +35,32 @@ export function LoadingSkeleton({ label, shape }: { label: string; shape: Skelet
     <div className={`loading-skeleton skeleton-${shape}`} aria-busy="true">
       <span className="muted small">{label}</span>
       <div className="skeleton-content" aria-hidden="true">
-        {shape === 'metrics' ? (
-          <div className="tiles">
-            {Array.from({ length: 7 }, (_, index) => <div className="tile" key={index}><Lines count={2} /></div>)}
-          </div>
-        ) : shape === 'chart' ? (
-          <div className="skeleton-chart-frame" />
-        ) : shape === 'table' ? (
-          <div className="skeleton-table-body">
-            {Array.from({ length: 4 }, (_, index) => <Lines count={5} key={index} />)}
-          </div>
-        ) : (
-          <>
-            <Lines count={3} />
-            <Lines count={shape === 'form' ? 3 : 2} />
-          </>
-        )}
+        <SkeletonContent shape={shape} />
       </div>
     </div>
+  )
+}
+
+function SkeletonContent({ shape }: { shape: SkeletonShape }) {
+  if (shape === 'metrics') {
+    return (
+      <div className="tiles">
+        {Array.from({ length: 7 }, (_, index) => <div className="tile" key={index}><Lines count={2} /></div>)}
+      </div>
+    )
+  }
+  if (shape === 'chart') return <div className="skeleton-chart-frame" />
+  if (shape === 'table') {
+    return (
+      <div className="skeleton-table-body">
+        {Array.from({ length: 4 }, (_, index) => <Lines count={5} key={index} />)}
+      </div>
+    )
+  }
+  return (
+    <>
+      <Lines count={3} />
+      <Lines count={shape === 'form' ? 3 : 2} />
+    </>
   )
 }
