@@ -165,6 +165,7 @@ Read the relevant skill before performing the matching task.
 |---|---|---|
 | Commit style | `.agent/skills/commit-style/SKILL.md` | Creating any git commit or branch |
 | Jira task creator | `.agent/skills/jira-task-creator/SKILL.md` | Creating, editing, or planning any Jira work item |
+| Clean code | `.agent/skills/clean-code/SKILL.md` | Writing, reviewing, or refactoring any Go, TypeScript, or Python code |
 
 ## 7. General Rules
 
