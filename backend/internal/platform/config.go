@@ -3,6 +3,8 @@ package platform
 import (
 	"fmt"
 	"os"
+	"strings"
+	"unicode"
 )
 
 const defaultPort = "8080"
@@ -36,10 +38,17 @@ func LoadConfig() (Config, error) {
 	if cfg.APIKey == "" {
 		return Config{}, fmt.Errorf("required environment variable API_KEY is not set")
 	}
+	if strings.IndexFunc(cfg.APIKey, isSpaceOrControl) >= 0 {
+		return Config{}, fmt.Errorf("API_KEY must not contain whitespace or control characters")
+	}
 	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.AnalystKeys = keys
 	return cfg, nil
+}
+
+func isSpaceOrControl(r rune) bool {
+	return unicode.IsSpace(r) || unicode.IsControl(r)
 }

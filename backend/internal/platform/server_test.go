@@ -25,6 +25,9 @@ func TestNewServerSetsTimeouts(t *testing.T) {
 			t.Errorf("%s = %v, want a positive timeout", name, got)
 		}
 	}
+	if srv.MaxHeaderBytes != maxHeaderBytes {
+		t.Errorf("MaxHeaderBytes = %d, want %d", srv.MaxHeaderBytes, maxHeaderBytes)
+	}
 }
 
 func TestServerServesHealthRoutes(t *testing.T) {

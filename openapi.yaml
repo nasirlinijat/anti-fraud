@@ -396,6 +396,12 @@ paths:
                 error: this value is already on the blocklist
                 fields:
                   value: is already on the blocklist
+        "413":
+          description: The request body exceeds 4096 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: The entry could not be saved.
           content:

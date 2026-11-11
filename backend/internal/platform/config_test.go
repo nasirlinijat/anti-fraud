@@ -87,3 +87,22 @@ func TestLoadConfigMissingAPIKey(t *testing.T) {
 		t.Errorf("error %q does not name API_KEY", err)
 	}
 }
+
+func TestLoadConfigRejectsWhitespaceOrControlCharsInAPIKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	for name, key := range map[string]string{
+		"leading space":   " secret-key",
+		"inner space":     "secret key",
+		"newline":         "secret-key\n",
+		"tab":             "secret\tkey",
+		"carriage return": "secret\rkey",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("API_KEY", key)
+			_, err := LoadConfig()
+			if err == nil || !strings.Contains(err.Error(), "API_KEY") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("unexpected error for %s: %v", name, err)
+			}
+		})
+	}
+}

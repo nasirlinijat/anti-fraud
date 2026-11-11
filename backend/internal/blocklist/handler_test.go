@@ -137,10 +137,23 @@ func TestAddRejectsInvalidEntries(t *testing.T) {
 		})
 	}
 
-	for _, body := range []string{`not json`, `{"type":"card","value":"a","reason":"r","extra":1}`, `{"type":"card","value":"a","reason":"r"}{}`} {
-		if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", body, testKey); rec.Code != http.StatusBadRequest {
+	for _, body := range []string{
+		`not json`,
+		`{"type":"card","value":"a","reason":"r","extra":1}`,
+		`{"type":"card","value":"a","reason":"r"}{}`,
+		`{"type":"card","value":"a","reason":"r"}null`,
+	} {
+		f := &fakeEntries{}
+		if rec := call(t, f, http.MethodPost, "/blocklist", body, testKey); rec.Code != http.StatusBadRequest {
 			t.Errorf("body %s: status = %d, want 400", body, rec.Code)
 		}
+		if len(f.added) != 0 {
+			t.Error("an invalid entry was saved")
+		}
+	}
+	oversized := `{"type":"card","value":"a","reason":"` + strings.Repeat("r", maxBodyBytes) + `"}`
+	if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", oversized, testKey); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body: status = %d, want 413", rec.Code)
 	}
 }
 
