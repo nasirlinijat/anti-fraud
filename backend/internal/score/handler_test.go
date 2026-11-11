@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
@@ -721,6 +723,41 @@ func (s *deviceHistoryStore) DeviceCardsLastHour(ctx context.Context, deviceID, 
 	return s.Store.DeviceCardsLastHour(ctx, deviceID, cardToken, at)
 }
 
+// publishDeviceCardRuleset publishes a ruleset with only the device card
+// count rule and checks that it became the active one and left the previous
+// version's rules as they were. It returns the new ruleset.
+func publishDeviceCardRuleset(t *testing.T, tx pgx.Tx, mux *http.ServeMux, previous scoring.Ruleset) scoring.Ruleset {
+	t.Helper()
+	ctx := t.Context()
+	publish := httptest.NewRequestWithContext(ctx, http.MethodPost, "/rulesets", strings.NewReader(`{
+		"review_threshold":20,"block_threshold":80,
+		"rules":{"device_card_count":{"enabled":true,"weight":20,"limit":5}}
+	}`))
+	publish.Header.Set(platform.APIKeyHeader, operatorTestKey)
+	published := httptest.NewRecorder()
+	mux.ServeHTTP(published, publish)
+	if published.Code != http.StatusCreated {
+		t.Fatalf("publish: %d %s", published.Code, published.Body)
+	}
+	active, err := rulesets.NewStore(tx).Active(ctx)
+	wantConfig := scoring.RuleConfig{Enabled: true, Weight: 20, Limit: 5}
+	if err != nil || active.Version <= previous.Version || active.Rules[scoring.RuleDeviceCardCount] != wantConfig {
+		t.Fatalf("active ruleset = %+v, %v, want new version with %+v", active, err, wantConfig)
+	}
+	if n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules WHERE ruleset_version = $1`, previous.Version); n != len(previous.Rules) {
+		t.Errorf("prior ruleset has %d rules, want %d", n, len(previous.Rules))
+	}
+	for name, config := range previous.Rules {
+		n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules
+			WHERE ruleset_version = $1 AND rule_name = $2 AND enabled = $3 AND weight = $4 AND rule_limit = $5`,
+			previous.Version, string(name), config.Enabled, config.Weight, config.Limit)
+		if n != 1 {
+			t.Errorf("prior ruleset lost original settings for %s", name)
+		}
+	}
+	return active
+}
+
 func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	tx := testTx(t)
 	ctx := t.Context()
@@ -746,32 +783,7 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 		t.Fatalf("score before publishing: %d %s, history calls = %d", first.Code, first.Body, purchaseStore.calls)
 	}
 
-	publish := httptest.NewRequestWithContext(ctx, http.MethodPost, "/rulesets", strings.NewReader(`{
-		"review_threshold":20,"block_threshold":80,
-		"rules":{"device_card_count":{"enabled":true,"weight":20,"limit":5}}
-	}`))
-	publish.Header.Set(platform.APIKeyHeader, operatorTestKey)
-	published := httptest.NewRecorder()
-	mux.ServeHTTP(published, publish)
-	if published.Code != http.StatusCreated {
-		t.Fatalf("publish: %d %s", published.Code, published.Body)
-	}
-	active, err := rulesetStore.Active(ctx)
-	wantConfig := scoring.RuleConfig{Enabled: true, Weight: 20, Limit: 5}
-	if err != nil || active.Version <= originalRuleset.Version || active.Rules[scoring.RuleDeviceCardCount] != wantConfig {
-		t.Fatalf("active ruleset = %+v, %v, want new version with %+v", active, err, wantConfig)
-	}
-	if n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules WHERE ruleset_version = $1`, originalRuleset.Version); n != len(originalRuleset.Rules) {
-		t.Errorf("prior ruleset has %d rules, want %d", n, len(originalRuleset.Rules))
-	}
-	for name, config := range originalRuleset.Rules {
-		n := countRows(t, tx, `SELECT count(*) FROM ruleset_rules
-			WHERE ruleset_version = $1 AND rule_name = $2 AND enabled = $3 AND weight = $4 AND rule_limit = $5`,
-			originalRuleset.Version, string(name), config.Enabled, config.Weight, config.Limit)
-		if n != 1 {
-			t.Errorf("prior ruleset lost original settings for %s", name)
-		}
-	}
+	active := publishDeviceCardRuleset(t, tx, mux, originalRuleset)
 
 	for n := 2; n <= 5; n++ {
 		rec := postScore(ctx, mux, testKey, body(n))
@@ -942,6 +954,66 @@ func (s synchronizedScoreStore) FindSavedDecision(ctx context.Context, p Purchas
 	return d, err
 }
 
+// synchronizedScoreMuxes returns two score handlers on separate connections.
+// Each signals on arrived when it reaches the first lookup, and waits there
+// until start is closed.
+func synchronizedScoreMuxes(t *testing.T, pool *pgxpool.Pool, arrived chan<- struct{}, start <-chan struct{}) [2]*http.ServeMux {
+	t.Helper()
+	muxes := [2]*http.ServeMux{}
+	for i := range muxes {
+		conn, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(conn.Release)
+		store := synchronizedScoreStore{Store: NewStore(conn), arrived: arrived, start: start}
+		muxes[i] = http.NewServeMux()
+		RegisterRoutes(muxes[i], NewHandler(rulesets.NewStore(conn), blocklist.NewStore(conn), store), testKey)
+	}
+	return muxes
+}
+
+// countScoreStatuses reads n responses and counts the 200 and 409 ones. Every
+// 200 response must carry the same decision.
+func countScoreStatuses(t *testing.T, responses <-chan *httptest.ResponseRecorder, n int) (ok, conflicts int) {
+	t.Helper()
+	var winner string
+	for range n {
+		rec := <-responses
+		switch rec.Code {
+		case http.StatusOK:
+			ok++
+			if winner != "" && rec.Body.String() != winner {
+				t.Errorf("matching requests returned different decisions: %s and %s", winner, rec.Body)
+			}
+			winner = rec.Body.String()
+		case http.StatusConflict:
+			conflicts++
+		default:
+			t.Errorf("unexpected status %d: %s", rec.Code, rec.Body)
+		}
+	}
+	return ok, conflicts
+}
+
+// checkOnePurchaseSaved checks that the database holds one purchase with its
+// decision, counted once in each of the six running totals.
+func checkOnePurchaseSaved(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if n := countRows(t, pool, "SELECT count(*) FROM purchases"); n != 1 {
+		t.Errorf("purchases = %d, want 1", n)
+	}
+	if n := countRows(t, pool, "SELECT count(*) FROM decisions"); n != 1 {
+		t.Errorf("decisions = %d, want 1", n)
+	}
+	if n := countRows(t, pool, "SELECT count(*) FROM feature_counts WHERE purchases = 1 AND players = 1"); n != 6 {
+		t.Errorf("feature counts incremented once = %d, want 6", n)
+	}
+	if n := countRows(t, pool, "SELECT count(*) FROM feature_counts"); n != 6 {
+		t.Errorf("feature count rows = %d, want 6", n)
+	}
+}
+
 func TestConcurrentScoreRetries(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -958,17 +1030,7 @@ func TestConcurrentScoreRetries(t *testing.T) {
 			defer cancel()
 			arrived := make(chan struct{}, 4)
 			start := make(chan struct{})
-			muxes := [2]*http.ServeMux{}
-			for i := range muxes {
-				conn, err := pool.Acquire(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer conn.Release()
-				store := synchronizedScoreStore{Store: NewStore(conn), arrived: arrived, start: start}
-				muxes[i] = http.NewServeMux()
-				RegisterRoutes(muxes[i], NewHandler(rulesets.NewStore(conn), blocklist.NewStore(conn), store), testKey)
-			}
+			muxes := synchronizedScoreMuxes(t, pool, arrived, start)
 
 			fields := fullRetryFields()
 			firstBody := encodeScoreFields(t, fields)
@@ -994,38 +1056,11 @@ func TestConcurrentScoreRetries(t *testing.T) {
 			}
 			close(start)
 
-			ok, conflicts := 0, 0
-			var winner string
-			for range muxes {
-				rec := <-responses
-				switch rec.Code {
-				case http.StatusOK:
-					ok++
-					if winner != "" && rec.Body.String() != winner {
-						t.Errorf("matching requests returned different decisions: %s and %s", winner, rec.Body)
-					}
-					winner = rec.Body.String()
-				case http.StatusConflict:
-					conflicts++
-				default:
-					t.Errorf("unexpected status %d: %s", rec.Code, rec.Body)
-				}
-			}
+			ok, conflicts := countScoreStatuses(t, responses, len(muxes))
 			if ok != test.wantOK || conflicts != test.want409 {
 				t.Errorf("got %d successes and %d conflicts, want %d and %d", ok, conflicts, test.wantOK, test.want409)
 			}
-			if n := countRows(t, pool, "SELECT count(*) FROM purchases"); n != 1 {
-				t.Errorf("purchases = %d, want 1", n)
-			}
-			if n := countRows(t, pool, "SELECT count(*) FROM decisions"); n != 1 {
-				t.Errorf("decisions = %d, want 1", n)
-			}
-			if n := countRows(t, pool, "SELECT count(*) FROM feature_counts WHERE purchases = 1 AND players = 1"); n != 6 {
-				t.Errorf("feature counts incremented once = %d, want 6", n)
-			}
-			if n := countRows(t, pool, "SELECT count(*) FROM feature_counts"); n != 6 {
-				t.Errorf("feature count rows = %d, want 6", n)
-			}
+			checkOnePurchaseSaved(t, pool)
 		})
 	}
 }

@@ -108,25 +108,10 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 	at := in.EventTime.UTC()
 	var h History
 
-	p := &h.Player
-	var first, last *time.Time
-	err := s.conn.QueryRow(ctx, PlayerHistorySQL,
-		at, in.AmountMinor, in.EmailKey(), in.DeviceName, in.ClientOS, in.ClientBrowser, in.ScreenResolution,
-		in.PlayerID, in.TransactionID, in.DeviceID,
-	).Scan(
-		&p.Purchases, &p.AmountTotalMinor, &p.AmountMaxMinor, &first, &last, &p.Uses1h, &p.Uses24h,
-		&p.SameAmount, &p.DistinctCards, &p.DistinctEmails, &p.EmailUses, &p.DistinctDevices, &p.DeviceUses,
-		&p.OSUses, &p.BrowserUses, &p.ScreenUses, &p.DistinctBrowsers, &p.DeviceIDUses,
-	)
+	var err error
+	h.Player, err = s.playerHistory(ctx, in, at)
 	if err != nil {
 		return History{}, fmt.Errorf("read player history: %w", err)
-	}
-	// A player without earlier purchases has no first or last time.
-	if first != nil {
-		p.First = *first
-	}
-	if last != nil {
-		p.Last = *last
 	}
 
 	err = s.conn.QueryRow(ctx, CardHistorySQL, at, in.CardToken, in.TransactionID, in.RegionKey()).
@@ -146,17 +131,50 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 		return History{}, fmt.Errorf("read card issuer history: %w", err)
 	}
 
+	if err := s.readCounts(ctx, in, &h); err != nil {
+		return History{}, fmt.Errorf("read feature counts: %w", err)
+	}
+	return h, nil
+}
+
+// playerHistory summarizes the player's earlier purchases.
+func (s *Store) playerHistory(ctx context.Context, in Input, at time.Time) (PlayerHistory, error) {
+	var p PlayerHistory
+	var first, last *time.Time
+	err := s.conn.QueryRow(ctx, PlayerHistorySQL,
+		at, in.AmountMinor, in.EmailKey(), in.DeviceName, in.ClientOS, in.ClientBrowser, in.ScreenResolution,
+		in.PlayerID, in.TransactionID, in.DeviceID,
+	).Scan(
+		&p.Purchases, &p.AmountTotalMinor, &p.AmountMaxMinor, &first, &last, &p.Uses1h, &p.Uses24h,
+		&p.SameAmount, &p.DistinctCards, &p.DistinctEmails, &p.EmailUses, &p.DistinctDevices, &p.DeviceUses,
+		&p.OSUses, &p.BrowserUses, &p.ScreenUses, &p.DistinctBrowsers, &p.DeviceIDUses,
+	)
+	if err != nil {
+		return PlayerHistory{}, err
+	}
+	// A player without earlier purchases has no first or last time.
+	if first != nil {
+		p.First = *first
+	}
+	if last != nil {
+		p.Last = *last
+	}
+	return p, nil
+}
+
+// readCounts reads the running totals that match the purchase into h.
+func (s *Store) readCounts(ctx context.Context, in Input, h *History) error {
 	rows, err := s.conn.Query(ctx, FeatureCountsSQL,
 		in.EmailKey(), in.DeviceName, in.ClientOS, in.ClientBrowser, in.ScreenResolution)
 	if err != nil {
-		return History{}, fmt.Errorf("read feature counts: %w", err)
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var kind, key string
 		var count Count
 		if err := rows.Scan(&kind, &key, &count.Purchases, &count.Players); err != nil {
-			return History{}, fmt.Errorf("read feature counts: %w", err)
+			return err
 		}
 		switch kind {
 		case "all":
@@ -173,10 +191,7 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 			h.Screen = count
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return History{}, fmt.Errorf("read feature counts: %w", err)
-	}
-	return h, nil
+	return rows.Err()
 }
 
 // deviceIDPlayers counts the earlier players on the purchase's device ID. A

@@ -10,7 +10,7 @@ import {
 } from '../api'
 import { TimeDisplayToggle, Timestamp } from '../Display'
 import { usePolling } from '../usePolling'
-import { useTimeDisplay } from '../useTimeDisplay'
+import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
 const typeNames: Record<EntryType, string> = {
@@ -31,11 +31,6 @@ function BlocklistPage() {
   const [entries, setEntries] = useState<BlocklistEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [operatorKey, setOperatorKey] = useState('')
-  const [type, setType] = useState<EntryType>('card')
-  const [value, setValue] = useState('')
-  const [reason, setReason] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [formError, setFormError] = useState<ErrorResponse | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
@@ -48,24 +43,8 @@ function BlocklistPage() {
     },
     onError: (error) => setLoadError(error instanceof Error ? error.message : 'The blocklist cannot be loaded.'),
   })
-
-  const add = async (e: FormEvent) => {
-    e.preventDefault()
-    if (saving || !operatorKey.trim()) return
-    setSaving(true)
-    setNotice(null)
-    const res = await addBlocklistEntry({ type, value, reason }, operatorKey.trim())
-    setSaving(false)
-    if (!res.ok) {
-      setFormError(res.error)
-      return
-    }
-    setFormError(null)
-    setValue('')
-    setReason('')
-    setNotice(`${typeNames[res.value.type]} ${res.value.value} is blocked from the next purchase on.`)
-    refresh()
-  }
+  // While the list itself cannot be loaded, its own error offers the retry.
+  const refreshEntries = loadError ? undefined : retry
 
   const remove = async (entry: BlocklistEntry) => {
     if (removing !== null || !operatorKey.trim()) return
@@ -82,8 +61,6 @@ function BlocklistPage() {
     refresh()
   }
 
-  const fields = formError?.fields ?? {}
-
   return (
     <div className="blocklist">
       <h2>Blocklist</h2>
@@ -98,69 +75,7 @@ function BlocklistPage() {
           onChange={(event) => setOperatorKey(event.target.value)} />
       </div>
 
-      <form className="panel blocklist-form" onSubmit={add} noValidate>
-        <h3>Add an entry</h3>
-        <div className="fields">
-          <div className={fields.type ? 'field invalid' : 'field'}>
-            <label htmlFor="entry-type">Type</label>
-            <select id="entry-type" value={type} disabled={saving} onChange={(e) => setType(e.target.value as EntryType)}>
-              {entryTypes.map((t) => (
-                <option key={t} value={t}>
-                  {typeNames[t]}
-                </option>
-              ))}
-            </select>
-            {fields.type && <span className="error-text">type {fields.type}</span>}
-          </div>
-          <div className={fields.value ? 'field invalid' : 'field'}>
-            <label htmlFor="entry-value">
-              Value<span className="required"> *</span>
-            </label>
-            <input
-              id="entry-value"
-              disabled={saving}
-              value={value}
-              placeholder={placeholders[type]}
-              onChange={(e) => setValue(e.target.value)}
-              aria-invalid={fields.value ? true : undefined}
-              aria-describedby={fields.value ? 'entry-value-error' : undefined}
-            />
-            {fields.value && (
-              <span id="entry-value-error" className="error-text">
-                value {fields.value}
-              </span>
-            )}
-          </div>
-          <div className={fields.reason ? 'field invalid wide' : 'field wide'}>
-            <label htmlFor="entry-reason">
-              Reason<span className="required"> *</span>
-            </label>
-            <input
-              id="entry-reason"
-              disabled={saving}
-              value={reason}
-              placeholder="Why is it blocked? For example: chargeback on 2026-11-08"
-              onChange={(e) => setReason(e.target.value)}
-              aria-invalid={fields.reason ? true : undefined}
-              aria-describedby={fields.reason ? 'entry-reason-error' : undefined}
-            />
-            {fields.reason && (
-              <span id="entry-reason-error" className="error-text">
-                reason {fields.reason}
-              </span>
-            )}
-          </div>
-        </div>
-        {formError && (
-          <ErrorState onRetry={!loadError && Object.keys(fields).length === 0 ? retry : undefined}
-            retryLabel="Refresh entries" pending={pending}>
-            {formError.error}
-          </ErrorState>
-        )}
-        <button type="submit" disabled={saving || !operatorKey.trim()}>
-          {saving ? 'Adding…' : 'Add to blocklist'}
-        </button>
-      </form>
+      <AddEntryForm operatorKey={operatorKey} pending={pending} onRefresh={refreshEntries} onNotice={setNotice} onAdded={refresh} />
 
       <p className="muted small" aria-live="polite">
         {notice}
@@ -170,7 +85,7 @@ function BlocklistPage() {
         <h3>Entries{entries ? ` (${entries.length})` : ''}</h3>
         {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
         {removeError && (
-          <ErrorState onRetry={loadError ? undefined : retry} retryLabel="Refresh entries" pending={pending}>
+          <ErrorState onRetry={refreshEntries} retryLabel="Refresh entries" pending={pending}>
             {removeError}
           </ErrorState>
         )}
@@ -178,45 +93,156 @@ function BlocklistPage() {
         {entries && entries.length === 0 && <EmptyState>The blocklist is empty. Use Add an entry above to block a value.</EmptyState>}
         {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
         {entries && entries.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Type</th>
-                <th scope="col">Value</th>
-                <th scope="col">Reason</th>
-                <th scope="col">Added</th>
-                <th scope="col">
-                  <span className="visually-hidden">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td>{typeNames[entry.type]}</td>
-                  <td>
-                    <code>{entry.value}</code>
-                  </td>
-                  <td>{entry.reason}</td>
-                  <td className="muted small"><Timestamp value={entry.created_at} display={time} /></td>
-                  <td className="num">
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={removing !== null || !operatorKey.trim()}
-                      onClick={() => remove(entry)}
-                      aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <EntriesTable entries={entries} time={time} disabled={removing !== null || !operatorKey.trim()} onRemove={remove} />
         )}
       </section>
     </div>
+  )
+}
+
+function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
+  operatorKey: string
+  pending: boolean
+  onRefresh?: () => void
+  onNotice: (notice: string | null) => void
+  onAdded: () => void
+}) {
+  const [type, setType] = useState<EntryType>('card')
+  const [value, setValue] = useState('')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<ErrorResponse | null>(null)
+  const fields = formError?.fields ?? {}
+
+  const add = async (e: FormEvent) => {
+    e.preventDefault()
+    if (saving || !operatorKey.trim()) return
+    setSaving(true)
+    onNotice(null)
+    const res = await addBlocklistEntry({ type, value, reason }, operatorKey.trim())
+    setSaving(false)
+    if (!res.ok) {
+      setFormError(res.error)
+      return
+    }
+    setFormError(null)
+    setValue('')
+    setReason('')
+    onNotice(`${typeNames[res.value.type]} ${res.value.value} is blocked from the next purchase on.`)
+    onAdded()
+  }
+
+  return (
+    <form className="panel blocklist-form" onSubmit={add} noValidate>
+      <h3>Add an entry</h3>
+      <div className="fields">
+        <div className={fields.type ? 'field invalid' : 'field'}>
+          <label htmlFor="entry-type">Type</label>
+          <select id="entry-type" value={type} disabled={saving} onChange={(e) => setType(e.target.value as EntryType)}>
+            {entryTypes.map((t) => (
+              <option key={t} value={t}>
+                {typeNames[t]}
+              </option>
+            ))}
+          </select>
+          {fields.type && <span className="error-text">type {fields.type}</span>}
+        </div>
+        <RequiredField name="value" label="Value" value={value} error={fields.value} disabled={saving}
+          placeholder={placeholders[type]} onChange={setValue} />
+        <RequiredField name="reason" label="Reason" wide value={reason} error={fields.reason} disabled={saving}
+          placeholder="Why is it blocked? For example: chargeback on 2026-11-08" onChange={setReason} />
+      </div>
+      {formError && (
+        <ErrorState onRetry={Object.keys(fields).length === 0 ? onRefresh : undefined}
+          retryLabel="Refresh entries" pending={pending}>
+          {formError.error}
+        </ErrorState>
+      )}
+      <button type="submit" disabled={saving || !operatorKey.trim()}>
+        {saving ? 'Adding…' : 'Add to blocklist'}
+      </button>
+    </form>
+  )
+}
+
+function RequiredField({ name, label, wide = false, value, error, disabled, placeholder, onChange }: {
+  name: 'value' | 'reason'
+  label: string
+  wide?: boolean
+  value: string
+  error?: string
+  disabled: boolean
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  const id = `entry-${name}`
+  const className = ['field', error && 'invalid', wide && 'wide'].filter(Boolean).join(' ')
+  return (
+    <div className={className}>
+      <label htmlFor={id}>
+        {label}<span className="required"> *</span>
+      </label>
+      <input
+        id={id}
+        disabled={disabled}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error && (
+        <span id={`${id}-error`} className="error-text">
+          {name} {error}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function EntriesTable({ entries, time, disabled, onRemove }: {
+  entries: BlocklistEntry[]
+  time: TimeDisplay
+  disabled: boolean
+  onRemove: (entry: BlocklistEntry) => void
+}) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Value</th>
+          <th scope="col">Reason</th>
+          <th scope="col">Added</th>
+          <th scope="col">
+            <span className="visually-hidden">Actions</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((entry) => (
+          <tr key={entry.id}>
+            <td>{typeNames[entry.type]}</td>
+            <td>
+              <code>{entry.value}</code>
+            </td>
+            <td>{entry.reason}</td>
+            <td className="muted small"><Timestamp value={entry.created_at} display={time} /></td>
+            <td className="num">
+              <button
+                type="button"
+                className="secondary"
+                disabled={disabled}
+                onClick={() => onRemove(entry)}
+                aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}
+              >
+                Remove
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 

@@ -141,6 +141,8 @@ type scoreResponse struct {
 	ModelVersion   *string             `json:"model_version"`
 }
 
+// ServeHTTP scores one purchase and returns its saved decision. A retry of a
+// saved transaction returns the decision saved the first time.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	var req scoreRequest
@@ -158,11 +160,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.respondWithSavedDecision(w, ctx, p) {
 		return
 	}
-
-	rs, err := h.rulesets.Active(ctx)
+	decision, err := h.decide(ctx, p)
 	if err != nil {
 		h.internalError(w, p, err)
 		return
+	}
+	decision.Latency = time.Since(started)
+	h.saveAndRespond(w, ctx, p, decision)
+}
+
+// decide scores a purchase that has no saved decision. The caller sets the
+// latency.
+func (h *Handler) decide(ctx context.Context, p Purchase) (Decision, error) {
+	rs, err := h.rulesets.Active(ctx)
+	if err != nil {
+		return Decision{}, err
 	}
 
 	// A blocklist match blocks the purchase before the rules run.
@@ -173,8 +185,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		IPAddress: p.IPAddress,
 	})
 	if err != nil {
-		h.internalError(w, p, err)
-		return
+		return Decision{}, err
 	}
 
 	// Model inputs are computed for every purchase, blocked ones too, so that
@@ -182,78 +193,111 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	in := p.FeatureInput()
 	history, err := h.purchases.FeatureHistory(ctx, in)
 	if err != nil {
-		h.internalError(w, p, err)
-		return
+		return Decision{}, err
 	}
 	vector := features.Vector(in, history)
 	modelInputs := features.Map(vector)
-
-	// The ruleset's model mode decides whether the model runs and whether its
-	// score can change the outcome. Without a model the rules decide alone.
-	scoreWithModel := h.model != nil && (rs.Model.Mode == scoring.ModelShadow || rs.Model.Mode == scoring.ModelAssist)
-	var modelScore, unblended *float64
-	var modelVersion *string
-	if scoreWithModel {
-		final, own, err := h.modelScore(r.Context(), p, vector)
-		if err != nil {
-			h.internalError(w, p, err)
-			return
-		}
-		version := h.model.Version()
-		modelScore, unblended, modelVersion = &final, &own, &version
+	model, err := h.runModel(ctx, p, rs, vector)
+	if err != nil {
+		return Decision{}, err
 	}
 
 	var result scoring.Result
 	if blocked {
 		result = scoring.Result{Outcome: scoring.OutcomeBlock, FiredRules: []scoring.FiredRule{scoring.BlocklistMatch(string(entry.Type))}}
 	} else {
-		cardUses, err := h.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
+		result, err = h.evaluateRules(ctx, p, rs, model.score)
 		if err != nil {
-			h.internalError(w, p, err)
-			return
-		}
-
-		in := scoring.Input{
-			AmountMinor:           p.AmountMinor,
-			IPCountry:             p.IPCountry,
-			AccountCreatedAt:      p.AccountCreatedAt,
-			EventTime:             p.EventTime,
-			CardPurchasesLastHour: cardUses,
-		}
-		if p.CardCountry != nil {
-			in.CardCountry = *p.CardCountry
-		}
-		if p.DeviceID != nil && rs.Rules[scoring.RuleDeviceCardCount].Enabled {
-			in.DeviceCardsLastHour, err = h.purchases.DeviceCardsLastHour(ctx, *p.DeviceID, p.CardToken, p.EventTime)
-			if err != nil {
-				h.internalError(w, p, err)
-				return
-			}
-		}
-		spike := rs.Rules[scoring.RuleNewDeviceSpike]
-		if p.DeviceID != nil && spike.Enabled && p.AmountMinor >= spike.MinAmountMinor {
-			in.TrustedHistory, err = h.purchases.TrustedHistory(ctx, p, spike.WindowDays)
-			if err != nil {
-				h.internalError(w, p, err)
-				return
-			}
-		}
-		result = scoring.Evaluate(in, rs)
-		if modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
-			result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, rs.Model.Policy(h.policy))
+			return Decision{}, err
 		}
 	}
-	decision := Decision{
+	return Decision{
 		RulesetVersion:      rs.Version,
 		Result:              result,
 		ModelInputs:         modelInputs,
-		ModelScore:          modelScore,
-		ModelScoreUnblended: unblended,
-		ModelVersion:        modelVersion,
-		Latency:             time.Since(started),
+		ModelScore:          model.score,
+		ModelScoreUnblended: model.unblended,
+		ModelVersion:        model.version,
 		FeatureHistory:      history,
+	}, nil
+}
+
+// modelResult is the model's part of a decision. Its fields are nil when the
+// model did not run.
+type modelResult struct {
+	score, unblended *float64
+	version          *string
+}
+
+// runModel scores the purchase with the model. The ruleset's model mode
+// decides whether the model runs; whether its score can change the outcome is
+// decided in evaluateRules. Without a model the rules decide alone.
+func (h *Handler) runModel(ctx context.Context, p Purchase, rs scoring.Ruleset, vector []float64) (modelResult, error) {
+	scoreWithModel := h.model != nil && (rs.Model.Mode == scoring.ModelShadow || rs.Model.Mode == scoring.ModelAssist)
+	if !scoreWithModel {
+		return modelResult{}, nil
 	}
-	_, err = h.purchases.Save(ctx, p, decision)
+	final, own, err := h.modelScore(ctx, p, vector)
+	if err != nil {
+		return modelResult{}, err
+	}
+	version := h.model.Version()
+	return modelResult{score: &final, unblended: &own, version: &version}, nil
+}
+
+// evaluateRules runs the rules on a purchase that is not blocklisted. In
+// assist mode the model score then adjusts the outcome. modelScore is nil when
+// the model did not run.
+func (h *Handler) evaluateRules(ctx context.Context, p Purchase, rs scoring.Ruleset, modelScore *float64) (scoring.Result, error) {
+	in, err := h.ruleInput(ctx, p, rs)
+	if err != nil {
+		return scoring.Result{}, err
+	}
+	result := scoring.Evaluate(in, rs)
+	if modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
+		result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, rs.Model.Policy(h.policy))
+	}
+	return result, nil
+}
+
+// ruleInput builds the rule input. It reads only the purchase history that
+// the enabled rules need.
+func (h *Handler) ruleInput(ctx context.Context, p Purchase, rs scoring.Ruleset) (scoring.Input, error) {
+	cardUses, err := h.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
+	if err != nil {
+		return scoring.Input{}, err
+	}
+
+	in := scoring.Input{
+		AmountMinor:           p.AmountMinor,
+		IPCountry:             p.IPCountry,
+		AccountCreatedAt:      p.AccountCreatedAt,
+		EventTime:             p.EventTime,
+		CardPurchasesLastHour: cardUses,
+	}
+	if p.CardCountry != nil {
+		in.CardCountry = *p.CardCountry
+	}
+	if p.DeviceID != nil && rs.Rules[scoring.RuleDeviceCardCount].Enabled {
+		in.DeviceCardsLastHour, err = h.purchases.DeviceCardsLastHour(ctx, *p.DeviceID, p.CardToken, p.EventTime)
+		if err != nil {
+			return scoring.Input{}, err
+		}
+	}
+	spike := rs.Rules[scoring.RuleNewDeviceSpike]
+	if p.DeviceID != nil && spike.Enabled && p.AmountMinor >= spike.MinAmountMinor {
+		in.TrustedHistory, err = h.purchases.TrustedHistory(ctx, p, spike.WindowDays)
+		if err != nil {
+			return scoring.Input{}, err
+		}
+	}
+	return in, nil
+}
+
+// saveAndRespond saves the decision and writes the response. When another
+// request saved the same transaction first, it responds with that decision.
+func (h *Handler) saveAndRespond(w http.ResponseWriter, ctx context.Context, p Purchase, decision Decision) {
+	_, err := h.purchases.Save(ctx, p, decision)
 	if errors.Is(err, ErrDuplicateTransaction) {
 		// Save has rolled back, so the lookup can see the committed winner.
 		if !h.respondWithSavedDecision(w, ctx, p) {
@@ -265,7 +309,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, p, err)
 		return
 	}
-
 	writeScoreResponse(w, p.TransactionID, decision)
 }
 
@@ -464,23 +507,38 @@ func (req scoreRequest) purchase(now time.Time) (Purchase, map[string]string) {
 	if p.BillingDistance != nil && *p.BillingDistance < 0 {
 		fields["billing_distance"] = "must not be negative"
 	}
-	if ip := optional(req.IPAddress); ip != nil {
-		addr, err := netip.ParseAddr(*ip)
-		if err != nil {
-			fields["ip_address"] = "must be an IPv4 or IPv6 address"
-		} else {
-			addr = addr.Unmap()
-			p.IPAddress = &addr
-		}
-	}
-	if req.AccountCreatedAt != nil {
-		created := req.AccountCreatedAt.UTC()
-		if !req.EventTime.IsZero() && created.After(p.EventTime) {
-			fields["account_created_at"] = "must not be after event_time"
-		}
-		p.AccountCreatedAt = &created
-	}
+	p.IPAddress = ipAddress(req.IPAddress, fields)
+	p.AccountCreatedAt = req.accountCreatedAt(p.EventTime, fields)
 	return p, fields
+}
+
+// ipAddress parses the optional IP address and records a problem in fields.
+// An IPv4 address written in IPv6 form is returned as IPv4.
+func ipAddress(s *string, fields map[string]string) *netip.Addr {
+	ip := optional(s)
+	if ip == nil {
+		return nil
+	}
+	addr, err := netip.ParseAddr(*ip)
+	if err != nil {
+		fields["ip_address"] = "must be an IPv4 or IPv6 address"
+		return nil
+	}
+	addr = addr.Unmap()
+	return &addr
+}
+
+// accountCreatedAt returns the optional account creation time in UTC and
+// records a problem in fields when it is after the event time.
+func (req scoreRequest) accountCreatedAt(eventTime time.Time, fields map[string]string) *time.Time {
+	if req.AccountCreatedAt == nil {
+		return nil
+	}
+	created := req.AccountCreatedAt.UTC()
+	if !req.EventTime.IsZero() && created.After(eventTime) {
+		fields["account_created_at"] = "must not be after event_time"
+	}
+	return &created
 }
 
 func optional(s *string) *string {

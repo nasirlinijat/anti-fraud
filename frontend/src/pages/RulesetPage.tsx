@@ -62,7 +62,9 @@ function toDraft(ruleset: Ruleset): RulesetDraft {
   }
 }
 
-function integer(value: string, field: string, min: bigint, max: bigint, errors: FieldErrors): bigint {
+type IntegerRange = { min: bigint; max: bigint }
+
+function integer(value: string, field: string, { min, max }: IntegerRange, errors: FieldErrors): bigint {
   const text = value.trim()
   if (/^\d+$/.test(text)) {
     const parsed = BigInt(text)
@@ -77,9 +79,10 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
   if ([...note].length > 500) {
     errors.note = 'Enter at most 500 characters.'
   }
+  const threshold = { min: 1n, max: maxInt32 }
   const config: RulesetConfig = {
-    review_threshold: Number(integer(draft.review_threshold, 'review_threshold', 1n, maxInt32, errors)),
-    block_threshold: Number(integer(draft.block_threshold, 'block_threshold', 1n, maxInt32, errors)),
+    review_threshold: Number(integer(draft.review_threshold, 'review_threshold', threshold, errors)),
+    block_threshold: Number(integer(draft.block_threshold, 'block_threshold', threshold, errors)),
     note,
     rules: {},
   }
@@ -88,13 +91,13 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
     const minLimit = name === 'device_card_count' || name === 'new_device_spike' ? 1n : 0n
     const settings: RuleSettings = {
       enabled: rule.enabled,
-      weight: Number(integer(rule.weight, `${field}.weight`, 0n, maxInt32, errors)),
-      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, minLimit, maxInt64, errors),
+      weight: Number(integer(rule.weight, `${field}.weight`, { min: 0n, max: maxInt32 }, errors)),
+      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, { min: minLimit, max: maxInt64 }, errors),
     }
     if (name === 'new_device_spike') {
-      settings.window_days = Number(integer(rule.window_days ?? '', `${field}.window_days`, 1n, 3650n, errors))
-      settings.min_amount_minor = integer(rule.min_amount_minor ?? '', `${field}.min_amount_minor`, 1n, maxInt64, errors)
-      settings.amount_multiplier = Number(integer(rule.amount_multiplier ?? '', `${field}.amount_multiplier`, 2n, maxInt32, errors))
+      settings.window_days = Number(integer(rule.window_days ?? '', `${field}.window_days`, { min: 1n, max: 3650n }, errors))
+      settings.min_amount_minor = integer(rule.min_amount_minor ?? '', `${field}.min_amount_minor`, { min: 1n, max: maxInt64 }, errors)
+      settings.amount_multiplier = Number(integer(rule.amount_multiplier ?? '', `${field}.amount_multiplier`, { min: 2n, max: maxInt32 }, errors))
     }
     config.rules[name] = settings
   }
@@ -136,58 +139,23 @@ function RulesetForm({ initial, history, time, onPublished }: {
 }) {
   const [version, setVersion] = useState(initial.version)
   const [draft, setDraft] = useState(() => toDraft(initial))
-  const [selectedVersion, setSelectedVersion] = useState(initial.version)
-  const [selectedRuleset, setSelectedRuleset] = useState<Ruleset | null>(initial)
-  const [selectedError, setSelectedError] = useState<string | null>(null)
   const [operatorKey, setOperatorKey] = useState('')
   const [saving, setSaving] = useState(false)
-  const [checkingActive, setCheckingActive] = useState(false)
-  const [checkError, setCheckError] = useState<string | null>(null)
   const [error, setError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState('')
-  const fields = error?.fields ?? {}
-  const readOnly = selectedVersion !== version
-  const displayDraft = readOnly && selectedRuleset ? toDraft(selectedRuleset) : draft
-
-  const loadSelected = useCallback(
-    (signal: AbortSignal) => getRuleset(selectedVersion, signal),
-    [selectedVersion],
-  )
-  const { retry: retrySelected, pending: loadingSelected } = usePolling(
-    readOnly && selectedRuleset?.version !== selectedVersion ? loadSelected : null,
-    {
-      onSuccess: (loaded) => {
-        setSelectedRuleset(loaded)
-        setSelectedError(null)
-      },
-      onError: (failure) => {
-        setSelectedError(failure instanceof Error ? failure.message : 'Could not load this ruleset version.')
-      },
-    },
-  )
-
-  usePolling(checkingActive ? getActiveRuleset : null, {
-    onSuccess: (active) => {
-      setVersion(active.version)
-      setError(null)
-      setCheckError(null)
-      setNotice(`Active version is ${active.version}. Your draft is still available.`)
-      setCheckingActive(false)
-    },
-    onError: (failure) => {
-      setCheckError(failure instanceof Error ? failure.message : 'Could not check the active version.')
-      setCheckingActive(false)
-    },
+  const selected = useSelectedVersion(initial, version)
+  const activeCheck = useActiveVersionCheck((active) => {
+    setVersion(active.version)
+    setError(null)
+    setNotice(`Active version is ${active.version}. Your draft is still available.`)
   })
+  const { readOnly } = selected
+  // A read-only version shows no validation messages: they belong to the draft.
+  const shownErrors: FieldErrors = readOnly ? {} : error?.fields ?? {}
+  const displayDraft = readOnly && selected.ruleset ? toDraft(selected.ruleset) : draft
 
-  const selectVersion = (target: number) => {
-    setSelectedError(null)
-    setSelectedVersion(target)
-    if (target === version) {
-      setSelectedRuleset(null)
-    } else if (selectedRuleset?.version !== target) {
-      setSelectedRuleset(null)
-    }
+  const updateDraft = (change: Partial<RulesetDraft>) => {
+    setDraft((current) => ({ ...current, ...change }))
   }
 
   const updateRule = (name: string, rule: RuleDraft) => {
@@ -196,9 +164,9 @@ function RulesetForm({ initial, history, time, onPublished }: {
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (saving || checkingActive || readOnly || !operatorKey.trim()) return
+    if (saving || activeCheck.checking || readOnly || !operatorKey.trim()) return
     setNotice('')
-    setCheckError(null)
+    activeCheck.clearError()
     const errors: FieldErrors = {}
     const config = toConfig(draft, errors)
     if (Object.keys(errors).length) {
@@ -215,8 +183,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
     }
     setDraft(toDraft(result.value))
     setVersion(result.value.version)
-    setSelectedVersion(result.value.version)
-    setSelectedRuleset(result.value)
+    selected.show(result.value)
     setNotice(`Published ruleset version ${result.value.version}.`)
     onPublished(result.value)
   }
@@ -225,157 +192,287 @@ function RulesetForm({ initial, history, time, onPublished }: {
     <>
       <p>
         <strong>Active version {version}</strong>
-        {readOnly && <> — viewing version {selectedVersion} (read-only)</>}
+        {readOnly && <> — viewing version {selected.version} (read-only)</>}
       </p>
       {readOnly && (
         <p>
-          <button type="button" className="secondary" onClick={() => selectVersion(version)}>
+          <button type="button" className="secondary" onClick={() => selected.select(version)}>
             Edit active version ({version})
           </button>
         </p>
       )}
-      {readOnly && loadingSelected && <LoadingSkeleton shape="form" label={`Loading version ${selectedVersion}…`} />}
-      {readOnly && selectedError && (
-        <ErrorState onRetry={retrySelected} pending={loadingSelected}>{selectedError}</ErrorState>
+      {readOnly && selected.loading && <LoadingSkeleton shape="form" label={`Loading version ${selected.version}…`} />}
+      {readOnly && selected.error && (
+        <ErrorState onRetry={selected.retry} pending={selected.loading}>{selected.error}</ErrorState>
       )}
-      {(!readOnly || selectedRuleset !== null) && (
+      {(!readOnly || selected.ruleset !== null) && (
         <form onSubmit={save} noValidate>
-          <fieldset disabled={saving || readOnly}>
-            <legend>Decision thresholds</legend>
-            <div className="fields">
-              <IntegerField
-                name="review_threshold"
-                label="Review threshold (points)"
-                value={displayDraft.review_threshold}
-                error={readOnly ? undefined : fields.review_threshold}
-                onChange={(review_threshold) => setDraft((current) => ({ ...current, review_threshold }))}
-              />
-              <IntegerField
-                name="block_threshold"
-                label="Block threshold (points)"
-                value={displayDraft.block_threshold}
-                error={readOnly ? undefined : fields.block_threshold}
-                onChange={(block_threshold) => setDraft((current) => ({ ...current, block_threshold }))}
-              />
-            </div>
-          </fieldset>
-
-          {ruleDetails.map((detail) => {
-            const { name, label } = detail
-            const limitLabel = 'limit' in detail ? detail.limit : undefined
-            const savedRule = displayDraft.rules[name]
-            const preset = 'preset' in detail ? detail.preset : undefined
-            const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
-            const field = `rules.${name}`
-            return (
-              <fieldset key={name} disabled={saving || readOnly}>
-                <legend>{label}</legend>
-                <label className="ruleset-enabled">
-                  <input
-                    type="checkbox"
-                    checked={rule.enabled}
-                    onChange={(event) => updateRule(name, { ...rule, enabled: event.target.checked })}
-                    aria-label={`Enable ${label.toLowerCase()}`}
-                    aria-invalid={!readOnly && fields[`${field}.enabled`] ? true : undefined}
-                    aria-describedby={!readOnly && fields[`${field}.enabled`] ? `${field}.enabled-error` : undefined}
-                  />
-                  Enabled
-                </label>
-                {!readOnly && fields[`${field}.enabled`] && (
-                  <span id={`${field}.enabled-error`} className="error-text">{fields[`${field}.enabled`]}</span>
-                )}
-                <div className="fields">
-                  <IntegerField
-                    name={`${field}.weight`}
-                    label="Weight (points)"
-                    value={rule.weight}
-                    error={readOnly ? undefined : fields[`${field}.weight`]}
-                    onChange={(weight) => updateRule(name, { ...rule, weight })}
-                    disabled={!savedRule && !preset}
-                  />
-                  {limitLabel && (
-                    <IntegerField
-                      name={`${field}.limit`}
-                      label={limitLabel}
-                      value={rule.limit ?? ''}
-                      error={readOnly ? undefined : fields[`${field}.limit`]}
-                      onChange={(limit) => updateRule(name, { ...rule, limit })}
-                      disabled={!savedRule && !preset}
-                    />
-                  )}
-                  {name === 'new_device_spike' && (
-                    <>
-                      <IntegerField
-                        name={`${field}.window_days`}
-                        label="Trusted history window (days)"
-                        value={rule.window_days ?? ''}
-                        error={readOnly ? undefined : fields[`${field}.window_days`]}
-                        onChange={(window_days) => updateRule(name, { ...rule, window_days })}
-                      />
-                      <IntegerField
-                        name={`${field}.min_amount_minor`}
-                        label="Minimum purchase amount (minor units)"
-                        value={rule.min_amount_minor ?? ''}
-                        error={readOnly ? undefined : fields[`${field}.min_amount_minor`]}
-                        onChange={(min_amount_minor) => updateRule(name, { ...rule, min_amount_minor })}
-                      />
-                      <IntegerField
-                        name={`${field}.amount_multiplier`}
-                        label="Minimum multiple of the trusted average"
-                        value={rule.amount_multiplier ?? ''}
-                        error={readOnly ? undefined : fields[`${field}.amount_multiplier`]}
-                        onChange={(amount_multiplier) => updateRule(name, { ...rule, amount_multiplier })}
-                      />
-                    </>
-                  )}
-                </div>
-                {!readOnly && fields[field] && <p className="error-text">{fields[field]}</p>}
-              </fieldset>
-            )
-          })}
+          <ThresholdFields draft={displayDraft} errors={shownErrors} disabled={saving || readOnly} onChange={updateDraft} />
+          {ruleDetails.map((detail) => (
+            <RuleFieldset
+              key={detail.name}
+              detail={detail}
+              savedRule={displayDraft.rules[detail.name]}
+              errors={shownErrors}
+              disabled={saving || readOnly}
+              onChange={(rule) => updateRule(detail.name, rule)}
+            />
+          ))}
 
           {!readOnly && (
-            <fieldset disabled={saving}>
-              <legend>Version note</legend>
-              <div className={fields.note ? 'field wide invalid' : 'field wide'}>
-                <label htmlFor="note">Why this version was made (optional)</label>
-                <input
-                  id="note"
-                  name="note"
-                  type="text"
-                  maxLength={500}
-                  value={draft.note}
-                  onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
-                  aria-invalid={fields.note ? true : undefined}
-                  aria-describedby={fields.note ? 'note-error' : undefined}
-                />
-                {fields.note && <span id="note-error" className="error-text">{fields.note}</span>}
-              </div>
-            </fieldset>
-          )}
-
-          {!readOnly && error && (
-            <ErrorState retryLabel="Check active version" pending={checkingActive}
-              onRetry={Object.keys(fields).length === 0 ? () => setCheckingActive(true) : undefined}>
-              {error.error}
-              {fields.rules && <p>{fields.rules}</p>}
-              {checkError && <p>Could not check the active version. {checkError}</p>}
-            </ErrorState>
-          )}
-          {!readOnly && (
-            <div className="field">
-              <label htmlFor="ruleset-operator-key">Operator key</label>
-              <input id="ruleset-operator-key" type="password" autoComplete="off" value={operatorKey}
-                disabled={saving} onChange={(event) => setOperatorKey(event.target.value)} />
-            </div>
-          )}
-          {!readOnly && (
-            <button type="submit" disabled={saving || checkingActive || !operatorKey.trim()}>{saving ? 'Publishing…' : 'Publish new version'}</button>
+            <>
+              <VersionNoteField note={draft.note} error={shownErrors.note} disabled={saving} onChange={(note) => updateDraft({ note })} />
+              <PublishControls error={error} checkError={activeCheck.error} checkingActive={activeCheck.checking} saving={saving}
+                operatorKey={operatorKey} onOperatorKey={setOperatorKey} onCheckActive={activeCheck.start} />
+            </>
           )}
         </form>
       )}
       <p className="muted" role="status">{notice}</p>
 
+      <VersionHistory history={history} time={time} activeVersion={version} selectedVersion={selected.version} onSelect={selected.select} />
+    </>
+  )
+}
+
+// The version shown in the form is the active one, which can be edited, or an
+// earlier one, which is loaded on demand and shown read-only.
+function useSelectedVersion(initial: Ruleset, activeVersion: number) {
+  const [version, setVersion] = useState(initial.version)
+  const [ruleset, setRuleset] = useState<Ruleset | null>(initial)
+  const [error, setError] = useState<string | null>(null)
+  const readOnly = version !== activeVersion
+
+  const load = useCallback((signal: AbortSignal) => getRuleset(version, signal), [version])
+  const { retry, pending: loading } = usePolling(readOnly && ruleset?.version !== version ? load : null, {
+    onSuccess: (loaded) => {
+      setRuleset(loaded)
+      setError(null)
+    },
+    onError: (failure) => {
+      setError(failure instanceof Error ? failure.message : 'Could not load this ruleset version.')
+    },
+  })
+
+  const select = (target: number) => {
+    setError(null)
+    setVersion(target)
+    if (target === activeVersion || ruleset?.version !== target) setRuleset(null)
+  }
+
+  const show = (published: Ruleset) => {
+    setVersion(published.version)
+    setRuleset(published)
+  }
+
+  return { version, ruleset, error, readOnly, loading, retry, select, show }
+}
+
+// Reads the active version once each time start is called. It backs the
+// "Check active version" action shown after a publish is refused.
+function useActiveVersionCheck(onActive: (active: Ruleset) => void) {
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  usePolling(checking ? getActiveRuleset : null, {
+    onSuccess: (active) => {
+      onActive(active)
+      setError(null)
+      setChecking(false)
+    },
+    onError: (failure) => {
+      setError(failure instanceof Error ? failure.message : 'Could not check the active version.')
+      setChecking(false)
+    },
+  })
+
+  return { checking, error, start: () => setChecking(true), clearError: () => setError(null) }
+}
+
+function ThresholdFields({ draft, errors, disabled, onChange }: {
+  draft: RulesetDraft
+  errors: FieldErrors
+  disabled: boolean
+  onChange: (change: Partial<RulesetDraft>) => void
+}) {
+  return (
+    <fieldset disabled={disabled}>
+      <legend>Decision thresholds</legend>
+      <div className="fields">
+        <IntegerField
+          name="review_threshold"
+          label="Review threshold (points)"
+          value={draft.review_threshold}
+          error={errors.review_threshold}
+          onChange={(review_threshold) => onChange({ review_threshold })}
+        />
+        <IntegerField
+          name="block_threshold"
+          label="Block threshold (points)"
+          value={draft.block_threshold}
+          error={errors.block_threshold}
+          onChange={(block_threshold) => onChange({ block_threshold })}
+        />
+      </div>
+    </fieldset>
+  )
+}
+
+function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
+  detail: (typeof ruleDetails)[number]
+  savedRule: RuleDraft | undefined
+  errors: FieldErrors
+  disabled: boolean
+  onChange: (rule: RuleDraft) => void
+}) {
+  const { name, label } = detail
+  const limitLabel = 'limit' in detail ? detail.limit : undefined
+  const preset = 'preset' in detail ? detail.preset : undefined
+  const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
+  const field = `rules.${name}`
+  const enabledError = errors[`${field}.enabled`]
+  return (
+    <fieldset disabled={disabled}>
+      <legend>{label}</legend>
+      <label className="ruleset-enabled">
+        <input
+          type="checkbox"
+          checked={rule.enabled}
+          onChange={(event) => onChange({ ...rule, enabled: event.target.checked })}
+          aria-label={`Enable ${label.toLowerCase()}`}
+          aria-invalid={enabledError ? true : undefined}
+          aria-describedby={enabledError ? `${field}.enabled-error` : undefined}
+        />
+        Enabled
+      </label>
+      {enabledError && (
+        <span id={`${field}.enabled-error`} className="error-text">{enabledError}</span>
+      )}
+      <div className="fields">
+        <IntegerField
+          name={`${field}.weight`}
+          label="Weight (points)"
+          value={rule.weight}
+          error={errors[`${field}.weight`]}
+          onChange={(weight) => onChange({ ...rule, weight })}
+          disabled={!savedRule && !preset}
+        />
+        {limitLabel && (
+          <IntegerField
+            name={`${field}.limit`}
+            label={limitLabel}
+            value={rule.limit ?? ''}
+            error={errors[`${field}.limit`]}
+            onChange={(limit) => onChange({ ...rule, limit })}
+            disabled={!savedRule && !preset}
+          />
+        )}
+        {name === 'new_device_spike' && <SpikeFields field={field} rule={rule} errors={errors} onChange={onChange} />}
+      </div>
+      {errors[field] && <p className="error-text">{errors[field]}</p>}
+    </fieldset>
+  )
+}
+
+function SpikeFields({ field, rule, errors, onChange }: {
+  field: string
+  rule: RuleDraft
+  errors: FieldErrors
+  onChange: (rule: RuleDraft) => void
+}) {
+  return (
+    <>
+      <IntegerField
+        name={`${field}.window_days`}
+        label="Trusted history window (days)"
+        value={rule.window_days ?? ''}
+        error={errors[`${field}.window_days`]}
+        onChange={(window_days) => onChange({ ...rule, window_days })}
+      />
+      <IntegerField
+        name={`${field}.min_amount_minor`}
+        label="Minimum purchase amount (minor units)"
+        value={rule.min_amount_minor ?? ''}
+        error={errors[`${field}.min_amount_minor`]}
+        onChange={(min_amount_minor) => onChange({ ...rule, min_amount_minor })}
+      />
+      <IntegerField
+        name={`${field}.amount_multiplier`}
+        label="Minimum multiple of the trusted average"
+        value={rule.amount_multiplier ?? ''}
+        error={errors[`${field}.amount_multiplier`]}
+        onChange={(amount_multiplier) => onChange({ ...rule, amount_multiplier })}
+      />
+    </>
+  )
+}
+
+function VersionNoteField({ note, error, disabled, onChange }: {
+  note: string
+  error?: string
+  disabled: boolean
+  onChange: (note: string) => void
+}) {
+  return (
+    <fieldset disabled={disabled}>
+      <legend>Version note</legend>
+      <div className={error ? 'field wide invalid' : 'field wide'}>
+        <label htmlFor="note">Why this version was made (optional)</label>
+        <input
+          id="note"
+          name="note"
+          type="text"
+          maxLength={500}
+          value={note}
+          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'note-error' : undefined}
+        />
+        {error && <span id="note-error" className="error-text">{error}</span>}
+      </div>
+    </fieldset>
+  )
+}
+
+function PublishControls({ error, checkError, checkingActive, saving, operatorKey, onOperatorKey, onCheckActive }: {
+  error: ErrorResponse | null
+  checkError: string | null
+  checkingActive: boolean
+  saving: boolean
+  operatorKey: string
+  onOperatorKey: (key: string) => void
+  onCheckActive: () => void
+}) {
+  const fields = error?.fields ?? {}
+  return (
+    <>
+      {error && (
+        <ErrorState retryLabel="Check active version" pending={checkingActive}
+          onRetry={Object.keys(fields).length === 0 ? onCheckActive : undefined}>
+          {error.error}
+          {fields.rules && <p>{fields.rules}</p>}
+          {checkError && <p>Could not check the active version. {checkError}</p>}
+        </ErrorState>
+      )}
+      <div className="field">
+        <label htmlFor="ruleset-operator-key">Operator key</label>
+        <input id="ruleset-operator-key" type="password" autoComplete="off" value={operatorKey}
+          disabled={saving} onChange={(event) => onOperatorKey(event.target.value)} />
+      </div>
+      <button type="submit" disabled={saving || checkingActive || !operatorKey.trim()}>{saving ? 'Publishing…' : 'Publish new version'}</button>
+    </>
+  )
+}
+
+function VersionHistory({ history, time, activeVersion, selectedVersion, onSelect }: {
+  history: RulesetSummary[]
+  time: TimeDisplay
+  activeVersion: number
+  selectedVersion: number
+  onSelect: (version: number) => void
+}) {
+  return (
+    <>
       <h3>Version history</h3>
       <TimeDisplayToggle display={time} />
       <table>
@@ -394,9 +491,9 @@ function RulesetForm({ initial, history, time, onPublished }: {
                   type="button"
                   className="review-open"
                   aria-current={item.version === selectedVersion ? 'true' : undefined}
-                  onClick={() => selectVersion(item.version)}
+                  onClick={() => onSelect(item.version)}
                 >
-                  Version {item.version}{item.version === version ? ' (active)' : ''}
+                  Version {item.version}{item.version === activeVersion ? ' (active)' : ''}
                 </button>
               </th>
               <td><Timestamp value={item.created_at} display={time} /></td>

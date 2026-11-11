@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import time
+from collections import namedtuple
 from pathlib import Path
 
 import joblib
@@ -169,7 +170,7 @@ def first_fraud_only(data):
     return ~((data["is_fraud"] == 1) & (earlier_fraud > 0))
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
     parser.add_argument("--out", default="output")
@@ -197,152 +198,245 @@ def main():
         help="share of flagged purchases that must be fraud on validation; when set, flag_at is the "
              "lowest threshold that reaches it instead of using --review-rate or --review-cost",
     )
-    args = parser.parse_args()
-    out_dir = Path(args.out)
-    out_dir.mkdir(exist_ok=True)
+    return parser
 
+
+def split_days(args):
+    """The IEEE-CIS split days, each replaced by its command-line range when
+    one is given."""
     days = dict(features.SPLIT_DAYS)
     for name, value in [("train", args.train_days), ("validation", args.validation_days), ("test", args.test_days)]:
         if value:
             first, last = (int(part) for part in value.split("-"))
             days[name] = (first, last)
+    return days
 
-    started = time.time()
+
+def load_data(parser, args):
     if args.inputs:
         if not args.labels:
             parser.error("--inputs needs --labels")
         data, unlabelled = features.load_export(args.inputs, args.labels, args.day_zero)
         print(f"read {len(data)} exported purchases with labels; {unlabelled} without a label left out")
-    else:
-        data = features.build(features.load(args.csv))
-    keep = first_fraud_only(data)
-    train, validation, test = features.split(data, days)
-    print(f"features built in {time.time() - started:.0f}s: train {len(train)}, validation {len(validation)}, test {len(test)}")
+        return data
+    return features.build(features.load(args.csv))
 
-    x_train, y_train = train[features.FEATURES], train["is_fraud"].to_numpy()
-    x_val, y_val = validation[features.FEATURES], validation["is_fraud"].to_numpy()
-    x_test, y_test = test[features.FEATURES], test["is_fraud"].to_numpy()
-    test_keep = keep.loc[test.index].to_numpy()
-    val_amount, test_amount = validation["amount"].to_numpy(), test["amount"].to_numpy()
 
+class Sets:
+    """The training, validation and test days of the data, with the model
+    inputs, labels and amounts that the training steps read from them."""
+
+    def __init__(self, data, days):
+        self.data, self.days = data, days
+        self.train, self.validation, self.test = features.split(data, days)
+        self.x_train, self.y_train = self.train[features.FEATURES], self.train["is_fraud"].to_numpy()
+        self.x_val, self.y_val = self.validation[features.FEATURES], self.validation["is_fraud"].to_numpy()
+        self.x_test, self.y_test = self.test[features.FEATURES], self.test["is_fraud"].to_numpy()
+        self.val_amount, self.test_amount = self.validation["amount"].to_numpy(), self.test["amount"].to_numpy()
+
+
+class FirstFraudSets(Sets):
+    """Sets with the masks that leave out every fraud after a customer's
+    first, and the mask of test purchases that are a player's first."""
+
+    def __init__(self, data, days):
+        super().__init__(data, days)
+        keep = first_fraud_only(data)
+        self.train_keep = keep.loc[self.train.index].to_numpy()
+        self.val_keep = keep.loc[self.validation.index].to_numpy()
+        self.test_keep = keep.loc[self.test.index].to_numpy()
+        self.first_purchase = self.test["player_txn_count"].to_numpy() == 0
+
+
+# One model's scores on the validation days and on the test days.
+Scores = namedtuple("Scores", ["val", "test"])
+
+
+def evaluate_first_fraud(sets, score):
+    """The test result without the frauds after each customer's first."""
+    keep = sets.test_keep
+    return evaluate(sets.y_test[keep], score[keep], sets.test_amount[keep])
+
+
+def baseline_report(make, sets):
+    baseline = make().fit(sets.x_train, sets.y_train)
+    baseline_test = baseline.predict_proba(sets.x_test)[:, 1]
+    return {
+        "validation": evaluate(sets.y_val, baseline.predict_proba(sets.x_val)[:, 1], sets.val_amount),
+        "test": evaluate(sets.y_test, baseline_test, sets.test_amount),
+        "test_first_fraud_only": evaluate_first_fraud(sets, baseline_test),
+    }
+
+
+def new_report(args, sets):
+    """Starts the training report with the data it describes and the baselines."""
     report = {
         "features": features.FEATURES,
         "data": "service export" if args.inputs else "IEEE-CIS",
-        "split_days": {name: f"{first}-{last}" for name, (first, last) in days.items()},
+        "split_days": {name: f"{first}-{last}" for name, (first, last) in sets.days.items()},
     }
-
     for name, make in [("logistic_regression", baseline_model), ("logistic_regression_all_numeric", all_numeric_baseline_model)]:
-        baseline = make().fit(x_train, y_train)
-        baseline_test = baseline.predict_proba(x_test)[:, 1]
-        report[name] = {
-            "validation": evaluate(y_val, baseline.predict_proba(x_val)[:, 1], val_amount),
-            "test": evaluate(y_test, baseline_test, test_amount),
-            "test_first_fraud_only": evaluate(y_test[test_keep], baseline_test[test_keep], test_amount[test_keep]),
-        }
+        report[name] = baseline_report(make, sets)
+    return report
 
-    # The main model is the average of several models trained with different
-    # random seeds; averaging smooths out each model's chance splits.
-    # Every finished model is saved, so an interrupted run continues after it.
-    checkpoints = out_dir / "checkpoints" / args.version
-    models = [
-        fit_lightgbm(seed, x_train, y_train, x_val, y_val, checkpoints / f"main-seed{seed}.joblib")
-        for seed in AVERAGE_SEEDS[: args.models]
+
+def fit_main_models(sets, checkpoints, count):
+    """The main model is the average of several models trained with different
+    random seeds; averaging smooths out each model's chance splits. Every
+    finished model is saved, so an interrupted run continues after it."""
+    return [
+        fit_lightgbm(seed, sets.x_train, sets.y_train, sets.x_val, sets.y_val, checkpoints / f"main-seed{seed}.joblib")
+        for seed in AVERAGE_SEEDS[:count]
     ]
-    single_test = models[0].predict_proba(x_test)[:, 1]
-    model_val = export.average_proba(models, x_val)
-    model_test = export.average_proba(models, x_test)
+
+
+def lightgbm_report(models, sets, scores):
+    single_test = models[0].predict_proba(sets.x_test)[:, 1]
     importance = np.mean([m.booster_.feature_importance(importance_type="gain") for m in models], axis=0)
-    report["lightgbm"] = {
+    return {
         "models": len(models),
         "best_iterations": [int(m.best_iteration_) for m in models],
-        "single_model_test": evaluate(y_test, single_test, test_amount),
-        "validation": evaluate(y_val, model_val, val_amount),
-        "test": evaluate(y_test, model_test, test_amount),
-        "test_first_fraud_only": evaluate(y_test[test_keep], model_test[test_keep], test_amount[test_keep]),
+        "single_model_test": evaluate(sets.y_test, single_test, sets.test_amount),
+        "validation": evaluate(sets.y_val, scores.val, sets.val_amount),
+        "test": evaluate(sets.y_test, scores.test, sets.test_amount),
+        "test_first_fraud_only": evaluate_first_fraud(sets, scores.test),
         "feature_importance_gain": {
             name: round(float(value), 1)
             for name, value in sorted(zip(features.FEATURES, importance), key=lambda item: -item[1])
         },
     }
 
-    thresholds = export.choose_thresholds(
-        y_val, model_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost, args.target_precision
+
+def thresholds_from(args, sets, score_val):
+    return export.choose_thresholds(
+        sets.y_val, score_val, args.review_rate, args.max_missed_fraud, sets.val_amount, args.review_cost, args.target_precision
     )
-    report["policy"] = {
+
+
+def policy_with_effects(sets, thresholds, scores):
+    return {
         **thresholds,
-        "validation_effect": export.policy_effect(y_val, model_val, thresholds, val_amount),
-        "test_effect": export.policy_effect(y_test, model_test, thresholds, test_amount),
+        "validation_effect": export.policy_effect(sets.y_val, scores.val, thresholds, sets.val_amount),
+        "test_effect": export.policy_effect(sets.y_test, scores.test, thresholds, sets.test_amount),
     }
 
-    (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
-    golden = export.synthetic_rows(x_train, 2000, SEED)
-    model_path, model_dump = export.export(models, features.FEATURES, args.version, args.models_dir, golden, report)
 
-    # A second model learns only each customer's first fraud: IEEE marks a
-    # customer's later purchases as fraud after a chargeback, and those are
-    # easy to recognize but not new fraud.
-    keep_train = keep.loc[train.index].to_numpy()
-    keep_val = keep.loc[validation.index].to_numpy()
-    first = fit_lightgbm(
-        SEED, x_train[keep_train], y_train[keep_train], x_val[keep_val], y_val[keep_val], checkpoints / "first.joblib"
+def fit_first_fraud_model(sets, checkpoint):
+    """A second model learns only each customer's first fraud: IEEE marks a
+    customer's later purchases as fraud after a chargeback, and those are
+    easy to recognize but not new fraud."""
+    train_keep, val_keep = sets.train_keep, sets.val_keep
+    return fit_lightgbm(
+        SEED, sets.x_train[train_keep], sets.y_train[train_keep], sets.x_val[val_keep], sets.y_val[val_keep], checkpoint
     )
-    first_val = first.predict_proba(x_val)[:, 1]
-    first_test = first.predict_proba(x_test)[:, 1]
-    first_report = {
+
+
+def first_fraud_report(first, sets, first_test):
+    return {
         "features": features.FEATURES,
         "labels": "first fraud of each customer only",
         "lightgbm": {
             "best_iteration": int(first.best_iteration_),
-            "test": evaluate(y_test, first_test, test_amount),
-            "test_first_fraud_only": evaluate(y_test[test_keep], first_test[test_keep], test_amount[test_keep]),
+            "test": evaluate(sets.y_test, first_test, sets.test_amount),
+            "test_first_fraud_only": evaluate_first_fraud(sets, first_test),
         },
     }
+
+
+def combined_scores(main, first):
+    """Returns the percentile tables of the two models and, for every
+    purchase, the higher of its two percentiles."""
+    tables = [export.percentile_table(main.val), export.percentile_table(first.val)]
+    combined_val = np.maximum(export.percentile(tables[0], main.val), export.percentile(tables[1], first.val))
+    combined_test = np.maximum(export.percentile(tables[0], main.test), export.percentile(tables[1], first.test))
+    return tables, Scores(combined_val, combined_test)
+
+
+def blended_main_scores(models, sets, weight):
+    """The main model's scores blended with the average of the player's
+    earlier main-model scores. The blend comes before the models are combined:
+    blending the combined score instead lowered precision in tests. Only
+    purchases after the training days have honest scores, so the history of
+    earlier scores starts there, as it would in a fresh service."""
+    data = sets.data
+    window = data[data["day"] > sets.days["train"][1]]
+    window_main = export.average_proba(models, window[features.FEATURES])
+    blended_main = pd.Series(
+        export.blend_with_history(window_main, window["player_id"].to_numpy(), weight), index=window.index
+    )
+    return Scores(blended_main.loc[sets.validation.index].to_numpy(), blended_main.loc[sets.test.index].to_numpy())
+
+
+def comparison_at_1pct(sets, test_scores):
+    """test_scores holds (name, test score) pairs."""
+    return {
+        name: {
+            **{k: v for k, v in at_false_positive_rate(sets.y_test, score, 0.01, sets.test_amount).items() if k != "threshold"},
+            "first_purchase_fraud_caught": first_purchase_recall(sets.y_test, score, sets.first_purchase),
+        }
+        for name, score in test_scores
+    }
+
+
+def combined_evaluation(sets, main_test, unblended_test, combined):
+    """The combined model's report without its policy."""
+    return {
+        "features": features.FEATURES,
+        "combination": "highest percentile of the main and first-fraud models",
+        "comparison_at_1pct": comparison_at_1pct(
+            sets, [("main", main_test), ("combined", unblended_test), ("combined_blended", combined.test)]
+        ),
+        "test_unblended": evaluate(sets.y_test, unblended_test, sets.test_amount),
+        "test_first_fraud_only_unblended": evaluate_first_fraud(sets, unblended_test),
+        "test": evaluate(sets.y_test, combined.test, sets.test_amount),
+        "test_first_fraud_only": evaluate_first_fraud(sets, combined.test),
+        "precision_targets": export.precision_targets(sets.y_val, combined.val, sets.y_test, combined.test, sets.test_amount),
+    }
+
+
+def print_summary(report, combined_report):
+    print(json.dumps(
+        {name: report[name]["test"] for name in ("logistic_regression", "logistic_regression_all_numeric", "lightgbm")},
+        indent=2,
+    ))
+    print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
+    print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "precision_targets", "policy")}, indent=2))
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    out_dir = Path(args.out)
+    out_dir.mkdir(exist_ok=True)
+    days = split_days(args)
+
+    started = time.time()
+    sets = FirstFraudSets(load_data(parser, args), days)
+    print(f"features built in {time.time() - started:.0f}s: train {len(sets.train)}, validation {len(sets.validation)}, test {len(sets.test)}")
+    report = new_report(args, sets)
+
+    checkpoints = out_dir / "checkpoints" / args.version
+    models = fit_main_models(sets, checkpoints, args.models)
+    main_scores = Scores(export.average_proba(models, sets.x_val), export.average_proba(models, sets.x_test))
+    report["lightgbm"] = lightgbm_report(models, sets, main_scores)
+    report["policy"] = policy_with_effects(sets, thresholds_from(args, sets, main_scores.val), main_scores)
+    (out_dir / "training_report.json").write_text(json.dumps(report, indent=2))
+    golden = export.synthetic_rows(sets.x_train, 2000, SEED)
+    model_path, model_dump = export.export(models, features.FEATURES, args.version, args.models_dir, golden, report)
+
+    first = fit_first_fraud_model(sets, checkpoints / "first.joblib")
+    first_scores = Scores(first.predict_proba(sets.x_val)[:, 1], first.predict_proba(sets.x_test)[:, 1])
+    first_report = first_fraud_report(first, sets, first_scores.test)
     first_version = f"{args.version}-first"
     _, first_dump = export.export(first, features.FEATURES, first_version, args.models_dir, golden, first_report)
 
-    tables = [export.percentile_table(model_val), export.percentile_table(first_val)]
-    combined_val = np.maximum(export.percentile(tables[0], model_val), export.percentile(tables[1], first_val))
-    combined_test = np.maximum(export.percentile(tables[0], model_test), export.percentile(tables[1], first_test))
-    # Blend the main model's score with the average of the player's earlier
-    # main-model scores, then combine. Blending the combined score instead
-    # lowered precision in tests. Only purchases after the training days have
-    # honest scores, so the history of earlier scores starts there, as it
-    # would in a fresh service.
-    unblended_test = combined_test
-    window = data[data["day"] > days["train"][1]]
-    window_main = export.average_proba(models, window[features.FEATURES])
-    blended_main = pd.Series(
-        export.blend_with_history(window_main, window["player_id"].to_numpy(), args.player_blend), index=window.index
-    )
-    main_val, main_test = blended_main.loc[validation.index].to_numpy(), blended_main.loc[test.index].to_numpy()
-    tables = [export.percentile_table(main_val), export.percentile_table(first_val)]
-    combined_val = np.maximum(export.percentile(tables[0], main_val), export.percentile(tables[1], first_val))
-    combined_test = np.maximum(export.percentile(tables[0], main_test), export.percentile(tables[1], first_test))
-    combined_thresholds = export.choose_thresholds(
-        y_val, combined_val, args.review_rate, args.max_missed_fraud, val_amount, args.review_cost, args.target_precision
-    )
+    _, unblended = combined_scores(main_scores, first_scores)
+    tables, combined = combined_scores(blended_main_scores(models, sets, args.player_blend), first_scores)
+    combined_thresholds = thresholds_from(args, sets, combined.val)
     combined_thresholds["player_blend_weight"] = args.player_blend
-    first_purchase = test["player_txn_count"].to_numpy() == 0
     combined_report = {
-        "features": features.FEATURES,
-        "combination": "highest percentile of the main and first-fraud models",
-        "comparison_at_1pct": {
-            name: {
-                **{k: v for k, v in at_false_positive_rate(y_test, score, 0.01, test_amount).items() if k != "threshold"},
-                "first_purchase_fraud_caught": first_purchase_recall(y_test, score, first_purchase),
-            }
-            for name, score in [("main", model_test), ("combined", unblended_test), ("combined_blended", combined_test)]
-        },
-        "test_unblended": evaluate(y_test, unblended_test, test_amount),
-        "test_first_fraud_only_unblended": evaluate(y_test[test_keep], unblended_test[test_keep], test_amount[test_keep]),
-        "test": evaluate(y_test, combined_test, test_amount),
-        "test_first_fraud_only": evaluate(y_test[test_keep], combined_test[test_keep], test_amount[test_keep]),
-        "precision_targets": export.precision_targets(y_val, combined_val, y_test, combined_test, test_amount),
-        "policy": {
-            **combined_thresholds,
-            "validation_effect": export.policy_effect(y_val, combined_val, combined_thresholds, val_amount),
-            "test_effect": export.policy_effect(y_test, combined_test, combined_thresholds, test_amount),
-        },
+        **combined_evaluation(sets, main_scores.test, unblended.test, combined),
+        "policy": policy_with_effects(sets, combined_thresholds, combined),
     }
     combined_path = export.export_combined(
         f"{args.version}-combined", args.models_dir,
@@ -350,12 +444,7 @@ def main():
         golden, combined_report,
     )
 
-    print(json.dumps(
-        {name: report[name]["test"] for name in ("logistic_regression", "logistic_regression_all_numeric", "lightgbm")},
-        indent=2,
-    ))
-    print(json.dumps({"policy": report["policy"], "export": report["export"]}, indent=2))
-    print(json.dumps({k: combined_report[k] for k in ("comparison_at_1pct", "precision_targets", "policy")}, indent=2))
+    print_summary(report, combined_report)
     print(f"models written to {model_path} and {combined_path}")
     print(f"done in {time.time() - started:.0f}s")
 

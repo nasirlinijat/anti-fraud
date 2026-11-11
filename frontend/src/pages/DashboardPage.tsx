@@ -48,27 +48,21 @@ function DashboardPage() {
     onError: (error) => setError(error instanceof Error ? error.message : 'The statistics cannot be loaded.'),
   })
 
+  const changePeriod = (next: Period) => {
+    if (next === period) return
+    stop()
+    setError(null)
+    setPeriod(next)
+  }
+
   const shown = stats?.period === period ? stats : null
   const outcomes = shown?.outcomes
-  const maxFired = Math.max(1, ...(shown?.top_rules.map((r) => r.fired) ?? []))
 
   return (
     <div className="dashboard">
       <div className="dashboard-head">
         <h2>Dashboard</h2>
-        <div className="periods" role="group" aria-label="Period">
-          {periods.map((p) => (
-            <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => {
-              if (p !== period) {
-                stop()
-                setError(null)
-                setPeriod(p)
-              }
-            }}>
-              {periodNames[p]}
-            </button>
-          ))}
-        </div>
+        <PeriodButtons period={period} onChange={changePeriod} />
       </div>
       {error && (
         <ErrorState polite onRetry={retry} pending={pending}>
@@ -94,42 +88,7 @@ function DashboardPage() {
 
       {outcomes && (
         <>
-          <div className="tiles">
-            <div className="tile">
-              <span className="tile-label">Decisions</span>
-              <span className="tile-value">{number.format(outcomes.total)}</span>
-            </div>
-            <div className="tile tile-allow">
-              <span className="tile-label"><OutcomeBadge outcome="allow" /></span>
-              <span className="tile-value">{number.format(outcomes.allow)}</span>
-              <span className="tile-note">{share(outcomes.allow, outcomes.total)}</span>
-            </div>
-            <div className="tile tile-review">
-              <span className="tile-label"><OutcomeBadge outcome="review" /></span>
-              <span className="tile-value">{number.format(outcomes.review)}</span>
-              <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
-            </div>
-            <div className="tile tile-block">
-              <span className="tile-label"><OutcomeBadge outcome="block" /></span>
-              <span className="tile-value">{number.format(outcomes.block)}</span>
-              <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
-            </div>
-            <div className="tile">
-              <span className="tile-label">p95 scoring latency</span>
-              <span className="tile-value">
-                {shown.p95_scoring_latency_us == null ? '–' : `${latency.format(shown.p95_scoring_latency_us / 1000)} ms`}
-              </span>
-            </div>
-            <div className="tile">
-              <span className="tile-label">Blocked value (USD)</span>
-              <span className="tile-value tile-money">{formatUsdMinor(shown.blocked_value_minor)}</span>
-            </div>
-            <div className="tile">
-              <span className="tile-label">Review queue now</span>
-              <span className="tile-value">{number.format(shown.review_queue)}</span>
-              <span className="tile-note">all time, waiting for an analyst</span>
-            </div>
-          </div>
+          <OutcomeTiles stats={shown} />
 
           {shown.decision_series?.buckets.length > 0 && (
             <Suspense fallback={<LoadingSkeleton shape="chart" label="Loading decisions over time…" />}>
@@ -138,50 +97,8 @@ function DashboardPage() {
           )}
 
           <div className="panels">
-            <section className="panel">
-              <h3>Most fired rules</h3>
-              {shown.top_rules.length === 0 ? (
-                <EmptyState>No rule fired in this period.</EmptyState>
-              ) : (
-                <ul className="bars">
-                  {shown.top_rules.map((rule) => (
-                    <li key={rule.name}>
-                      <div className="bar-label">
-                        <span>{ruleNames[rule.name] ?? rule.name}</span>
-                        <span className="num">{number.format(rule.fired)}</span>
-                      </div>
-                      <div className="bar-track">
-                        <div className="bar" style={{ width: `${(rule.fired / maxFired) * 100}%` }} />
-                      </div>
-                      <span className="muted small">
-                        fired in {share(rule.fired, outcomes.total)} of decisions, {number.format(rule.points)} points in total
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section className="panel">
-              <h3>Fraud model</h3>
-              {shown.model.scored === 0 ? (
-                <EmptyState>No decision in this period has a model score. The backend may run with rules only.</EmptyState>
-              ) : (
-                <dl className="facts">
-                  <dt>Scored by the model</dt>
-                  <dd>{number.format(shown.model.scored)}</dd>
-                  <dt>Sent to review by the model</dt>
-                  <dd>
-                    {number.format(shown.model.flagged)} <span className="muted small">the rules allowed them</span>
-                  </dd>
-                  <dt>Cleared by the model</dt>
-                  <dd>
-                    {number.format(shown.model.cleared)} <span className="muted small">the rules sent them to review</span>
-                  </dd>
-                </dl>
-              )}
-              <p className="muted small">The model can send a purchase to review or clear a review, but never blocks.</p>
-            </section>
+            <TopRules rules={shown.top_rules} decisions={outcomes.total} />
+            <ModelPanel model={shown.model} />
           </div>
 
           {outcomes.total === 0 && (
@@ -193,6 +110,114 @@ function DashboardPage() {
         </>
       )}
     </div>
+  )
+}
+
+function PeriodButtons({ period, onChange }: { period: Period; onChange: (period: Period) => void }) {
+  return (
+    <div className="periods" role="group" aria-label="Period">
+      {periods.map((p) => (
+        <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => onChange(p)}>
+          {periodNames[p]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function OutcomeTiles({ stats }: { stats: Stats }) {
+  const { outcomes } = stats
+  return (
+    <div className="tiles">
+      <div className="tile">
+        <span className="tile-label">Decisions</span>
+        <span className="tile-value">{number.format(outcomes.total)}</span>
+      </div>
+      <div className="tile tile-allow">
+        <span className="tile-label"><OutcomeBadge outcome="allow" /></span>
+        <span className="tile-value">{number.format(outcomes.allow)}</span>
+        <span className="tile-note">{share(outcomes.allow, outcomes.total)}</span>
+      </div>
+      <div className="tile tile-review">
+        <span className="tile-label"><OutcomeBadge outcome="review" /></span>
+        <span className="tile-value">{number.format(outcomes.review)}</span>
+        <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
+      </div>
+      <div className="tile tile-block">
+        <span className="tile-label"><OutcomeBadge outcome="block" /></span>
+        <span className="tile-value">{number.format(outcomes.block)}</span>
+        <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
+      </div>
+      <div className="tile">
+        <span className="tile-label">p95 scoring latency</span>
+        <span className="tile-value">
+          {stats.p95_scoring_latency_us == null ? '–' : `${latency.format(stats.p95_scoring_latency_us / 1000)} ms`}
+        </span>
+      </div>
+      <div className="tile">
+        <span className="tile-label">Blocked value (USD)</span>
+        <span className="tile-value tile-money">{formatUsdMinor(stats.blocked_value_minor)}</span>
+      </div>
+      <div className="tile">
+        <span className="tile-label">Review queue now</span>
+        <span className="tile-value">{number.format(stats.review_queue)}</span>
+        <span className="tile-note">all time, waiting for an analyst</span>
+      </div>
+    </div>
+  )
+}
+
+function TopRules({ rules, decisions }: { rules: Stats['top_rules']; decisions: number }) {
+  const maxFired = Math.max(1, ...rules.map((r) => r.fired))
+  return (
+    <section className="panel">
+      <h3>Most fired rules</h3>
+      {rules.length === 0 ? (
+        <EmptyState>No rule fired in this period.</EmptyState>
+      ) : (
+        <ul className="bars">
+          {rules.map((rule) => (
+            <li key={rule.name}>
+              <div className="bar-label">
+                <span>{ruleNames[rule.name] ?? rule.name}</span>
+                <span className="num">{number.format(rule.fired)}</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar" style={{ width: `${(rule.fired / maxFired) * 100}%` }} />
+              </div>
+              <span className="muted small">
+                fired in {share(rule.fired, decisions)} of decisions, {number.format(rule.points)} points in total
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function ModelPanel({ model }: { model: Stats['model'] }) {
+  return (
+    <section className="panel">
+      <h3>Fraud model</h3>
+      {model.scored === 0 ? (
+        <EmptyState>No decision in this period has a model score. The backend may run with rules only.</EmptyState>
+      ) : (
+        <dl className="facts">
+          <dt>Scored by the model</dt>
+          <dd>{number.format(model.scored)}</dd>
+          <dt>Sent to review by the model</dt>
+          <dd>
+            {number.format(model.flagged)} <span className="muted small">the rules allowed them</span>
+          </dd>
+          <dt>Cleared by the model</dt>
+          <dd>
+            {number.format(model.cleared)} <span className="muted small">the rules sent them to review</span>
+          </dd>
+        </dl>
+      )}
+      <p className="muted small">The model can send a purchase to review or clear a review, but never blocks.</p>
+    </section>
   )
 }
 

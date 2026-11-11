@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase, type ReviewSort } from './api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
 import { formatUsdMinor } from './displayFormat'
@@ -8,6 +8,7 @@ import { useTimeDisplay, type TimeDisplay } from './useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from './ViewState'
 
 type ReviewAction = { item: Review; decision: Decision }
+type Feedback = { text: string; failed?: boolean }
 const REFRESH_MS = 3_000
 
 function ReviewTable({ items, pending, time, sort, modelEnabled, onOpen, onDecision }: {
@@ -228,38 +229,79 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
 function ReviewQueue() {
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [keyError, setKeyError] = useState<string | null>(null)
+  const time = useTimeDisplay()
+  const heading = useRef<HTMLHeadingElement>(null)
+
+  function openQueue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const key = new FormData(event.currentTarget).get('apiKey')
+    if (typeof key !== 'string') return
+    setKeyError(null)
+    setApiKey(key.trim())
+  }
+
+  // Closing the session unmounts QueueSession, which discards its queue state.
+  function rejectKey(message: string) {
+    setApiKey(null)
+    setKeyError(message)
+  }
+
+  return (
+    <section aria-labelledby="reviews-heading">
+      <h2 id="reviews-heading" ref={heading} tabIndex={-1}>Review queue</h2>
+      {apiKey === null ? (
+        <AnalystKeyForm keyError={keyError} onSubmit={openQueue} />
+      ) : (
+        <QueueSession apiKey={apiKey} time={time} heading={heading} onKeyRejected={rejectKey} />
+      )}
+    </section>
+  )
+}
+
+function AnalystKeyForm({ keyError, onSubmit }: {
+  keyError: string | null
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  return (
+    <form className="review-key-form" method="post" onSubmit={onSubmit}>
+      <label htmlFor="review-api-key">Analyst key</label>
+      <p id="review-key-hint">Enter your individual review key.</p>
+      {keyError && <p id="review-key-error" role="alert">The analyst key was rejected. Enter a valid key. {keyError}</p>}
+      <input
+        id="review-api-key"
+        name="apiKey"
+        type="password"
+        autoComplete="off"
+        autoFocus={keyError !== null}
+        aria-describedby={keyError ? 'review-key-hint review-key-error' : 'review-key-hint'}
+        aria-invalid={keyError !== null || undefined}
+        required
+      />
+      <button type="submit">Open queue</button>
+    </form>
+  )
+}
+
+// QueueSession is the queue while an analyst key is in use. It is mounted
+// once per accepted key, so a rejected key starts the next session clean.
+function QueueSession({ apiKey, time, heading, onKeyRejected }: {
+  apiKey: string
+  time: TimeDisplay
+  heading: RefObject<HTMLHeadingElement | null>
+  onKeyRejected: (message: string) => void
+}) {
   const [cursors, setCursors] = useState<(string | null)[]>([null])
   const [sort, setSort] = useState<ReviewSort>('rule_score')
   const [modelEnabled, setModelEnabled] = useState(false)
   const [page, setPage] = useState<QueuePage | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [openCase, setOpenCase] = useState<string | null>(null)
-  const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
-  const [feedback, setFeedback] = useState<{ text: string; failed?: boolean } | null>(null)
-  const [blockDevice, setBlockDevice] = useState(false)
-  const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
-  const time = useTimeDisplay()
-  // A null controller keeps the action disabled until a successful poll verifies queue state.
-  const requests = useRef(new Map<string, AbortController | null>())
-  const dialog = useRef<HTMLDialogElement>(null)
-  const heading = useRef<HTMLHeadingElement>(null)
   const cursor = cursors[cursors.length - 1]
 
-  const cancelDecisions = useCallback(() => {
-    for (const request of requests.current.values()) request?.abort()
-    requests.current.clear()
-  }, [])
-
-  useEffect(() => cancelDecisions, [cancelDecisions])
-
-  useEffect(() => {
-    if (confirmation && !dialog.current?.open) dialog.current?.showModal()
-  }, [confirmation])
-
-  const loadQueue = useMemo(() => {
-    if (apiKey === null) return null
-    return (signal: AbortSignal) => listReviews(apiKey, sort, cursor, signal)
-  }, [apiKey, sort, cursor])
+  const loadQueue = useCallback(
+    (signal: AbortSignal) => listReviews(apiKey, sort, cursor, signal),
+    [apiKey, sort, cursor],
+  )
   const { stop, refresh, retry, pending: queuePending } = usePolling(loadQueue, {
     intervalMs: REFRESH_MS,
     waitAfterCompletion: true,
@@ -269,14 +311,7 @@ function ReviewQueue() {
         changeSort('rule_score')
         return
       }
-      // Only a successful read listing the purchase confirms it is still pending.
-      let reconciled = false
-      for (const [id, inFlight] of requests.current) {
-        if (inFlight !== null || !result.items.some(row => row.purchase_id === id)) continue
-        requests.current.delete(id)
-        reconciled = true
-      }
-      if (reconciled) setPending(new Set(requests.current.keys()))
+      decisions.requests.reconcile(result.items)
       setPage(result)
       setLoadError(null)
     },
@@ -290,29 +325,12 @@ function ReviewQueue() {
     },
   })
 
-  const rejectKey = useCallback((message: string) => {
-    stop()
-    cancelDecisions()
-    setPending(new Set())
-    setApiKey(null)
-    setKeyError(message)
-    setPage(null)
-    setCursors([null])
-    setSort('rule_score')
-    setModelEnabled(false)
-    setOpenCase(null)
-    setConfirmation(null)
-    setFeedback(null)
-    setLoadError(null)
-  }, [cancelDecisions, stop])
+  const decisions = useDecisions({ apiKey, refresh, onKeyRejected: rejectKey, onDecided: removeDecidedPurchase })
 
-  function openQueue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const key = new FormData(event.currentTarget).get('apiKey')
-    if (typeof key !== 'string') return
-    setKeyError(null)
-    setLoadError(null)
-    setApiKey(key.trim())
+  function rejectKey(message: string) {
+    stop()
+    decisions.requests.cancelAll()
+    onKeyRejected(message)
   }
 
   function goTo(next: (string | null)[]) {
@@ -327,54 +345,6 @@ function ReviewQueue() {
     goTo([null])
   }
 
-  function chooseDecision(item: Review, decision: Decision) {
-    if (requests.current.has(item.purchase_id)) return
-    setBlockDevice(false)
-    setConfirmation({ item, decision })
-  }
-
-  async function saveDecision({ item, decision }: ReviewAction) {
-    const id = item.purchase_id
-    if (apiKey === null || requests.current.has(id)) return
-
-    const controller = new AbortController()
-    requests.current.set(id, controller)
-    setPending(new Set(requests.current.keys()))
-    setFeedback(null)
-    const isCurrent = () => requests.current.get(id) === controller
-    let needsReconciliation = false
-    try {
-      const deviceBlocked = await submitReviewDecision(apiKey, id, decision, blockDevice, controller.signal)
-      if (!isCurrent()) return
-      removeDecidedPurchase(id)
-      setFeedback({ text: `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.` })
-    } catch (error) {
-      if (!isCurrent()) return
-      const status = error instanceof ApiError ? error.status : undefined
-      const message = error instanceof Error ? error.message : 'Could not save the decision.'
-      if (status === 401) {
-        rejectKey(message)
-      } else if (status === 404) {
-        setFeedback({ text: `Could not find ${item.transaction_id}. ${message}`, failed: true })
-      } else if (status === 409) {
-        removeDecidedPurchase(id)
-        setFeedback({ text: `${item.transaction_id} is no longer pending review. ${message}` })
-      } else if (status !== undefined && status < 500 && error instanceof ApiError && error.kind === 'http') {
-        setFeedback({ text: `Could not save a decision for ${item.transaction_id}. ${message}`, failed: true })
-      } else {
-        needsReconciliation = true
-        setFeedback({ text: `Could not confirm the decision for ${item.transaction_id}. ${message} Check whether it is still pending after the queue refreshes.`, failed: true })
-      }
-    } finally {
-      if (isCurrent()) {
-        if (needsReconciliation) requests.current.set(id, null)
-        else requests.current.delete(id)
-        setPending(new Set(requests.current.keys()))
-        refresh()
-      }
-    }
-  }
-
   function removeDecidedPurchase(id: string) {
     if (document.activeElement?.closest('tr')?.dataset.purchaseId === id) heading.current?.focus()
     setPage(current => current && {
@@ -384,42 +354,16 @@ function ReviewQueue() {
   }
 
   const nextCursor = page?.next_cursor ?? null
-  const hasPrevious = cursors.length > 1
+  const { feedback } = decisions
 
   return (
-    <section aria-labelledby="reviews-heading">
-      <h2 id="reviews-heading" ref={heading} tabIndex={-1}>Review queue</h2>
-      {apiKey !== null && (openCase !== null || (page && page.items.length > 0)) && <TimeDisplayToggle display={time} />}
-      {apiKey === null ? (
-        <form className="review-key-form" method="post" onSubmit={openQueue}>
-          <label htmlFor="review-api-key">Analyst key</label>
-          <p id="review-key-hint">Enter your individual review key.</p>
-          {keyError && <p id="review-key-error" role="alert">The analyst key was rejected. Enter a valid key. {keyError}</p>}
-          <input
-            id="review-api-key"
-            name="apiKey"
-            type="password"
-            autoComplete="off"
-            autoFocus={keyError !== null}
-            aria-describedby={keyError ? 'review-key-hint review-key-error' : 'review-key-hint'}
-            aria-invalid={keyError !== null || undefined}
-            required
-          />
-          <button type="submit">Open queue</button>
-        </form>
-      ) : openCase !== null ? (
+    <>
+      {(openCase !== null || (page && page.items.length > 0)) && <TimeDisplayToggle display={time} />}
+      {openCase !== null ? (
         <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} time={time} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
       ) : (
         <>
-          {modelEnabled && (
-            <label>
-              Sort by{' '}
-              <select value={sort} onChange={event => changeSort(event.target.value === 'model_score' ? 'model_score' : 'rule_score')}>
-                <option value="rule_score">Rule score</option>
-                <option value="model_score">Model risk</option>
-              </select>
-            </label>
-          )}
+          {modelEnabled && <SortSelect sort={sort} onChange={changeSort} />}
           <p role="status">{feedback && !feedback.failed ? feedback.text : ''}</p>
           {feedback?.failed && (
             <ErrorState polite onRetry={loadError ? undefined : retry} pending={queuePending}>{feedback.text}</ErrorState>
@@ -430,53 +374,227 @@ function ReviewQueue() {
             </ErrorState>
           )}
           {page === null && (!loadError || queuePending) && <LoadingSkeleton shape="table" label="Loading review queue…" />}
-          {page && (page.items.length > 0 ? (
-            <ReviewTable items={page.items} pending={pending} time={time} sort={sort} modelEnabled={modelEnabled} onOpen={setOpenCase} onDecision={chooseDecision} />
-          ) : (
-            <EmptyState>
-              {cursor === null ? (
-                <>No purchases are waiting for review. Score a purchase in <a href="#/tester">Tester</a> or run <code>make simulate</code> to generate traffic.</>
-              ) : 'No purchases on this page. Choose Previous to see the earlier page.'}
-            </EmptyState>
-          ))}
-          <nav className="review-pages" aria-label="Review queue pages">
-            <button type="button" aria-disabled={!hasPrevious} onClick={() => {
-              if (hasPrevious) goTo(cursors.slice(0, -1))
-            }}>
-              Previous
-            </button>
-            <span aria-live="polite">Page {cursors.length}</span>
-            <button type="button" aria-disabled={nextCursor === null} onClick={() => {
-              if (nextCursor !== null) goTo([...cursors, nextCursor])
-            }}>
-              Next
-            </button>
-          </nav>
-          <dialog className="review-confirmation" ref={dialog} aria-labelledby="review-confirmation-title"
-            onClose={event => {
-              const confirmed = event.currentTarget.returnValue === 'confirm'
-              event.currentTarget.returnValue = ''
-              setConfirmation(null)
-              if (confirmed && confirmation) void saveDecision(confirmation)
-            }}>
-            <h3 id="review-confirmation-title">
-              {confirmation?.decision === 'approve' ? 'Approve' : 'Reject'} this purchase?
-            </h3>
-            <p>Transaction {confirmation?.item.transaction_id}. This decision is final.</p>
-            {confirmation?.decision === 'reject' && confirmation.item.device_id !== null && (
-              <label className="review-block-device">
-                <input type="checkbox" checked={blockDevice} onChange={event => setBlockDevice(event.target.checked)} />
-                {' '}Also block this purchase&apos;s device ({confirmation.item.device_id})
-              </label>
-            )}
-            <form method="dialog" className="review-actions">
-              <button value="cancel" className="secondary" autoFocus>Cancel</button>
-              <button value="confirm">{confirmation?.decision === 'approve' ? 'Approve' : 'Reject'}</button>
-            </form>
-          </dialog>
+          {page && page.items.length > 0 && (
+            <ReviewTable items={page.items} pending={decisions.requests.pending} time={time} sort={sort} modelEnabled={modelEnabled} onOpen={setOpenCase} onDecision={decisions.choose} />
+          )}
+          {page && page.items.length === 0 && <EmptyQueue firstPage={cursor === null} />}
+          <QueuePages
+            number={cursors.length}
+            onPrevious={cursors.length > 1 ? () => goTo(cursors.slice(0, -1)) : undefined}
+            onNext={nextCursor !== null ? () => goTo([...cursors, nextCursor]) : undefined}
+          />
+          <ConfirmationDialog dialogRef={decisions.dialog} confirmation={decisions.confirmation}
+            blockDevice={decisions.blockDevice} onBlockDevice={decisions.setBlockDevice}
+            onDismiss={decisions.dismiss} onConfirm={(action) => void decisions.save(action)} />
         </>
       )}
-    </section>
+    </>
+  )
+}
+
+// Takes a decision from the analyst's confirmation to its saved result, and
+// reports that result as feedback.
+function useDecisions({ apiKey, refresh, onKeyRejected, onDecided }: {
+  apiKey: string
+  refresh: () => void
+  onKeyRejected: (message: string) => void
+  onDecided: (purchaseId: string) => void
+}) {
+  const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
+  const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const [blockDevice, setBlockDevice] = useState(false)
+  const requests = useDecisionRequests()
+  const dialog = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    if (confirmation && !dialog.current?.open) dialog.current?.showModal()
+  }, [confirmation])
+
+  function choose(item: Review, decision: Decision) {
+    if (requests.has(item.purchase_id)) return
+    setBlockDevice(false)
+    setConfirmation({ item, decision })
+  }
+
+  async function save({ item, decision }: ReviewAction) {
+    const id = item.purchase_id
+    if (requests.has(id)) return
+
+    const controller = requests.begin(id)
+    setFeedback(null)
+    const isCurrent = () => requests.isCurrent(id, controller)
+    let unconfirmed = false
+    try {
+      const deviceBlocked = await submitReviewDecision(apiKey, id, decision, blockDevice, controller.signal)
+      if (!isCurrent()) return
+      onDecided(id)
+      setFeedback({ text: `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.` })
+    } catch (error) {
+      if (!isCurrent()) return
+      if (error instanceof ApiError && error.status === 401) {
+        onKeyRejected(error.message)
+        return
+      }
+      const failure = describeFailure(error, item.transaction_id)
+      if (failure.decided) onDecided(id)
+      unconfirmed = failure.unconfirmed === true
+      setFeedback(failure.feedback)
+    } finally {
+      if (isCurrent()) {
+        if (unconfirmed) requests.holdForReconciliation(id)
+        else requests.finish(id)
+        refresh()
+      }
+    }
+  }
+
+  const dismiss = () => setConfirmation(null)
+  return { requests, confirmation, feedback, blockDevice, dialog, setBlockDevice, choose, save, dismiss }
+}
+
+// Tracks the decisions being saved, by purchase ID, so each purchase can have
+// only one save in flight and its buttons stay disabled until it settles.
+function useDecisionRequests() {
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
+  // A null controller keeps the action disabled until a successful poll verifies queue state.
+  const requests = useRef(new Map<string, AbortController | null>())
+
+  const cancelAll = useCallback(() => {
+    for (const request of requests.current.values()) request?.abort()
+    requests.current.clear()
+  }, [])
+
+  useEffect(() => cancelAll, [cancelAll])
+
+  const publish = () => setPending(new Set(requests.current.keys()))
+
+  return {
+    pending,
+    cancelAll,
+    has: (id: string) => requests.current.has(id),
+    isCurrent: (id: string, controller: AbortController) => requests.current.get(id) === controller,
+    begin(id: string) {
+      const controller = new AbortController()
+      requests.current.set(id, controller)
+      publish()
+      return controller
+    },
+    finish(id: string) {
+      requests.current.delete(id)
+      publish()
+    },
+    holdForReconciliation(id: string) {
+      requests.current.set(id, null)
+      publish()
+    },
+    // Only a successful read listing the purchase confirms it is still pending.
+    reconcile(items: Review[]) {
+      let reconciled = false
+      for (const [id, inFlight] of requests.current) {
+        if (inFlight !== null || !items.some(row => row.purchase_id === id)) continue
+        requests.current.delete(id)
+        reconciled = true
+      }
+      if (reconciled) publish()
+    },
+  }
+}
+
+type DecisionFailure = { feedback: Feedback; decided?: boolean; unconfirmed?: boolean }
+
+// A 409 means the purchase was already decided. A failure that is not a clear
+// client error leaves the outcome unknown until the queue is read again.
+function describeFailure(error: unknown, transactionId: string): DecisionFailure {
+  const status = error instanceof ApiError ? error.status : undefined
+  const message = error instanceof Error ? error.message : 'Could not save the decision.'
+  if (status === 404) {
+    return { feedback: { text: `Could not find ${transactionId}. ${message}`, failed: true } }
+  }
+  if (status === 409) {
+    return { decided: true, feedback: { text: `${transactionId} is no longer pending review. ${message}` } }
+  }
+  if (status !== undefined && status < 500 && error instanceof ApiError && error.kind === 'http') {
+    return { feedback: { text: `Could not save a decision for ${transactionId}. ${message}`, failed: true } }
+  }
+  return {
+    unconfirmed: true,
+    feedback: { text: `Could not confirm the decision for ${transactionId}. ${message} Check whether it is still pending after the queue refreshes.`, failed: true },
+  }
+}
+
+function SortSelect({ sort, onChange }: { sort: ReviewSort; onChange: (sort: ReviewSort) => void }) {
+  return (
+    <label>
+      Sort by{' '}
+      <select value={sort} onChange={event => onChange(event.target.value === 'model_score' ? 'model_score' : 'rule_score')}>
+        <option value="rule_score">Rule score</option>
+        <option value="model_score">Model risk</option>
+      </select>
+    </label>
+  )
+}
+
+function EmptyQueue({ firstPage }: { firstPage: boolean }) {
+  if (!firstPage) {
+    return <EmptyState>No purchases on this page. Choose Previous to see the earlier page.</EmptyState>
+  }
+  return (
+    <EmptyState>
+      No purchases are waiting for review. Score a purchase in <a href="#/tester">Tester</a> or run <code>make simulate</code> to generate traffic.
+    </EmptyState>
+  )
+}
+
+// A missing handler means there is no page in that direction.
+function QueuePages({ number, onPrevious, onNext }: {
+  number: number
+  onPrevious?: () => void
+  onNext?: () => void
+}) {
+  return (
+    <nav className="review-pages" aria-label="Review queue pages">
+      <button type="button" aria-disabled={!onPrevious} onClick={() => onPrevious?.()}>
+        Previous
+      </button>
+      <span aria-live="polite">Page {number}</span>
+      <button type="button" aria-disabled={!onNext} onClick={() => onNext?.()}>
+        Next
+      </button>
+    </nav>
+  )
+}
+
+function ConfirmationDialog({ dialogRef, confirmation, blockDevice, onBlockDevice, onDismiss, onConfirm }: {
+  dialogRef: RefObject<HTMLDialogElement | null>
+  confirmation: ReviewAction | null
+  blockDevice: boolean
+  onBlockDevice: (block: boolean) => void
+  onDismiss: () => void
+  onConfirm: (action: ReviewAction) => void
+}) {
+  return (
+    <dialog className="review-confirmation" ref={dialogRef} aria-labelledby="review-confirmation-title"
+      onClose={event => {
+        const confirmed = event.currentTarget.returnValue === 'confirm'
+        event.currentTarget.returnValue = ''
+        onDismiss()
+        if (confirmed && confirmation) onConfirm(confirmation)
+      }}>
+      <h3 id="review-confirmation-title">
+        {confirmation?.decision === 'approve' ? 'Approve' : 'Reject'} this purchase?
+      </h3>
+      <p>Transaction {confirmation?.item.transaction_id}. This decision is final.</p>
+      {confirmation?.decision === 'reject' && confirmation.item.device_id !== null && (
+        <label className="review-block-device">
+          <input type="checkbox" checked={blockDevice} onChange={event => onBlockDevice(event.target.checked)} />
+          {' '}Also block this purchase&apos;s device ({confirmation.item.device_id})
+        </label>
+      )}
+      <form method="dialog" className="review-actions">
+        <button value="cancel" className="secondary" autoFocus>Cancel</button>
+        <button value="confirm">{confirmation?.decision === 'approve' ? 'Approve' : 'Reject'}</button>
+      </form>
+    </dialog>
   )
 }
 
