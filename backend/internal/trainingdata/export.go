@@ -45,31 +45,11 @@ func Export(ctx context.Context, conn platform.DBTX, featureNames []string, w io
 			return sum, fmt.Errorf("list model inputs: %w", err)
 		}
 		for _, r := range rows {
-			var inputs map[string]float64
-			if err := json.Unmarshal(r.ModelInputs, &inputs); err != nil {
-				return sum, fmt.Errorf("decode model inputs of %s: %w", r.TransactionID, err)
+			ok, err := fillRecord(record, r, featureNames)
+			if err != nil {
+				return sum, err
 			}
-			if len(inputs) != len(featureNames) {
-				sum.Skipped++
-				continue
-			}
-			record[0] = r.TransactionID
-			record[1] = r.EventTime.UTC().Format(time.RFC3339)
-			record[2] = r.PlayerID
-			record[3] = ""
-			if r.ModelScore != nil {
-				record[3] = strconv.FormatFloat(*r.ModelScore, 'g', -1, 64)
-			}
-			complete := true
-			for i, name := range featureNames {
-				value, ok := inputs[name]
-				if !ok {
-					complete = false
-					break
-				}
-				record[4+i] = strconv.FormatFloat(value, 'g', -1, 64)
-			}
-			if !complete {
+			if !ok {
 				sum.Skipped++
 				continue
 			}
@@ -86,6 +66,33 @@ func Export(ctx context.Context, conn platform.DBTX, featureNames []string, w io
 	}
 	out.Flush()
 	return sum, out.Error()
+}
+
+// fillRecord writes the columns of one decision into record. It returns false
+// when the saved model inputs are not exactly the given features.
+func fillRecord(record []string, r modelInputsRow, featureNames []string) (bool, error) {
+	var inputs map[string]float64
+	if err := json.Unmarshal(r.ModelInputs, &inputs); err != nil {
+		return false, fmt.Errorf("decode model inputs of %s: %w", r.TransactionID, err)
+	}
+	if len(inputs) != len(featureNames) {
+		return false, nil
+	}
+	record[0] = r.TransactionID
+	record[1] = r.EventTime.UTC().Format(time.RFC3339)
+	record[2] = r.PlayerID
+	record[3] = ""
+	if r.ModelScore != nil {
+		record[3] = strconv.FormatFloat(*r.ModelScore, 'g', -1, 64)
+	}
+	for i, name := range featureNames {
+		value, ok := inputs[name]
+		if !ok {
+			return false, nil
+		}
+		record[4+i] = strconv.FormatFloat(value, 'g', -1, 64)
+	}
+	return true, nil
 }
 
 // ModelInputsPageSQL is a page of saved decisions after the given
