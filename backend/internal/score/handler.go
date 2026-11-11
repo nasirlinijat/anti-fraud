@@ -182,9 +182,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	vector := features.Vector(in, history)
 	modelInputs := features.Map(vector)
 
+	// The ruleset's model mode decides whether the model runs and whether its
+	// score can change the outcome. Without a model the rules decide alone.
+	scoreWithModel := h.model != nil && (rs.Model.Mode == scoring.ModelShadow || rs.Model.Mode == scoring.ModelAssist)
 	var modelScore, unblended *float64
 	var modelVersion *string
-	if h.model != nil {
+	if scoreWithModel {
 		final, own, err := h.modelScore(r.Context(), p, vector)
 		if err != nil {
 			h.internalError(w, p, err)
@@ -230,8 +233,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		result = scoring.Evaluate(in, rs)
-		if modelScore != nil {
-			result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, h.policy)
+		if modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
+			result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, rs.Model.Policy(h.policy))
 		}
 	}
 	decision := Decision{

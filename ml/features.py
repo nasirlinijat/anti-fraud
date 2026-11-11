@@ -1,8 +1,9 @@
-"""Builds model features from IEEE-CIS transactions.
+"""Builds model features from IEEE-CIS transactions or from score requests.
 
 Every history feature uses only transactions that happened before the current one,
 so the same values can be computed by the live scoring service.
 """
+import json
 from pathlib import Path
 
 import numpy as np
@@ -130,19 +131,87 @@ def load(path, identity_path=None):
 
 
 def add_keys(df):
+    """Adds the keys history is counted by. IEEE-CIS has no player or card ID,
+    so they are built from its columns; purchases loaded from score requests
+    already carry their own."""
     def text(column):
         return column.astype(str).fillna("none")
 
-    first_day = text((df["day"] - df["D1"]).astype("Int64"))
-    df["player_id"] = text(df["card1"]) + "_" + text(df["addr1"]) + "_" + first_day
-    card_id = text(df["card1"])
-    for column in ["card2", "card3", "card4", "card5", "card6"]:
-        card_id = card_id + "|" + text(df[column])
-    df["card_id"] = card_id
+    if "player_id" not in df.columns:
+        first_day = text((df["day"] - df["D1"]).astype("Int64"))
+        df["player_id"] = text(df["card1"]) + "_" + text(df["addr1"]) + "_" + first_day
+    if "card_id" not in df.columns:
+        card_id = text(df["card1"])
+        for column in ["card2", "card3", "card4", "card5", "card6"]:
+            card_id = card_id + "|" + text(df[column])
+        df["card_id"] = card_id
     df["email"] = df["P_emaildomain"].fillna("none")
     df["device"] = df["DeviceInfo"].fillna("none")
-    df["card1_key"] = text(df["card1"])
-    df["address"] = text(df["addr1"])
+    if "card1_key" not in df.columns:
+        df["card1_key"] = text(df["card1"])
+    if "address" not in df.columns:
+        df["address"] = text(df["addr1"])
+    return df
+
+
+# Score request fields and the IEEE-CIS column each one stands for.
+REQUEST_TEXT_COLUMNS = {
+    "product_code": "ProductCD", "card_network": "card4", "card_type": "card6",
+    "email_domain": "P_emaildomain", "recipient_email_domain": "R_emaildomain",
+    "device_type": "DeviceType", "device_name": "DeviceInfo",
+    "client_os": "id_30", "client_browser": "id_31", "screen_resolution": "id_33",
+}
+# Codes the service reads as numbers; text that is not a number is missing.
+REQUEST_CODE_COLUMNS = {
+    "card_issuer": "card1", "card_country": "card3", "card_category": "card5",
+    "billing_region": "addr1", "billing_country": "addr2",
+}
+
+
+def load_requests(path):
+    """Reads purchases written by the simulator's -dump option: one JSON object
+    per line with the score request, its pattern and its fraud label. Returns
+    them in the columns build() reads, with the request's own player and card
+    IDs, plus the pattern. day counts whole days since midnight UTC of the
+    first purchase."""
+    records = []
+    with open(path, encoding="utf-8") as lines:
+        for line in lines:
+            item = json.loads(line)
+            record = item["request"]
+            record["pattern"] = item["pattern"]
+            record["isFraud"] = int(item["is_fraud"])
+            records.append(record)
+    raw = pd.DataFrame.from_records(records)
+
+    def column(name):
+        return raw[name] if name in raw.columns else pd.Series(np.nan, index=raw.index, dtype=object)
+
+    event_time = pd.to_datetime(raw["event_time"], utc=True)
+    seconds = (event_time - event_time.min().normalize()).dt.total_seconds()
+    created = pd.to_datetime(column("account_created_at"), utc=True)
+    df = pd.DataFrame({
+        "TransactionID": raw["transaction_id"].astype(str),
+        "isFraud": raw["isFraud"],
+        "pattern": raw["pattern"],
+        "TransactionDT": seconds.astype("int64"),
+        "amount_minor": raw["amount_minor"].astype("int64"),
+        "TransactionAmt": raw["amount_minor"] / 100,
+        "player_id": raw["player_id"].astype(str),
+        "card_id": raw["card_token"].astype(str),
+        "card2": np.nan,
+        "dist1": pd.to_numeric(column("billing_distance"), errors="coerce"),
+        # Whole days, as the service counts the account age.
+        "D1": np.floor((event_time - created).dt.total_seconds() / SECONDS_PER_DAY),
+        "card1_key": column("card_issuer").astype(str),
+        "address": column("billing_region").astype(str),
+    })
+    for field, name in REQUEST_TEXT_COLUMNS.items():
+        df[name] = column(field)
+    for field, name in REQUEST_CODE_COLUMNS.items():
+        df[name] = pd.to_numeric(column(field), errors="coerce")
+    df = df.sort_values(["TransactionDT", "TransactionID"], kind="stable").reset_index(drop=True)
+    df["day"] = df["TransactionDT"] // SECONDS_PER_DAY
     return df
 
 

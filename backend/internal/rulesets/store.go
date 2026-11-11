@@ -2,13 +2,25 @@ package rulesets
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/db"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
+
+// ErrNotFound means no ruleset has the requested version.
+var ErrNotFound = errors.New("ruleset version not found")
+
+// VersionSummary is an entry in the ruleset version history.
+type VersionSummary struct {
+	Version   int       `json:"version"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 // Conn runs queries and starts transactions.
 type Conn interface {
@@ -19,10 +31,20 @@ type Conn interface {
 // Store reads and publishes rulesets.
 type Store struct {
 	conn Conn
+	// reportThresholds holds the thresholds from the loaded model's report.
+	// Publish saves them in a version that has none. It is nil without a model.
+	reportThresholds *scoring.ModelSettings
 }
 
 func NewStore(conn Conn) *Store {
 	return &Store{conn: conn}
+}
+
+// UseModelThresholds makes Publish save the thresholds of the loaded model's
+// report in a new version that does not set its own.
+func (s *Store) UseModelThresholds(p scoring.ModelPolicy) {
+	clearBelow, flagAt := p.ClearBelow, p.FlagAt
+	s.reportThresholds = &scoring.ModelSettings{ClearBelow: &clearBelow, FlagAt: &flagAt}
 }
 
 // Active returns the active ruleset with its rules.
@@ -32,17 +54,74 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("get active ruleset: %w", err)
 	}
+	return s.loadRuleset(ctx, q, scoring.Ruleset{
+		Version:         int(row.Version),
+		ReviewThreshold: int(row.ReviewThreshold),
+		BlockThreshold:  int(row.BlockThreshold),
+		Note:            row.Note,
+		CreatedAt:       row.CreatedAt.Time.UTC(),
+		Model:           modelSettings(row.ModelMode, row.ModelClearBelow, row.ModelFlagAt),
+	})
+}
 
-	ruleRows, err := q.ListRulesetRules(ctx, row.Version)
+// Version returns the ruleset with the given version, or ErrNotFound.
+func (s *Store) Version(ctx context.Context, version int32) (scoring.Ruleset, error) {
+	q := db.New(s.conn)
+	row, err := q.GetRuleset(ctx, version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return scoring.Ruleset{}, ErrNotFound
+	}
 	if err != nil {
-		return scoring.Ruleset{}, fmt.Errorf("list rules of ruleset %d: %w", row.Version, err)
+		return scoring.Ruleset{}, fmt.Errorf("get ruleset %d: %w", version, err)
+	}
+	return s.loadRuleset(ctx, q, scoring.Ruleset{
+		Version:         int(row.Version),
+		ReviewThreshold: int(row.ReviewThreshold),
+		BlockThreshold:  int(row.BlockThreshold),
+		Note:            row.Note,
+		CreatedAt:       row.CreatedAt.Time.UTC(),
+		Model:           modelSettings(row.ModelMode, row.ModelClearBelow, row.ModelFlagAt),
+	})
+}
+
+func modelSettings(mode string, clearBelow, flagAt pgtype.Float8) scoring.ModelSettings {
+	m := scoring.ModelSettings{Mode: scoring.ModelMode(mode)}
+	if clearBelow.Valid && flagAt.Valid {
+		m.ClearBelow, m.FlagAt = &clearBelow.Float64, &flagAt.Float64
+	}
+	return m
+}
+
+// List returns all ruleset versions, newest first.
+func (s *Store) List(ctx context.Context) ([]VersionSummary, error) {
+	rows, err := db.New(s.conn).ListRulesets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list rulesets: %w", err)
+	}
+	items := make([]VersionSummary, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, VersionSummary{
+			Version:   int(r.Version),
+			Note:      r.Note,
+			CreatedAt: r.CreatedAt.Time.UTC(),
+		})
+	}
+	return items, nil
+}
+
+// loadRuleset adds the rules to a ruleset read from the rulesets table.
+func (s *Store) loadRuleset(ctx context.Context, q *db.Queries, rs scoring.Ruleset) (scoring.Ruleset, error) {
+	version := rs.Version
+	ruleRows, err := q.ListRulesetRules(ctx, int32(version))
+	if err != nil {
+		return scoring.Ruleset{}, fmt.Errorf("list rules of ruleset %d: %w", version, err)
 	}
 
 	rules := make(map[scoring.RuleName]scoring.RuleConfig, len(ruleRows))
 	for _, r := range ruleRows {
 		name := scoring.RuleName(r.RuleName)
 		if !name.Known() {
-			return scoring.Ruleset{}, fmt.Errorf("ruleset %d has unknown rule %q", row.Version, r.RuleName)
+			return scoring.Ruleset{}, fmt.Errorf("ruleset %d has unknown rule %q", version, r.RuleName)
 		}
 		rules[name] = scoring.RuleConfig{
 			Enabled:          r.Enabled,
@@ -54,27 +133,43 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 		}
 	}
 
-	return scoring.Ruleset{
-		Version:         int(row.Version),
-		ReviewThreshold: int(row.ReviewThreshold),
-		BlockThreshold:  int(row.BlockThreshold),
-		Rules:           rules,
-	}, nil
+	rs.Rules = rules
+	return rs, nil
 }
 
-// Publish saves a new version and activates it in the same transaction.
-func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Ruleset, error) {
+// Publish saves a new version and activates it in the same transaction. A
+// ruleset without a model mode keeps the model settings of the active version.
+// Thresholds that are still missing are taken from the loaded model's report.
+func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset, operatorID string) (scoring.Ruleset, error) {
 	err := pgx.BeginFunc(ctx, s.conn, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		if err := q.LockRulesetsForPublish(ctx); err != nil {
 			return fmt.Errorf("lock rulesets: %w", err)
 		}
+		if rs.Model.Mode == "" {
+			active, err := q.GetActiveRuleset(ctx)
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				rs.Model = scoring.ModelSettings{Mode: scoring.ModelAssist}
+			case err != nil:
+				return fmt.Errorf("get active ruleset: %w", err)
+			default:
+				rs.Model = modelSettings(active.ModelMode, active.ModelClearBelow, active.ModelFlagAt)
+			}
+		}
+		if (rs.Model.ClearBelow == nil || rs.Model.FlagAt == nil) && s.reportThresholds != nil {
+			rs.Model.ClearBelow, rs.Model.FlagAt = s.reportThresholds.ClearBelow, s.reportThresholds.FlagAt
+		}
 		if err := q.DeactivateRuleset(ctx); err != nil {
 			return fmt.Errorf("deactivate ruleset: %w", err)
 		}
-		version, err := q.InsertRuleset(ctx, db.InsertRulesetParams{
+		saved, err := q.InsertRuleset(ctx, db.InsertRulesetParams{
 			ReviewThreshold: int32(rs.ReviewThreshold),
 			BlockThreshold:  int32(rs.BlockThreshold),
+			Note:            rs.Note,
+			ModelMode:       string(rs.Model.Mode),
+			ModelClearBelow: optionalFloat(rs.Model.ClearBelow),
+			ModelFlagAt:     optionalFloat(rs.Model.FlagAt),
 		})
 		if err != nil {
 			return fmt.Errorf("insert ruleset: %w", err)
@@ -82,7 +177,7 @@ func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Rulese
 		for name, rule := range rs.Rules {
 			spike := name == scoring.RuleNewDeviceSpike
 			if err := q.InsertRulesetRule(ctx, db.InsertRulesetRuleParams{
-				RulesetVersion:   version,
+				RulesetVersion:   saved.Version,
 				RuleName:         string(name),
 				Enabled:          rule.Enabled,
 				Weight:           int32(rule.Weight),
@@ -94,11 +189,25 @@ func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset) (scoring.Rulese
 				return fmt.Errorf("insert rule %q: %w", name, err)
 			}
 		}
-		rs.Version = int(version)
+		if err := q.AuditRulesetPublication(ctx, db.AuditRulesetPublicationParams{
+			OperatorID: operatorID,
+			Version:    int64(saved.Version),
+		}); err != nil {
+			return fmt.Errorf("record ruleset publication: %w", err)
+		}
+		rs.Version = int(saved.Version)
+		rs.CreatedAt = saved.CreatedAt.Time.UTC()
 		return nil
 	})
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("publish ruleset: %w", err)
 	}
 	return rs, nil
+}
+
+func optionalFloat(v *float64) pgtype.Float8 {
+	if v == nil {
+		return pgtype.Float8{}
+	}
+	return pgtype.Float8{Float64: *v, Valid: true}
 }

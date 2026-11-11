@@ -105,11 +105,12 @@ func (s *Store) List(ctx context.Context) ([]StoredEntry, error) {
 
 // Add saves an entry. It returns ErrDuplicate if the same type and value are
 // already on the blocklist. The entry applies to the next scored purchase.
-func (s *Store) Add(ctx context.Context, e Entry) (StoredEntry, error) {
+func (s *Store) Add(ctx context.Context, e Entry, operatorID string) (StoredEntry, error) {
 	row, err := s.q.InsertBlocklistEntry(ctx, db.InsertBlocklistEntryParams{
-		EntryType: string(e.Type),
-		Value:     e.Value,
-		Reason:    e.Reason,
+		OperatorID: operatorID,
+		EntryType:  string(e.Type),
+		Value:      e.Value,
+		Reason:     e.Reason,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -124,8 +125,9 @@ func (s *Store) Add(ctx context.Context, e Entry) (StoredEntry, error) {
 // AddIfAbsent saves an entry unless the same type and value are already on the
 // blocklist, and reports whether it saved one. Build the store on a
 // transaction to make the insert part of that transaction.
-func (s *Store) AddIfAbsent(ctx context.Context, e Entry) (StoredEntry, bool, error) {
+func (s *Store) AddIfAbsent(ctx context.Context, e Entry, analystID string) (StoredEntry, bool, error) {
 	row, err := s.q.InsertBlocklistEntryIfAbsent(ctx, db.InsertBlocklistEntryIfAbsentParams{
+		AnalystID: analystID,
 		EntryType: string(e.Type),
 		Value:     e.Value,
 		Reason:    e.Reason,
@@ -140,8 +142,8 @@ func (s *Store) AddIfAbsent(ctx context.Context, e Entry) (StoredEntry, bool, er
 }
 
 // Remove deletes the entry with the given ID. It returns ErrNotFound if there is none.
-func (s *Store) Remove(ctx context.Context, id int64) error {
-	n, err := s.q.DeleteBlocklistEntry(ctx, id)
+func (s *Store) Remove(ctx context.Context, id int64, operatorID string) error {
+	n, err := s.q.DeleteBlocklistEntry(ctx, db.DeleteBlocklistEntryParams{EntryID: id, OperatorID: operatorID})
 	if err != nil {
 		return fmt.Errorf("delete blocklist entry %d: %w", id, err)
 	}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase } from './api'
-import { ModelRiskBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
+import { getReviewCase, listReviews, submitReviewDecision, type Decision, type QueuePage, type Review, type ReviewCase, type ReviewSort } from './api'
+import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from './Display'
 import { formatUsdMinor } from './displayFormat'
 import { ApiError } from './request'
 import { usePolling } from './usePolling'
@@ -8,12 +8,14 @@ import { useTimeDisplay, type TimeDisplay } from './useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from './ViewState'
 
 type ReviewAction = { item: Review; decision: Decision }
-const REFRESH_MS = 5_000
+const REFRESH_MS = 3_000
 
-function ReviewTable({ items, pending, time, onOpen, onDecision }: {
+function ReviewTable({ items, pending, time, sort, modelEnabled, onOpen, onDecision }: {
   items: Review[]
   pending: ReadonlySet<string>
   time: TimeDisplay
+  sort: ReviewSort
+  modelEnabled: boolean
   onOpen: (purchaseId: string) => void
   onDecision: (item: Review, decision: Decision) => void
 }) {
@@ -36,7 +38,7 @@ function ReviewTable({ items, pending, time, onOpen, onDecision }: {
       onKeyDown={scrollTable}
     >
       <table className="review-table">
-        <caption id="review-caption">Purchases awaiting review, oldest queued first</caption>
+        <caption id="review-caption">Purchases awaiting review</caption>
         <thead>
           <tr>
             <th scope="col">Transaction</th>
@@ -44,8 +46,8 @@ function ReviewTable({ items, pending, time, onOpen, onDecision }: {
             <th scope="col">Amount (USD)</th>
             <th scope="col">Purchase time</th>
             <th scope="col">Queued time</th>
-            <th scope="col">Rule score</th>
-            <th scope="col">Model risk</th>
+            <th scope="col" aria-sort={sort === 'rule_score' ? 'descending' : undefined}>Rule score</th>
+            {modelEnabled && <th scope="col" aria-sort={sort === 'model_score' ? 'descending' : undefined}>Model risk</th>}
             <th scope="col">Model version</th>
             <th scope="col">Fired rules</th>
             <th scope="col">Actions</th>
@@ -64,7 +66,7 @@ function ReviewTable({ items, pending, time, onOpen, onDecision }: {
               <td><Timestamp value={item.event_time} display={time} /></td>
               <td><Timestamp value={item.queued_at} display={time} /></td>
               <td><RuleScoreBadge value={item.rule_score} /></td>
-              <td><ModelRiskBadge value={item.model_score} /></td>
+              {modelEnabled && <td><ModelRiskBadge value={item.model_score} /></td>}
               <td>{item.model_version ?? 'None'}</td>
               <td>
                 {item.fired_rules.length === 0 ? 'None' : (
@@ -181,6 +183,44 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
           </tbody>
         </table>
       )}
+      <h4>Recent player purchases</h4>
+      {review.player_purchases.length === 0 ? (
+        <EmptyState>No earlier purchases for this player.</EmptyState>
+      ) : (
+        <table className="review-table review-rules">
+          <thead>
+            <tr>
+              <th scope="col">Transaction</th>
+              <th scope="col">Purchase time</th>
+              <th scope="col">Amount (USD)</th>
+              <th scope="col">Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            {review.player_purchases.map((purchase) => (
+              <tr key={purchase.transaction_id}>
+                <th scope="row">{purchase.transaction_id}</th>
+                <td><Timestamp value={purchase.event_time} display={time} /></td>
+                <td>{formatUsdMinor(purchase.amount_minor)}</td>
+                <td><OutcomeBadge outcome={purchase.outcome} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h4>Recent device activity</h4>
+      {review.device_activity === null ? (
+        <EmptyState>This purchase did not include a device ID.</EmptyState>
+      ) : (
+        <dl className="review-facts">
+          <dt>Purchases on this device</dt>
+          <dd>{review.device_activity.purchases}</dd>
+          <dt>Distinct cards</dt>
+          <dd>{review.device_activity.distinct_cards}</dd>
+          <dt>Last seen</dt>
+          <dd><Timestamp value={review.device_activity.last_seen_at} display={time} /></dd>
+        </dl>
+      )}
     </>
   )
 }
@@ -189,6 +229,8 @@ function ReviewQueue() {
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [keyError, setKeyError] = useState<string | null>(null)
   const [cursors, setCursors] = useState<(string | null)[]>([null])
+  const [sort, setSort] = useState<ReviewSort>('rule_score')
+  const [modelEnabled, setModelEnabled] = useState(false)
   const [page, setPage] = useState<QueuePage | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [openCase, setOpenCase] = useState<string | null>(null)
@@ -216,12 +258,17 @@ function ReviewQueue() {
 
   const loadQueue = useMemo(() => {
     if (apiKey === null) return null
-    return (signal: AbortSignal) => listReviews(apiKey, cursor, signal)
-  }, [apiKey, cursor])
+    return (signal: AbortSignal) => listReviews(apiKey, sort, cursor, signal)
+  }, [apiKey, sort, cursor])
   const { stop, refresh, retry, pending: queuePending } = usePolling(loadQueue, {
     intervalMs: REFRESH_MS,
     waitAfterCompletion: true,
     onSuccess: (result) => {
+      setModelEnabled(result.model_enabled)
+      if (!result.model_enabled && sort === 'model_score') {
+        changeSort('rule_score')
+        return
+      }
       // Only a successful read listing the purchase confirms it is still pending.
       let reconciled = false
       for (const [id, inFlight] of requests.current) {
@@ -251,6 +298,8 @@ function ReviewQueue() {
     setKeyError(message)
     setPage(null)
     setCursors([null])
+    setSort('rule_score')
+    setModelEnabled(false)
     setOpenCase(null)
     setConfirmation(null)
     setFeedback(null)
@@ -271,6 +320,11 @@ function ReviewQueue() {
     setPage(null)
     setLoadError(null)
     setCursors(next)
+  }
+
+  function changeSort(next: ReviewSort) {
+    setSort(next)
+    goTo([null])
   }
 
   function chooseDecision(item: Review, decision: Decision) {
@@ -357,6 +411,15 @@ function ReviewQueue() {
         <CaseView key={openCase} apiKey={apiKey} purchaseId={openCase} time={time} onBack={() => setOpenCase(null)} onKeyRejected={rejectKey} />
       ) : (
         <>
+          {modelEnabled && (
+            <label>
+              Sort by{' '}
+              <select value={sort} onChange={event => changeSort(event.target.value === 'model_score' ? 'model_score' : 'rule_score')}>
+                <option value="rule_score">Rule score</option>
+                <option value="model_score">Model risk</option>
+              </select>
+            </label>
+          )}
           <p role="status">{feedback && !feedback.failed ? feedback.text : ''}</p>
           {feedback?.failed && (
             <ErrorState polite onRetry={loadError ? undefined : retry} pending={queuePending}>{feedback.text}</ErrorState>
@@ -368,7 +431,7 @@ function ReviewQueue() {
           )}
           {page === null && (!loadError || queuePending) && <LoadingSkeleton shape="table" label="Loading review queue…" />}
           {page && (page.items.length > 0 ? (
-            <ReviewTable items={page.items} pending={pending} time={time} onOpen={setOpenCase} onDecision={chooseDecision} />
+            <ReviewTable items={page.items} pending={pending} time={time} sort={sort} modelEnabled={modelEnabled} onOpen={setOpenCase} onDecision={chooseDecision} />
           ) : (
             <EmptyState>
               {cursor === null ? (

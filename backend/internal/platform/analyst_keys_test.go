@@ -39,3 +39,16 @@ func TestParseAnalystKeysRejectsInvalidConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestOperatorKeyMustDifferFromAnalystAndServiceKeys(t *testing.T) {
+	analysts, err := ParseAnalystKeys(`[{"analyst_id":"alice","key":"analyst-key"}]`, "service-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"analyst-key", "service-key"} {
+		_, err := ParseOperatorKeys(`[{"operator_id":"alice","key":"`+key+`"}]`, "service-key", analysts)
+		if err == nil || strings.Contains(err.Error(), key) {
+			t.Fatalf("unexpected operator key configuration error: %v", err)
+		}
+	}
+}

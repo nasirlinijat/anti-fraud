@@ -30,6 +30,8 @@ docker build --iidfile "$work_dir/api-image" "$root/backend"
 network=$(docker network create "$name")
 password="local-$name"
 api_key="api-$name"
+operator_key="operator-$name"
+runtime_password="runtime-$name"
 
 db=$(docker run --detach --rm --name "$name-db" --network "$network" --network-alias db \
     --publish 127.0.0.1::5432 \
@@ -45,9 +47,12 @@ db_url="postgres://scorebench:$password@db:5432/scorebench?sslmode=disable"
 docker run --rm --network "$network" -v "$root/backend/migrations:/migrations:ro" migrate/migrate:v4.20.1 \
     -path=/migrations -database "$db_url" up
 docker exec -i "$db" psql -X -v ON_ERROR_STOP=1 -U scorebench -d scorebench < "$root/scripts/scorebench-seed.sql"
+docker exec -i -e RUNTIME_DB_PASSWORD="$runtime_password" "$db" \
+    psql -X -v ON_ERROR_STOP=1 -U scorebench -d scorebench < "$root/backend/runtime-role.sql"
 
 api=$(docker run --detach --rm --name "$name-api" --network "$network" --publish 127.0.0.1::8080 \
-    -e PORT=8080 -e DATABASE_URL="$db_url" -e API_KEY="$api_key" \
+    -e PORT=8080 -e DATABASE_URL="postgres://antifraud_api:$runtime_password@db:5432/scorebench?sslmode=disable" \
+    -e API_KEY="$api_key" -e OPERATOR_API_KEYS="[{\"operator_id\":\"scorebench\",\"key\":\"$operator_key\"}]" \
     -e MODEL_PATH=/models/lgbm-ieee-v5-combined.json "$(cat "$work_dir/api-image")")
 db_address=$(docker port "$db" 5432/tcp)
 api_address=$(docker port "$api" 8080/tcp)
@@ -59,5 +64,5 @@ done
 
 cd "$root/backend"
 SCOREBENCH_DATABASE_URL="postgres://scorebench:$password@$db_address/scorebench?sslmode=disable" \
-    SCOREBENCH_API_URL="http://$api_address" SCOREBENCH_API_KEY="$api_key" \
+    SCOREBENCH_API_URL="http://$api_address" SCOREBENCH_API_KEY="$api_key" SCOREBENCH_OPERATOR_KEY="$operator_key" \
     go test -count=1 -timeout=5m -run '^TestScoreBenchmark$' -v ./internal/db

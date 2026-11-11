@@ -9,9 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
-const testKey = "test-key"
+const testKey = "operator-key"
+const serviceKey = "service-key"
 
 type fakeEntries struct {
 	entries []StoredEntry
@@ -24,7 +27,7 @@ type fakeEntries struct {
 
 func (f *fakeEntries) List(context.Context) ([]StoredEntry, error) { return f.entries, f.err }
 
-func (f *fakeEntries) Add(_ context.Context, e Entry) (StoredEntry, error) {
+func (f *fakeEntries) Add(_ context.Context, e Entry, _ string) (StoredEntry, error) {
 	if f.addErr != nil {
 		return StoredEntry{}, f.addErr
 	}
@@ -32,7 +35,7 @@ func (f *fakeEntries) Add(_ context.Context, e Entry) (StoredEntry, error) {
 	return StoredEntry{ID: 7, Type: e.Type, Value: e.Value, Reason: e.Reason, CreatedAt: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}, nil
 }
 
-func (f *fakeEntries) Remove(_ context.Context, id int64) error {
+func (f *fakeEntries) Remove(_ context.Context, id int64, _ string) error {
 	if f.rmErr != nil {
 		return f.rmErr
 	}
@@ -43,7 +46,11 @@ func (f *fakeEntries) Remove(_ context.Context, id int64) error {
 func call(t *testing.T, f *fakeEntries, method, path, body, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewHandler(f), testKey)
+	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"blocklist-operator","key":"`+testKey+`"}]`, serviceKey, platform.AnalystKeys{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	RegisterRoutes(mux, NewHandler(f), serviceKey, keys)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
 		req.Header.Set("X-API-Key", key)
@@ -55,13 +62,13 @@ func call(t *testing.T, f *fakeEntries, method, path, body, key string) *httptes
 
 func TestListEntries(t *testing.T) {
 	f := &fakeEntries{entries: []StoredEntry{{ID: 1, Type: TypeCard, Value: "bad-card", Reason: "stolen", CreatedAt: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}}}
-	rec := call(t, f, http.MethodGet, "/blocklist", "", testKey)
+	rec := call(t, f, http.MethodGet, "/blocklist", "", serviceKey)
 	want := `{"entries":[{"id":1,"type":"card","value":"bad-card","reason":"stolen","created_at":"2026-11-09T12:00:00Z"}]}`
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != want {
 		t.Fatalf("status %d body %s, want 200 %s", rec.Code, rec.Body.String(), want)
 	}
 
-	rec = call(t, &fakeEntries{entries: []StoredEntry{}}, http.MethodGet, "/blocklist", "", testKey)
+	rec = call(t, &fakeEntries{entries: []StoredEntry{}}, http.MethodGet, "/blocklist", "", serviceKey)
 	if strings.TrimSpace(rec.Body.String()) != `{"entries":[]}` {
 		t.Errorf("empty list body = %s", rec.Body.String())
 	}
@@ -137,10 +144,23 @@ func TestAddRejectsInvalidEntries(t *testing.T) {
 		})
 	}
 
-	for _, body := range []string{`not json`, `{"type":"card","value":"a","reason":"r","extra":1}`, `{"type":"card","value":"a","reason":"r"}{}`} {
-		if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", body, testKey); rec.Code != http.StatusBadRequest {
+	for _, body := range []string{
+		`not json`,
+		`{"type":"card","value":"a","reason":"r","extra":1}`,
+		`{"type":"card","value":"a","reason":"r"}{}`,
+		`{"type":"card","value":"a","reason":"r"}null`,
+	} {
+		f := &fakeEntries{}
+		if rec := call(t, f, http.MethodPost, "/blocklist", body, testKey); rec.Code != http.StatusBadRequest {
 			t.Errorf("body %s: status = %d, want 400", body, rec.Code)
 		}
+		if len(f.added) != 0 {
+			t.Error("an invalid entry was saved")
+		}
+	}
+	oversized := `{"type":"card","value":"a","reason":"` + strings.Repeat("r", maxBodyBytes) + `"}`
+	if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", oversized, testKey); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body: status = %d, want 413", rec.Code)
 	}
 }
 
@@ -181,7 +201,7 @@ func TestBlocklistRequiresAPIKey(t *testing.T) {
 func TestBlocklistInternalErrors(t *testing.T) {
 	boom := errors.New("database is down")
 	recs := []*httptest.ResponseRecorder{
-		call(t, &fakeEntries{err: boom}, http.MethodGet, "/blocklist", "", testKey),
+		call(t, &fakeEntries{err: boom}, http.MethodGet, "/blocklist", "", serviceKey),
 		call(t, &fakeEntries{addErr: boom}, http.MethodPost, "/blocklist", `{"type":"card","value":"a","reason":"r"}`, testKey),
 		call(t, &fakeEntries{rmErr: boom}, http.MethodDelete, "/blocklist/1", "", testKey),
 	}

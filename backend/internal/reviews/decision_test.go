@@ -20,7 +20,7 @@ import (
 
 type rejectUnexpectedReviewAccess struct{}
 
-func (rejectUnexpectedReviewAccess) queue(context.Context, int, *queueCursor) ([]QueueItem, error) {
+func (rejectUnexpectedReviewAccess) queue(context.Context, int, queueOrder, *queueCursor) ([]QueueItem, error) {
 	panic("unexpected queue read")
 }
 
@@ -44,7 +44,7 @@ func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest
 
 func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, platform.AnalystKeys{})
+	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, platform.AnalystKeys{}, false)
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
@@ -59,7 +59,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 
 func TestReviewDecisionRejectsInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, testAnalystKeys(t))
+	RegisterRoutes(mux, rejectUnexpectedReviewAccess{}, testAnalystKeys(t), false)
 	const target = "/reviews/1/decision"
 	const body = `{"decision":"approve"}`
 	for _, tc := range []struct {
@@ -95,7 +95,7 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	allowed := insertDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
 	store := NewStore(tx)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, store, testAnalystKeys(t))
+	RegisterRoutes(mux, store, testAnalystKeys(t), false)
 	q := db.New(tx)
 	since := pgtype.Timestamptz{Time: at, Valid: true}
 	until := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -203,7 +203,7 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 		return found
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t))
+	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
 	decide := func(id int64, body string) *httptest.ResponseRecorder {
 		return reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", queueTestKey, body)
 	}
@@ -229,6 +229,14 @@ func TestRejectCanBlockTheDevice(t *testing.T) {
 	var entries int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM blocklist_entries WHERE entry_type = 'device' AND value = 'device-bad'`).Scan(&entries); err != nil || entries != 1 {
 		t.Fatalf("entries for the device = %d, err = %v, want 1", entries, err)
+	}
+	var audited int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM configuration_audit_events
+		WHERE action = 'blocklist.add' AND actor_kind = 'analyst' AND actor_id = 'first'
+		  AND details->>'value' = 'device-bad'
+	`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("audit events for the device = %d, err = %v, want 1", audited, err)
 	}
 
 	// A conflicting decision creates no entry.
@@ -260,7 +268,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t))
+	RegisterRoutes(mux, NewStore(tx), testAnalystKeys(t), false)
 	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), score.NewStore(tx)), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {

@@ -172,7 +172,7 @@ func TestUseModelRejectsMismatch(t *testing.T) {
 }
 
 func TestUseModelAcceptsExportedModels(t *testing.T) {
-	for _, path := range []string{"../../models/lgbm-ieee-v5.json", "../../models/lgbm-ieee-v5-combined.json"} {
+	for _, path := range []string{"../../models/lgbm-ieee-v5.json", "../../models/lgbm-ieee-v5-combined.json", "../../models/lgbm-game-v2.json"} {
 		t.Run(path, func(t *testing.T) { useExportedModel(t, path) })
 	}
 }
@@ -280,5 +280,112 @@ func TestBlendAppliesToTheMainModelOfACombination(t *testing.T) {
 	d := purchases.decisions[0]
 	if d.ModelScoreUnblended == nil || *d.ModelScoreUnblended != 0.2 {
 		t.Errorf("saved unblended score %v, want the main model's own 0.2", d.ModelScoreUnblended)
+	}
+}
+
+func serveModelWithRuleset(t *testing.T, m Model, rs scoring.Ruleset, p Purchases, body string) scoreResponse {
+	t.Helper()
+	h := NewHandler(fakeRulesets{rs: rs}, &fakeBlocklist{}, p)
+	if err := h.UseModel(m, testPolicy); err != nil {
+		t.Fatalf("UseModel: %v", err)
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, h, testKey)
+	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
+	req.Header.Set("X-API-Key", testKey)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	return decodeJSON[scoreResponse](t, rec)
+}
+
+func withModel(rs scoring.Ruleset, m scoring.ModelSettings) scoring.Ruleset {
+	rs.Model = m
+	return rs
+}
+
+func TestModelModes(t *testing.T) {
+	tests := []struct {
+		name      string
+		mode      scoring.ModelMode
+		body      string
+		score     float64
+		want      scoring.Outcome
+		wantScore bool
+	}{
+		{"off leaves a review", scoring.ModelOff, reviewBody, 0, scoring.OutcomeReview, false},
+		{"off leaves an allow", scoring.ModelOff, minimalBody, 1, scoring.OutcomeAllow, false},
+		{"shadow does not clear a review", scoring.ModelShadow, reviewBody, 0, scoring.OutcomeReview, true},
+		{"shadow does not flag an allow", scoring.ModelShadow, minimalBody, 1, scoring.OutcomeAllow, true},
+		{"assist clears a review", scoring.ModelAssist, reviewBody, 0, scoring.OutcomeAllow, true},
+		{"assist flags an allow", scoring.ModelAssist, minimalBody, 1, scoring.OutcomeReview, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &fakeModel{score: tt.score}
+			purchases := &fakePurchases{}
+			rs := withModel(testRuleset, scoring.ModelSettings{Mode: tt.mode})
+			got := serveModelWithRuleset(t, m, rs, purchases, tt.body)
+			if got.Outcome != tt.want {
+				t.Errorf("outcome = %s, want %s", got.Outcome, tt.want)
+			}
+			d := purchases.decisions[0]
+			if tt.wantScore {
+				if got.ModelScore == nil || *got.ModelScore != tt.score || d.ModelScore == nil || *d.ModelScore != tt.score {
+					t.Errorf("model score: response %v, saved %v; want %v", got.ModelScore, d.ModelScore, tt.score)
+				}
+				if d.ModelVersion == nil || *d.ModelVersion != fakeModelVersion {
+					t.Errorf("saved model version = %v, want %s", d.ModelVersion, fakeModelVersion)
+				}
+			} else {
+				if m.got != nil {
+					t.Error("the model was run in off mode")
+				}
+				if got.ModelScore != nil || got.ModelVersion != nil || d.ModelScore != nil || d.ModelScoreUnblended != nil || d.ModelVersion != nil {
+					t.Errorf("model score and version were returned or saved in off mode: %+v", d)
+				}
+			}
+			if len(d.ModelInputs) != len(features.Names) {
+				t.Errorf("saved %d model inputs, want all %d in every mode", len(d.ModelInputs), len(features.Names))
+			}
+		})
+	}
+}
+
+func TestModelNeverBlocksInAnyMode(t *testing.T) {
+	for _, mode := range []scoring.ModelMode{scoring.ModelOff, scoring.ModelShadow, scoring.ModelAssist} {
+		for _, body := range []string{minimalBody, reviewBody} {
+			got := serveModelWithRuleset(t, &fakeModel{score: 1}, withModel(testRuleset, scoring.ModelSettings{Mode: mode}), &fakePurchases{}, body)
+			if got.Outcome == scoring.OutcomeBlock {
+				t.Errorf("mode %s: a model score of 1 blocked a purchase the rules did not block", mode)
+			}
+		}
+	}
+}
+
+func TestRulesetThresholdsReplaceReportThresholds(t *testing.T) {
+	clearBelow, flagAt := 0.5, 0.95
+	rs := withModel(testRuleset, scoring.ModelSettings{Mode: scoring.ModelAssist, ClearBelow: &clearBelow, FlagAt: &flagAt})
+
+	// The report's clear_below of 0.01 would keep this review.
+	if got := serveModelWithRuleset(t, &fakeModel{score: 0.4}, rs, &fakePurchases{}, reviewBody); got.Outcome != scoring.OutcomeAllow {
+		t.Errorf("review with score 0.4 = %s, want allow below the ruleset's clear_below 0.5", got.Outcome)
+	}
+	// The report's flag_at of 0.3 would flag this allow.
+	if got := serveModelWithRuleset(t, &fakeModel{score: 0.9}, rs, &fakePurchases{}, minimalBody); got.Outcome != scoring.OutcomeAllow {
+		t.Errorf("allow with score 0.9 = %s, want allow below the ruleset's flag_at 0.95", got.Outcome)
+	}
+}
+
+func TestRulesOnlyWithoutModelInEveryMode(t *testing.T) {
+	for _, mode := range []scoring.ModelMode{scoring.ModelOff, scoring.ModelShadow, scoring.ModelAssist} {
+		purchases := &fakePurchases{}
+		rec := serve(t, fakeRulesets{rs: withModel(testRuleset, scoring.ModelSettings{Mode: mode})}, purchases, testKey, reviewBody)
+		got := decodeJSON[scoreResponse](t, rec)
+		if got.Outcome != scoring.OutcomeReview || got.ModelScore != nil || purchases.decisions[0].ModelScore != nil {
+			t.Errorf("mode %s without a model: outcome %s, model score %v; want review from the rules and no score", mode, got.Outcome, got.ModelScore)
+		}
 	}
 }

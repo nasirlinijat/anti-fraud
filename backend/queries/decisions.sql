@@ -50,22 +50,6 @@ FROM purchases p
 JOIN decisions d ON d.purchase_id = p.id
 WHERE p.transaction_id = sqlc.arg(transaction_id);
 
--- name: ListReviewQueue :many
-SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
-       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at
-FROM decisions d
-JOIN purchases p ON p.id = d.purchase_id
-WHERE d.outcome = 'review'
-  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
-  AND (
-      sqlc.narg(after_decided_at)::timestamptz IS NULL
-      OR (d.decided_at, d.purchase_id) > (
-          sqlc.narg(after_decided_at)::timestamptz, sqlc.narg(after_purchase_id)::bigint
-      )
-  )
-ORDER BY d.decided_at, d.purchase_id
-LIMIT sqlc.arg(page_limit);
-
 -- name: GetReviewCase :one
 SELECT d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
        d.ruleset_version, d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at

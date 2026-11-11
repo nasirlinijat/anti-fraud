@@ -52,6 +52,12 @@ paths:
         2. Otherwise the enabled rules of the active ruleset add points. A
            total at or above the block threshold is `block`, at or above the
            review threshold is `review`, and anything lower is `allow`.
+        3. When a fraud model is loaded, the `model.mode` of the active
+           ruleset decides how it is used. `off` computes and saves no model
+           score. `shadow` saves the score but leaves the outcome unchanged.
+           `assist` clears a `review` with a score below `clear_below` and
+           sends an `allow` with a score at or above `flag_at` to review. The
+           model never blocks a purchase in any mode.
 
         Purchases with the outcome `review` go to the review queue for an
         analyst. After authentication and validation, a retry with the same
@@ -339,7 +345,7 @@ paths:
         IP addresses are stored in canonical form, so `::ffff:203.0.113.9`
         is saved as `203.0.113.9`.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       requestBody:
         required: true
         content:
@@ -379,13 +385,13 @@ paths:
                   value: must be an IPv4 or IPv6 address
                   reason: is required
         "401":
-          description: The API key is missing or wrong.
+          description: The operator key is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid API key
+                error: missing or invalid operator key
         "409":
           description: The same type and value are already on the blocklist.
           content:
@@ -396,6 +402,12 @@ paths:
                 error: this value is already on the blocklist
                 fields:
                   value: is already on the blocklist
+        "413":
+          description: The request body exceeds 4096 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: The entry could not be saved.
           content:
@@ -404,6 +416,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
 
   /blocklist/{id}:
     delete:
@@ -412,7 +426,7 @@ paths:
       summary: Remove a blocklist entry
       description: The value is no longer blocked from the next scored purchase on.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       parameters:
         - name: id
           in: path
@@ -433,13 +447,13 @@ paths:
               example:
                 error: the entry ID must be a positive integer
         "401":
-          description: The API key is missing or wrong.
+          description: The operator key is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid API key
+                error: missing or invalid operator key
         "404":
           description: No entry has this ID.
           content:
@@ -456,6 +470,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
 
   /reviews:
     get:
@@ -463,11 +479,19 @@ paths:
       operationId: listReviews
       summary: List purchases awaiting review
       description: >-
-        Returns up to 100 purchases, ordered by when they entered the review
-        queue, oldest first. Follow next_cursor to reach the next page.
+        Returns up to 100 purchases, highest score first. Ties go to the oldest
+        queued purchase, then the lowest purchase ID. Model sorting puts
+        missing scores last. Follow next_cursor with the same sort order.
       security:
         - AnalystKeyAuth: []
       parameters:
+        - in: query
+          name: sort
+          description: Score used to order the queue.
+          schema:
+            type: string
+            enum: [rule_score, model_score]
+            default: rule_score
         - in: query
           name: cursor
           description: Opaque next_cursor from a previous response. Omit for the first page.
@@ -488,7 +512,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewPage"
         "400":
-          description: The cursor is malformed.
+          description: The sort order or cursor is invalid, or the cursor belongs to a different sort order.
           content:
             application/json:
               schema:
@@ -598,8 +622,9 @@ paths:
       summary: Get the evidence behind a purchase awaiting review
       description: >-
         Returns one purchase marked for review with its rule score, fired rules
-        and points, the version of the ruleset that scored it, and the model
-        score when one was recorded.
+        and points, the version of the ruleset that scored it, the model
+        score when one was recorded, the player's recent purchases before this
+        one, and activity on the same device.
       security:
         - AnalystKeyAuth: []
       parameters:
@@ -649,35 +674,46 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
-  /rulesets/active:
+  /rulesets:
     get:
       tags: [Rulesets]
-      operationId: getActiveRuleset
-      summary: Read the active ruleset
+      operationId: listRulesets
+      summary: List ruleset versions
+      description: Returns all published ruleset versions, newest first, with their version number, optional note, and creation time.
       security:
         - ApiKeyAuth: []
       responses:
         "200":
-          description: The current version and its settings.
+          description: All ruleset versions.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ruleset"
+                type: object
+                required: [versions]
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RulesetSummary"
         "401":
           description: Missing or invalid API key.
         "500":
-          description: The ruleset could not be read.
-
-  /rulesets:
+          description: The ruleset history could not be read.
     post:
       tags: [Rulesets]
       operationId: publishRuleset
       summary: Publish and activate a new ruleset version
       description: |
         Submit the complete configuration. Rules absent from `rules` are
-        disabled in the new version. Existing decisions retain their version.
+        disabled in the new version. An optional `note` explains why the
+        version was made and is saved with the version. Existing decisions
+        retain their version.
+
+        Without `model`, the new version keeps the model settings of the
+        active version. Thresholds that are still missing are taken from the
+        report of the loaded model; without a loaded model they stay null.
       security:
-        - ApiKeyAuth: []
+        - OperatorKeyAuth: []
       requestBody:
         required: true
         content:
@@ -698,11 +734,71 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid API key.
+          description: Missing or invalid operator key.
         "413":
           description: The request body exceeds 65536 bytes.
         "500":
           description: The ruleset could not be published.
+        "503":
+          $ref: "#/components/responses/OperatorAccessUnavailable"
+
+  /rulesets/active:
+    get:
+      tags: [Rulesets]
+      operationId: getActiveRuleset
+      summary: Read the active ruleset
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: The current version and its settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "401":
+          description: Missing or invalid API key.
+        "500":
+          description: The ruleset could not be read.
+
+  /rulesets/{version}:
+    get:
+      tags: [Rulesets]
+      operationId: getRuleset
+      summary: Read a ruleset version
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        "200":
+          description: The requested ruleset version and its settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ruleset"
+        "400":
+          description: The version is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+        "404":
+          description: No ruleset has this version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The ruleset could not be read.
 
 components:
   securitySchemes:
@@ -719,7 +815,20 @@ components:
       name: X-API-Key
       description: The individual key assigned to the analyst in REVIEW_ANALYST_KEYS.
 
+    OperatorKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: The individual key assigned to the operator in OPERATOR_API_KEYS.
+
   responses:
+    OperatorAccessUnavailable:
+      description: No operator keys are configured.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
     ReviewAccessUnavailable:
       description: No analyst keys are configured.
       content:
@@ -751,7 +860,7 @@ components:
 
     ReviewPage:
       type: object
-      required: [items, next_cursor]
+      required: [items, next_cursor, model_enabled]
       properties:
         items:
           type: array
@@ -762,6 +871,9 @@ components:
           type: string
           nullable: true
           description: Cursor for the next page, or null if this is the last page.
+        model_enabled:
+          type: boolean
+          description: Whether the scoring service currently has a model loaded.
 
     ReviewItem:
       type: object
@@ -815,24 +927,92 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version]
+          required: [ruleset_version, player_purchases, device_activity]
           properties:
             ruleset_version:
               type: integer
               format: int32
               description: The ruleset version that scored the purchase.
               example: 2
+            player_purchases:
+              type: array
+              maxItems: 5
+              description: Up to 5 recent purchases by the same player before this one, newest first.
+              items:
+                $ref: "#/components/schemas/CasePlayerPurchase"
+            device_activity:
+              $ref: "#/components/schemas/CaseDeviceActivity"
+
+    CasePlayerPurchase:
+      type: object
+      required: [transaction_id, event_time, amount_minor, outcome]
+      properties:
+        transaction_id:
+          type: string
+        event_time:
+          type: string
+          format: date-time
+          description: The purchase time in UTC.
+        amount_minor:
+          type: string
+          description: The integer amount in minor units as a decimal string.
+        outcome:
+          type: string
+          enum: [allow, review, block]
+
+    CaseDeviceActivity:
+      type: object
+      nullable: true
+      description: Activity on the same device up to this purchase, or null when the purchase carried no device_id.
+      required: [purchases, distinct_cards, last_seen_at]
+      properties:
+        purchases:
+          type: integer
+          format: int64
+          minimum: 1
+        distinct_cards:
+          type: integer
+          format: int64
+          minimum: 1
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Latest purchase time on this device up to this purchase, in UTC.
+
+    RulesetSummary:
+      type: object
+      required: [version, note, created_at]
+      properties:
+        version:
+          type: integer
+          format: int32
+          example: 2
+        note:
+          type: string
+          description: Optional note saved when the version was published, or empty string when omitted.
+          example: Lower review threshold for weekend promo
+        created_at:
+          type: string
+          format: date-time
+          description: When the version was published, in UTC.
 
     Ruleset:
       allOf:
         - $ref: "#/components/schemas/RulesetConfig"
         - type: object
-          required: [version]
+          required: [version, note, created_at, model]
           properties:
             version:
               type: integer
               format: int32
               example: 2
+            note:
+              type: string
+              example: Lower review threshold for weekend promo
+            created_at:
+              type: string
+              format: date-time
+              description: When the version was published, in UTC.
 
     RulesetConfig:
       type: object
@@ -849,6 +1029,11 @@ components:
           minimum: 1
           description: Must be greater than `review_threshold`.
           example: 80
+        note:
+          type: string
+          maxLength: 500
+          description: Optional note explaining why this version was published. Trimmed before saving.
+          example: Lower review threshold for weekend promo
         rules:
           type: object
           description: |
@@ -898,6 +1083,49 @@ components:
             card_velocity: { enabled: true, weight: 40, limit: 5 }
             new_account: { enabled: true, weight: 20, limit: 24 }
             country_mismatch: { enabled: true, weight: 25 }
+        model:
+          $ref: "#/components/schemas/ModelSettings"
+
+    ModelSettings:
+      type: object
+      description: |
+        How the version uses the fraud model. Without a loaded model
+        (MODEL_PATH is empty) the service scores with rules only, whatever the
+        mode says. The model never blocks a purchase.
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [off, shadow, assist]
+          description: |
+            `off` computes and saves no model score. `shadow` saves the model
+            score but does not change the outcome. `assist` lets the model
+            clear a review or send an allowed purchase to review. Model
+            inputs are saved in every mode.
+          example: assist
+        clear_below:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: |
+            A purchase the rules send to review is allowed when its model
+            score is below this value. Must be lower than `flag_at`, and the
+            two are set together. Null in versions published before model
+            settings existed; those use the loaded model's report.
+          example: 0.391385
+        flag_at:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: |
+            An allowed purchase goes to review when its model score is at or
+            above this value. Null in versions published before model settings
+            existed; those use the loaded model's report.
+          example: 0.994001
 
     ScoreRequest:
       type: object
@@ -1076,9 +1304,10 @@ components:
             `allow` lets the purchase through. `review` sends it to an
             analyst. `block` rejects it, because of a blocklist match or
             because the rule score reached the block threshold. When a fraud
-            model is loaded, a review with a model score below `clear_below`
-            becomes `allow`, and an allow with a model score at or above
-            `flag_at` becomes `review`. The model never blocks a purchase.
+            model is loaded and the ruleset's model mode is `assist`, a review
+            with a model score below `clear_below` becomes `allow`, and an
+            allow with a model score at or above `flag_at` becomes `review`.
+            The model never blocks a purchase.
           example: allow
         score:
           type: integer
@@ -1105,7 +1334,7 @@ components:
             model it is the higher of two percentiles: where the purchase ranks
             among validation purchases for the main model and for the
             first-fraud model. It is null when the service runs without a
-            model (MODEL_PATH is empty).
+            model (MODEL_PATH is empty) or the ruleset's model mode is `off`.
           example: 0.0074
         model_version:
           type: string
@@ -1113,7 +1342,8 @@ components:
           description: >-
             Version of the model that gave model_score, such as
             lgbm-ieee-v5-combined. It is saved with the decision. It is null
-            when the service runs without a model.
+            when the service runs without a model or the ruleset's model mode
+            is `off`.
           example: lgbm-ieee-v5-combined
 
     FiredRule:

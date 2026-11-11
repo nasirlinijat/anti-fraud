@@ -37,7 +37,28 @@ type CaseItem struct {
 	QueueItem
 	// RulesetVersion is the ruleset version that scored the purchase.
 	RulesetVersion int
+	// PlayerPurchases lists the player's recent purchases before this one, newest first.
+	PlayerPurchases []PlayerPurchase
+	// DeviceActivity summarizes activity on the same device, or is nil when the purchase had no device ID.
+	DeviceActivity *DeviceActivity
 }
+
+// PlayerPurchase is an earlier purchase by the same player.
+type PlayerPurchase struct {
+	TransactionID string
+	EventTime     time.Time
+	AmountMinor   int64
+	Outcome       scoring.Outcome
+}
+
+// DeviceActivity summarizes recent activity on the same device.
+type DeviceActivity struct {
+	Purchases     int64
+	DistinctCards int64
+	LastSeenAt    time.Time
+}
+
+const casePlayerPurchaseLimit = 5
 
 // ErrNotFound means no purchase under review has the given ID.
 var ErrNotFound = errors.New("review case not found")
@@ -90,7 +111,7 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 				Type:   blocklist.TypeDevice,
 				Value:  device.String,
 				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
-			})
+			}, analystID)
 			if err != nil {
 				return resolution{}, err
 			}
@@ -104,23 +125,38 @@ func (s *Store) resolve(ctx context.Context, purchaseID int64, decision, analyst
 	return result, nil
 }
 
-// Queue returns up to limit purchases marked for review, the earliest decided first.
+// Queue returns up to limit purchases marked for review, highest rule score first.
 func (s *Store) Queue(ctx context.Context, limit int) ([]QueueItem, error) {
-	return s.queue(ctx, limit, nil)
+	return s.queue(ctx, limit, byRuleScore, nil)
 }
+
+type queueOrder string
+
+const (
+	byRuleScore  queueOrder = "rule_score"
+	byModelScore queueOrder = "model_score"
+)
 
 type queueCursor struct {
 	decidedAt  time.Time
 	purchaseID int64
+	scoreKey   float64
 }
 
-func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]QueueItem, error) {
-	params := db.ListReviewQueueParams{PageLimit: int32(limit)}
-	if after != nil {
-		params.AfterDecidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
-		params.AfterPurchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
+func cursorFor(order queueOrder, item QueueItem) queueCursor {
+	// Match the ascending score keys in the SQL, including the key for NULL.
+	key := -float64(item.RuleScore)
+	if order == byModelScore {
+		key = 1
+		if item.ModelScore != nil {
+			key = -*item.ModelScore
+		}
 	}
-	rows, err := s.q.ListReviewQueue(ctx, params)
+	return queueCursor{decidedAt: item.DecidedAt, purchaseID: item.PurchaseID, scoreKey: key}
+}
+
+func (s *Store) queue(ctx context.Context, limit int, order queueOrder, after *queueCursor) ([]QueueItem, error) {
+	rows, err := s.queueRows(ctx, int32(limit), order, after)
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}
@@ -135,6 +171,35 @@ func (s *Store) queue(ctx context.Context, limit int, after *queueCursor) ([]Que
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (s *Store) queueRows(ctx context.Context, limit int32, order queueOrder, after *queueCursor) ([]db.ListReviewQueueRow, error) {
+	var decidedAt pgtype.Timestamptz
+	var purchaseID pgtype.Int8
+	var score float64
+	if after != nil {
+		decidedAt = pgtype.Timestamptz{Time: after.decidedAt, Valid: true}
+		purchaseID = pgtype.Int8{Int64: after.purchaseID, Valid: true}
+		score = after.scoreKey
+	}
+	if order == byRuleScore {
+		return s.q.ListReviewQueue(ctx, db.ListReviewQueueParams{
+			PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
+			AfterScore: pgtype.Int4{Int32: int32(score), Valid: after != nil},
+		})
+	}
+	rows, err := s.q.ListReviewQueueByModel(ctx, db.ListReviewQueueByModelParams{
+		PageLimit: limit, AfterDecidedAt: decidedAt, AfterPurchaseID: purchaseID,
+		AfterScore: pgtype.Float8{Float64: score, Valid: after != nil},
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]db.ListReviewQueueRow, len(rows))
+	for i, row := range rows {
+		result[i] = db.ListReviewQueueRow(row)
+	}
+	return result, nil
 }
 
 // Case returns the purchase with the given ID if it is under review. It
@@ -152,7 +217,49 @@ func (s *Store) Case(ctx context.Context, purchaseID int64) (CaseItem, error) {
 	if err != nil {
 		return CaseItem{}, err
 	}
-	return CaseItem{QueueItem: item, RulesetVersion: int(r.RulesetVersion)}, nil
+
+	historyRows, err := s.q.ListCasePlayerPurchases(ctx, db.ListCasePlayerPurchasesParams{
+		PlayerID:      r.PlayerID,
+		EventTime:     r.EventTime,
+		TransactionID: r.TransactionID,
+		PageLimit:     casePlayerPurchaseLimit,
+	})
+	if err != nil {
+		return CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
+	}
+	playerPurchases := make([]PlayerPurchase, 0, len(historyRows))
+	for _, row := range historyRows {
+		playerPurchases = append(playerPurchases, PlayerPurchase{
+			TransactionID: row.TransactionID,
+			EventTime:     row.EventTime.Time.UTC(),
+			AmountMinor:   row.AmountMinor,
+			Outcome:       scoring.Outcome(row.Outcome),
+		})
+	}
+
+	var deviceActivity *DeviceActivity
+	if r.DeviceID.Valid {
+		activity, err := s.q.GetCaseDeviceActivity(ctx, db.GetCaseDeviceActivityParams{
+			DeviceID:      r.DeviceID.String,
+			EventTime:     r.EventTime,
+			TransactionID: r.TransactionID,
+		})
+		if err != nil {
+			return CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
+		}
+		deviceActivity = &DeviceActivity{
+			Purchases:     activity.Purchases,
+			DistinctCards: activity.DistinctCards,
+			LastSeenAt:    activity.LastSeenAt.Time.UTC(),
+		}
+	}
+
+	return CaseItem{
+		QueueItem:       item,
+		RulesetVersion:  int(r.RulesetVersion),
+		PlayerPurchases: playerPurchases,
+		DeviceActivity:  deviceActivity,
+	}, nil
 }
 
 func newQueueItem(

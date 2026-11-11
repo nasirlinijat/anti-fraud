@@ -8,8 +8,10 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -17,17 +19,30 @@ import (
 
 const maxBodyBytes = 64 << 10
 const maxDeviceSpikeWindowDays = 3650
+const maxNoteRunes = 500
 
-// RegisterRoutes exposes the active ruleset and version publishing.
-func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string) {
+// RegisterRoutes exposes the active ruleset, version history, and version publishing.
+func RegisterRoutes(mux *http.ServeMux, store *Store, apiKey string, operators platform.OperatorKeys) {
+	mux.Handle("GET /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.list)))
 	mux.Handle("GET /rulesets/active", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getActive)))
-	mux.Handle("POST /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.publish)))
+	mux.Handle("GET /rulesets/{version}", platform.RequireAPIKey(apiKey, http.HandlerFunc(store.getVersion)))
+	mux.Handle("POST /rulesets", platform.RequireOperator(operators, store.publish))
 }
 
 type configPayload struct {
 	ReviewThreshold int32                             `json:"review_threshold"`
 	BlockThreshold  int32                             `json:"block_threshold"`
+	Note            string                            `json:"note"`
 	Rules           map[scoring.RuleName]*rulePayload `json:"rules"`
+	Model           *modelPayload                     `json:"model,omitempty"`
+}
+
+// modelPayload is how a version uses the fraud model. Null thresholds in a
+// response mean the version uses the thresholds of the loaded model's report.
+type modelPayload struct {
+	Mode       scoring.ModelMode `json:"mode"`
+	ClearBelow *float64          `json:"clear_below"`
+	FlagAt     *float64          `json:"flag_at"`
 }
 
 type rulePayload struct {
@@ -37,6 +52,18 @@ type rulePayload struct {
 	WindowDays       *int32 `json:"window_days,omitempty"`
 	MinAmountMinor   *int64 `json:"min_amount_minor,omitempty"`
 	AmountMultiplier *int32 `json:"amount_multiplier,omitempty"`
+}
+
+func (s *Store) list(w http.ResponseWriter, r *http.Request) {
+	versions, err := s.List(r.Context())
+	if err != nil {
+		log.Printf("list rulesets: %v", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, struct {
+		Versions []VersionSummary `json:"versions"`
+	}{Versions: versions})
 }
 
 func (s *Store) getActive(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +76,26 @@ func (s *Store) getActive(w http.ResponseWriter, r *http.Request) {
 	writeRuleset(w, http.StatusOK, rs)
 }
 
-func (s *Store) publish(w http.ResponseWriter, r *http.Request) {
+func (s *Store) getVersion(w http.ResponseWriter, r *http.Request) {
+	version, err := strconv.ParseInt(r.PathValue("version"), 10, 32)
+	if err != nil || version <= 0 {
+		platform.WriteError(w, http.StatusBadRequest, "the ruleset version must be a positive integer")
+		return
+	}
+	rs, err := s.Version(r.Context(), int32(version))
+	if errors.Is(err, ErrNotFound) {
+		platform.WriteError(w, http.StatusNotFound, "no ruleset has this version")
+		return
+	}
+	if err != nil {
+		log.Printf("read ruleset %d: %v", version, err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeRuleset(w, http.StatusOK, rs)
+}
+
+func (s *Store) publish(w http.ResponseWriter, r *http.Request, operatorID string) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	var payload *configPayload
@@ -72,7 +118,7 @@ func (s *Store) publish(w http.ResponseWriter, r *http.Request) {
 		platform.WriteJSON(w, http.StatusBadRequest, platform.ErrorResponse{Error: "invalid request", Fields: fields})
 		return
 	}
-	rs, err := s.Publish(r.Context(), rs)
+	rs, err := s.Publish(r.Context(), rs, operatorID)
 	if err != nil {
 		log.Printf("%v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
@@ -109,6 +155,10 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	if p.BlockThreshold <= p.ReviewThreshold || p.BlockThreshold <= 0 {
 		fields["block_threshold"] = "must be positive and greater than review_threshold"
 	}
+	note := strings.TrimSpace(p.Note)
+	if utf8.RuneCountInString(note) > maxNoteRunes {
+		fields["note"] = fmt.Sprintf("must be at most %d characters", maxNoteRunes)
+	}
 	if p.Rules == nil {
 		fields["rules"] = "is required"
 	}
@@ -116,6 +166,7 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	rs := scoring.Ruleset{
 		ReviewThreshold: int(p.ReviewThreshold),
 		BlockThreshold:  int(p.BlockThreshold),
+		Note:            note,
 		Rules:           make(map[scoring.RuleName]scoring.RuleConfig, len(p.Rules)),
 	}
 	var maxScore int64
@@ -182,7 +233,33 @@ func (p configPayload) ruleset() (scoring.Ruleset, map[string]string) {
 	if maxScore > math.MaxInt32 {
 		fields["rules"] = fmt.Sprintf("enabled rule weights must add up to at most %d", math.MaxInt32)
 	}
+	if p.Model != nil {
+		rs.Model = p.Model.settings(fields)
+	}
 	return rs, fields
+}
+
+// settings validates the model settings and adds problems to fields.
+func (m modelPayload) settings(fields map[string]string) scoring.ModelSettings {
+	if !m.Mode.Known() {
+		fields["model.mode"] = "must be off, shadow, or assist"
+	}
+	inRange := func(name string, v *float64) bool {
+		if v != nil && (*v < 0 || *v > 1) {
+			fields["model."+name] = "must be between 0 and 1"
+			return false
+		}
+		return true
+	}
+	rangesValid := inRange("clear_below", m.ClearBelow)
+	rangesValid = inRange("flag_at", m.FlagAt) && rangesValid
+	switch {
+	case (m.ClearBelow == nil) != (m.FlagAt == nil):
+		fields["model"] = "clear_below and flag_at must be set together"
+	case rangesValid && m.ClearBelow != nil && *m.ClearBelow >= *m.FlagAt:
+		fields["model.clear_below"] = "must be lower than flag_at"
+	}
+	return scoring.ModelSettings{Mode: m.Mode, ClearBelow: m.ClearBelow, FlagAt: m.FlagAt}
 }
 
 func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
@@ -198,14 +275,22 @@ func writeRuleset(w http.ResponseWriter, status int, rs scoring.Ruleset) {
 		rules[name] = payload
 	}
 	platform.WriteJSON(w, status, struct {
-		Version int `json:"version"`
+		Version   int       `json:"version"`
+		CreatedAt time.Time `json:"created_at"`
 		configPayload
 	}{
-		Version: rs.Version,
+		Version:   rs.Version,
+		CreatedAt: rs.CreatedAt.UTC(),
 		configPayload: configPayload{
 			ReviewThreshold: int32(rs.ReviewThreshold),
 			BlockThreshold:  int32(rs.BlockThreshold),
+			Note:            rs.Note,
 			Rules:           rules,
+			Model: &modelPayload{
+				Mode:       rs.Model.Mode,
+				ClearBelow: rs.Model.ClearBelow,
+				FlagAt:     rs.Model.FlagAt,
+			},
 		},
 	})
 }

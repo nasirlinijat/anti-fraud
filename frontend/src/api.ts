@@ -81,11 +81,20 @@ export interface RuleSettings {
 export interface RulesetConfig {
   review_threshold: number
   block_threshold: number
+  note?: string
   rules: Record<string, RuleSettings>
 }
 
 export interface Ruleset extends RulesetConfig {
   version: number
+  note: string
+  created_at: string
+}
+
+export interface RulesetSummary {
+  version: number
+  note: string
+  created_at: string
 }
 
 // The API sends 64-bit thresholds as JSON integers. Keep their exact value in the editor.
@@ -107,10 +116,20 @@ export function getActiveRuleset(signal?: AbortSignal): Promise<Ruleset> {
   return request('/rulesets/active', { read: readRuleset, signal })
 }
 
-export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
+export function getRuleset(version: number, signal?: AbortSignal): Promise<Ruleset> {
+  return request(`/rulesets/${version}`, { read: readRuleset, signal })
+}
+
+export async function listRulesets(signal?: AbortSignal): Promise<RulesetSummary[]> {
+  const result = await request<{ versions: RulesetSummary[] }>('/rulesets', { signal })
+  return result.versions
+}
+
+export function publishRuleset(config: RulesetConfig, operatorKey: string): Promise<Saved<Ruleset>> {
   return save(() => request('/rulesets', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: 'operator',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
     body: JSON.stringify(config, (_key, value: unknown) => {
       if (typeof value !== 'bigint') return value
       const number = Number(value)
@@ -122,22 +141,23 @@ export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
   }))
 }
 
-// The proxy adds the API key to the blocklist requests.
+// The proxy adds the service key to blocklist reads.
 export async function listBlocklist(signal?: AbortSignal): Promise<BlocklistEntry[]> {
   const result = await request<{ entries: BlocklistEntry[] }>('/blocklist', { signal })
   return result.entries
 }
 
-export function addBlocklistEntry(entry: { type: string; value: string; reason: string }): Promise<Saved<BlocklistEntry>> {
+export function addBlocklistEntry(entry: { type: string; value: string; reason: string }, operatorKey: string): Promise<Saved<BlocklistEntry>> {
   return save(() => request<BlocklistEntry>('/blocklist', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    auth: 'operator',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
     body: JSON.stringify(entry),
   }))
 }
 
-export function removeBlocklistEntry(id: number): Promise<Saved<null>> {
-  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', read: async () => null }))
+export function removeBlocklistEntry(id: number, operatorKey: string): Promise<Saved<null>> {
+  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', auth: 'operator', headers: { 'X-API-Key': operatorKey }, read: async () => null }))
 }
 
 export type ScoreResult =
@@ -176,20 +196,38 @@ export interface Review {
   fired_rules: FiredRule[]
 }
 
+export interface PlayerPurchase {
+  transaction_id: string
+  event_time: string
+  amount_minor: string
+  outcome: Outcome
+}
+
+export interface DeviceActivity {
+  purchases: number
+  distinct_cards: number
+  last_seen_at: string
+}
+
 export interface ReviewCase extends Review {
   ruleset_version: number
+  player_purchases: PlayerPurchase[]
+  device_activity: DeviceActivity | null
 }
 
 export interface QueuePage {
   items: Review[]
   next_cursor: string | null
+  model_enabled: boolean
 }
 
+export type ReviewSort = 'rule_score' | 'model_score'
 export type Decision = 'approve' | 'reject'
 
-export function listReviews(analystKey: string, cursor: string | null, signal: AbortSignal): Promise<QueuePage> {
-  const path = cursor === null ? '/reviews' : `/reviews?${new URLSearchParams({ cursor })}`
-  return request(path, { auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal })
+export function listReviews(analystKey: string, sort: ReviewSort, cursor: string | null, signal: AbortSignal): Promise<QueuePage> {
+  const params = new URLSearchParams({ sort })
+  if (cursor !== null) params.set('cursor', cursor)
+  return request(`/reviews?${params}`, { auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal })
 }
 
 export function getReviewCase(analystKey: string, purchaseId: string, signal: AbortSignal): Promise<ReviewCase> {

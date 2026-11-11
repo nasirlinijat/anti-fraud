@@ -30,6 +30,7 @@ const placeholders: Record<EntryType, string> = {
 function BlocklistPage() {
   const [entries, setEntries] = useState<BlocklistEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [operatorKey, setOperatorKey] = useState('')
   const [type, setType] = useState<EntryType>('card')
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
@@ -50,10 +51,10 @@ function BlocklistPage() {
 
   const add = async (e: FormEvent) => {
     e.preventDefault()
-    if (saving) return
+    if (saving || !operatorKey.trim()) return
     setSaving(true)
     setNotice(null)
-    const res = await addBlocklistEntry({ type, value, reason })
+    const res = await addBlocklistEntry({ type, value, reason }, operatorKey.trim())
     setSaving(false)
     if (!res.ok) {
       setFormError(res.error)
@@ -67,14 +68,14 @@ function BlocklistPage() {
   }
 
   const remove = async (entry: BlocklistEntry) => {
-    if (removing !== null) return
+    if (removing !== null || !operatorKey.trim()) return
     if (!window.confirm(`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value} from the blocklist?`)) {
       return
     }
     setRemoving(entry.id)
     setRemoveError(null)
     setNotice(null)
-    const res = await removeBlocklistEntry(entry.id)
+    const res = await removeBlocklistEntry(entry.id, operatorKey.trim())
     setRemoving(null)
     if (res.ok) setNotice(`${typeNames[entry.type]} ${entry.value} is no longer blocked.`)
     else setRemoveError(res.error.error)
@@ -90,6 +91,12 @@ function BlocklistPage() {
         A purchase whose card, device, player or IP address is on the blocklist is blocked before the rules run. A new
         entry applies to the next scored purchase.
       </p>
+
+      <div className="field">
+        <label htmlFor="blocklist-operator-key">Operator key</label>
+        <input id="blocklist-operator-key" type="password" autoComplete="off" value={operatorKey}
+          onChange={(event) => setOperatorKey(event.target.value)} />
+      </div>
 
       <form className="panel blocklist-form" onSubmit={add} noValidate>
         <h3>Add an entry</h3>
@@ -150,7 +157,7 @@ function BlocklistPage() {
             {formError.error}
           </ErrorState>
         )}
-        <button type="submit" disabled={saving}>
+        <button type="submit" disabled={saving || !operatorKey.trim()}>
           {saving ? 'Adding…' : 'Add to blocklist'}
         </button>
       </form>
@@ -196,7 +203,7 @@ function BlocklistPage() {
                     <button
                       type="button"
                       className="secondary"
-                      disabled={removing !== null}
+                      disabled={removing !== null || !operatorKey.trim()}
                       onClick={() => remove(entry)}
                       aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}
                     >

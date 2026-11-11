@@ -26,7 +26,11 @@ From the repository root, use Docker with the Compose plugin to run the console.
    docker compose down
    ```
 
-Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to score, stats, blocklist, and ruleset requests. Review requests use the analyst key entered in the console.
+Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to scoring, statistics, and configuration reads. Review requests and configuration writes use the individual key entered in the console.
+
+## Deployment
+
+The production setup runs on one AWS EC2 server with Docker Compose and HTTPS. See [deploy/README.md](deploy/README.md).
 
 ## Development commands
 
@@ -92,6 +96,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
+| `-dump` | none | Write the purchases with their scenario and fraud label to this JSON Lines file instead of sending them. Needs a positive count and no API key. Used to train the game model, see `ml/README.md` |
 
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
@@ -122,25 +127,25 @@ Run this from the repository root with a local Docker engine, Go, and curl:
 ./scripts/scorebench.sh
 ```
 
-The script builds the API image and starts a disposable PostgreSQL 18 instance and API on loopback ports. It applies the migrations, loads 500,000 synthetic purchases and matching decisions spanning 120 days, and initializes all six feature-count groups. The benchmark publishes ruleset version 2 with the seeded settings plus device card count and new device spike enabled. It uses the Compose model, `lgbm-ieee-v5-combined`.
+The script builds the API image and starts a disposable PostgreSQL 18 instance and API on loopback ports. It applies the migrations, loads 500,000 synthetic purchases and matching decisions spanning 120 days, and initializes all six feature-count groups. The API uses the restricted database role. A separate operator key publishes ruleset version 2 with the seeded settings plus device card count and new device spike enabled, preserving the model settings in assist mode. Scoring uses the service key and the Compose model, `lgbm-ieee-v5-combined`.
 
 Seed 42 selects returning players, cards, and devices for 100 warm-up requests and 1,000 timed requests. The timed mix is 800 routine purchases, 100 on shared devices, and 100 large purchases on unseen devices. Across those groups, 100 requests have a missing issuer and 100 use a common issuer. The client sends one request at a time in event order and measures through the end of the HTTP response body. The script checks that the timed decisions were saved, verifies both new rules fired, and requires p95 below 50 ms. It removes the benchmark containers, database volume, and network at exit.
 
 ### Local results
 
-Measured on November 11, 2026, on an Apple M4 with 10 CPU cores and 16 GiB RAM, macOS 26.6.2, Docker Engine 29.8.1 with 10 CPUs and 7.75 GiB allocated, and PostgreSQL 18.6. The baseline used `99d3398`. The two final runs used the same base with migration `000016` and the updated issuer-history query.
+Measured on November 11, 2026, on an Apple M4 with 10 CPU cores and 16 GiB RAM, macOS 26.6.2, Docker Engine 29.8.1 with 10 CPUs and 7.75 GiB allocated, and PostgreSQL 18.6. The baseline used `99d3398`. The covering-index change first reduced p95 to 40.76 ms and 39.21 ms on that same base. The final runs below include `main` at `35cc6c5`, migration `000020`, the restricted API database role, and operator authentication.
 
 | Run | HTTP p50 | HTTP p95 | HTTP p99 |
 |---|---:|---:|---:|
 | Baseline | 19.05 ms | 94.13 ms | 121.46 ms |
-| Final 1 | 7.88 ms | 40.76 ms | 46.73 ms |
-| Final 2 | 7.39 ms | 39.21 ms | 42.84 ms |
+| Final 1 | 7.25 ms | 38.37 ms | 40.57 ms |
+| Final 2 | 8.27 ms | 41.39 ms | 66.62 ms |
 
-Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run. `pg_stat_statements` ranked issuer history first by mean and total execution time. Its mean fell from 28.09 ms to 10.85 ms and 10.45 ms. `EXPLAIN (ANALYZE, BUFFERS)` showed index-only scans for the typical, missing, and common issuer samples. The player, card, model history, device-card count, and trusted-purchase history plans used their indexes with no sequential scans. The issuer query still counts distinct values across both indexes. Rows with wide text use the index with the original keys.
+Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run. `pg_stat_statements` ranked issuer history first by mean and total execution time. Its mean was 28.09 ms in the baseline and 10.30 ms and 11.47 ms in the final runs. `EXPLAIN (ANALYZE, BUFFERS)` showed index-only scans for the typical, missing, and common issuer samples. The player, card, model history, device-card count, and trusted-purchase history plans used their indexes with no sequential scans. The issuer query still counts distinct values across both indexes. Rows with wide text use the index with the original keys.
 
 ## Ruleset API
 
-Use `GET /rulesets/active` to read the current version. To change settings, send the full configuration without its `version` field to `POST /rulesets`. Both endpoints require the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
+Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
 
 Device card count starts off. To enable it, publish a new ruleset with `device_card_count` enabled. The Rulesets page suggests 5 distinct cards in 60 minutes, including the current card, and a weight of 20 points. Before rolling back to a version of the service that predates this rule, publish a new ruleset that omits `device_card_count`.
 
@@ -180,12 +185,12 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards API requests to the backend, so the browser needs no CORS setup. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the key to score, stats, blocklist, and ruleset requests. For review requests, it forwards the analyst key entered on the Review queue page. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key to scoring, statistics, and configuration reads. It forwards individual analyst keys for reviews and individual operator keys for configuration writes. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Starts the development server with hot reload |
-| `npm run check` | Runs the linter (oxlint) and the TypeScript type check |
+| `npm run check` | Runs the linter (oxlint), TypeScript type check, and proxy tests |
 | `npm run build` | Type checks and builds the production files into `frontend/dist/` |
 
 ## Console pages
@@ -195,8 +200,8 @@ The development server forwards API requests to the backend, so the browser need
 | Dashboard (`#/dashboard`) | Shows counts and rates by outcome, p95 scoring latency, blocked value in minor units, and a stacked decision timeline with a table view. Choose the last 15 minutes, hour, day, week, or all time. The dashboard also shows the current review queue, most fired rules, and model effects. It reads `GET /stats` every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
-| Review queue (`#/reviews`) | Enter your analyst key to browse and approve or reject purchases awaiting review. The current page refreshes every five seconds. |
-| Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version and shows its version number. |
+| Review queue (`#/reviews`) | Enter your analyst key to browse and decide purchases awaiting review, or open a case to inspect its evidence. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
+| Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version with an optional note and shows its version number. Selecting an earlier version in the history shows its settings read-only. |
 
 ### Review access
 
@@ -213,6 +218,18 @@ REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"
 ```
 
 Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
+
+## Security
+
+Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.
+
+```dotenv
+OPERATOR_API_KEYS=[{"operator_id":"operator-1","key":"replace-with-an-individual-key"}]
+```
+
+When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASSWORD` to `.env` before starting the stack. Keep the existing `POSTGRES_USER` and `POSTGRES_PASSWORD` for migrations and backups. If you run the backend on the host, update `DATABASE_URL` to use `antifraud_api` and the runtime password.
+
+The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 
 ## Database Queries
 

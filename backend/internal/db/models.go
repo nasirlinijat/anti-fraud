@@ -18,6 +18,16 @@ type BlocklistEntry struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type ConfigurationAuditEvent struct {
+	ID         int64
+	ActorKind  string
+	ActorID    string
+	Action     string
+	ResourceID int64
+	Details    []byte
+	RecordedAt pgtype.Timestamptz
+}
+
 type Decision struct {
 	PurchaseID          int64
 	RulesetVersion      int32
@@ -82,6 +92,10 @@ type Ruleset struct {
 	BlockThreshold  int32
 	IsActive        bool
 	CreatedAt       pgtype.Timestamptz
+	Note            string
+	ModelMode       string
+	ModelClearBelow pgtype.Float8
+	ModelFlagAt     pgtype.Float8
 }
 
 type RulesetRule struct {

@@ -119,7 +119,11 @@ func TestScoreBenchmark(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	version := publishScorebenchRuleset(t, client)
+	operatorKey := os.Getenv("SCOREBENCH_OPERATOR_KEY")
+	if operatorKey == "" || operatorKey == key {
+		t.Fatal("a distinct SCOREBENCH_OPERATOR_KEY is required")
+	}
+	version := publishScorebenchRuleset(t, client, operatorKey)
 	profiles := readScorebenchProfiles(t, conn)
 	rng := rand.New(rand.NewPCG(42, 42))
 	warmup := scorebenchWorkload(rng, profiles, "warmup", 0, scorebenchWarmup)
@@ -154,13 +158,14 @@ func TestScoreBenchmark(t *testing.T) {
 	explainScorebenchReads(t, conn, profiles)
 }
 
-func publishScorebenchRuleset(t *testing.T, client scorebenchClient) int {
+func publishScorebenchRuleset(t *testing.T, client scorebenchClient, operatorKey string) int {
 	t.Helper()
 	var active struct {
 		Version         int                        `json:"version,omitempty"`
 		ReviewThreshold int                        `json:"review_threshold"`
 		BlockThreshold  int                        `json:"block_threshold"`
 		Rules           map[string]json.RawMessage `json:"rules"`
+		Model           json.RawMessage            `json:"model"`
 	}
 	if _, err := client.json(t.Context(), http.MethodGet, "/rulesets/active", nil, &active, http.StatusOK); err != nil {
 		t.Fatal(err)
@@ -168,11 +173,17 @@ func publishScorebenchRuleset(t *testing.T, client scorebenchClient) int {
 	if active.Version != 1 || active.Rules == nil {
 		t.Fatalf("expected seeded ruleset version 1, got %d", active.Version)
 	}
+	var model struct{ Mode string }
+	if json.Unmarshal(active.Model, &model) != nil || model.Mode != "assist" {
+		t.Fatal("expected the seeded model settings in assist mode")
+	}
 	active.Rules["device_card_count"] = json.RawMessage(`{"enabled":true,"weight":20,"limit":5}`)
 	active.Rules["new_device_spike"] = json.RawMessage(`{"enabled":true,"weight":50,"limit":3,"window_days":90,"min_amount_minor":1000,"amount_multiplier":3}`)
 	active.Version = 0
+	operator := client
+	operator.key = operatorKey
 	var published struct{ Version int }
-	if _, err := client.json(t.Context(), http.MethodPost, "/rulesets", active, &published, http.StatusCreated); err != nil {
+	if _, err := operator.json(t.Context(), http.MethodPost, "/rulesets", active, &published, http.StatusCreated); err != nil {
 		t.Fatal(err)
 	}
 	if published.Version != 2 {

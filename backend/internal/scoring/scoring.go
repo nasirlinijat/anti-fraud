@@ -49,7 +49,10 @@ type Ruleset struct {
 	Version         int
 	ReviewThreshold int
 	BlockThreshold  int
+	Note            string
+	CreatedAt       time.Time
 	Rules           map[RuleName]RuleConfig
+	Model           ModelSettings
 }
 
 // FiredRule is a rule that fired and the points it added. Message is a

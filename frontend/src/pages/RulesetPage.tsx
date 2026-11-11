@@ -1,6 +1,8 @@
-import { type FormEvent, useState } from 'react'
-import { getActiveRuleset, publishRuleset, type ErrorResponse, type RuleSettings, type Ruleset, type RulesetConfig } from '../api'
+import { type FormEvent, useCallback, useState } from 'react'
+import { getActiveRuleset, getRuleset, listRulesets, publishRuleset, type ErrorResponse, type RuleSettings, type Ruleset, type RulesetConfig, type RulesetSummary } from '../api'
+import { TimeDisplayToggle, Timestamp } from '../Display'
 import { usePolling } from '../usePolling'
+import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
 
 const ruleDetails = [
@@ -39,6 +41,7 @@ type RuleDraft = {
 type RulesetDraft = {
   review_threshold: string
   block_threshold: string
+  note: string
   rules: Record<string, RuleDraft>
 }
 type FieldErrors = Record<string, string>
@@ -47,6 +50,7 @@ function toDraft(ruleset: Ruleset): RulesetDraft {
   return {
     review_threshold: String(ruleset.review_threshold),
     block_threshold: String(ruleset.block_threshold),
+    note: '',
     rules: Object.fromEntries(Object.entries(ruleset.rules).map(([name, rule]) => [
       name,
       {
@@ -69,9 +73,14 @@ function integer(value: string, field: string, min: bigint, max: bigint, errors:
 }
 
 function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
+  const note = draft.note.trim()
+  if ([...note].length > 500) {
+    errors.note = 'Enter at most 500 characters.'
+  }
   const config: RulesetConfig = {
     review_threshold: Number(integer(draft.review_threshold, 'review_threshold', 1n, maxInt32, errors)),
     block_threshold: Number(integer(draft.block_threshold, 'block_threshold', 1n, maxInt32, errors)),
+    note,
     rules: {},
   }
   for (const [name, rule] of Object.entries(draft.rules)) {
@@ -119,15 +128,43 @@ function IntegerField({ name, label, value, error, onChange, disabled }: {
   )
 }
 
-function RulesetForm({ initial }: { initial: Ruleset }) {
+function RulesetForm({ initial, history, time, onPublished }: {
+  initial: Ruleset
+  history: RulesetSummary[]
+  time: TimeDisplay
+  onPublished: (ruleset: Ruleset) => void
+}) {
   const [version, setVersion] = useState(initial.version)
   const [draft, setDraft] = useState(() => toDraft(initial))
+  const [selectedVersion, setSelectedVersion] = useState(initial.version)
+  const [selectedRuleset, setSelectedRuleset] = useState<Ruleset | null>(initial)
+  const [selectedError, setSelectedError] = useState<string | null>(null)
+  const [operatorKey, setOperatorKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [checkingActive, setCheckingActive] = useState(false)
   const [checkError, setCheckError] = useState<string | null>(null)
   const [error, setError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState('')
   const fields = error?.fields ?? {}
+  const readOnly = selectedVersion !== version
+  const displayDraft = readOnly && selectedRuleset ? toDraft(selectedRuleset) : draft
+
+  const loadSelected = useCallback(
+    (signal: AbortSignal) => getRuleset(selectedVersion, signal),
+    [selectedVersion],
+  )
+  const { retry: retrySelected, pending: loadingSelected } = usePolling(
+    readOnly && selectedRuleset?.version !== selectedVersion ? loadSelected : null,
+    {
+      onSuccess: (loaded) => {
+        setSelectedRuleset(loaded)
+        setSelectedError(null)
+      },
+      onError: (failure) => {
+        setSelectedError(failure instanceof Error ? failure.message : 'Could not load this ruleset version.')
+      },
+    },
+  )
 
   usePolling(checkingActive ? getActiveRuleset : null, {
     onSuccess: (active) => {
@@ -143,13 +180,23 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
     },
   })
 
+  const selectVersion = (target: number) => {
+    setSelectedError(null)
+    setSelectedVersion(target)
+    if (target === version) {
+      setSelectedRuleset(null)
+    } else if (selectedRuleset?.version !== target) {
+      setSelectedRuleset(null)
+    }
+  }
+
   const updateRule = (name: string, rule: RuleDraft) => {
     setDraft((current) => ({ ...current, rules: { ...current.rules, [name]: rule } }))
   }
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (saving || checkingActive) return
+    if (saving || checkingActive || readOnly || !operatorKey.trim()) return
     setNotice('')
     setCheckError(null)
     const errors: FieldErrors = {}
@@ -160,7 +207,7 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
     }
     setError(null)
     setSaving(true)
-    const result = await publishRuleset(config)
+    const result = await publishRuleset(config, operatorKey.trim())
     setSaving(false)
     if (!result.ok) {
       setError(result.error)
@@ -168,139 +215,242 @@ function RulesetForm({ initial }: { initial: Ruleset }) {
     }
     setDraft(toDraft(result.value))
     setVersion(result.value.version)
+    setSelectedVersion(result.value.version)
+    setSelectedRuleset(result.value)
     setNotice(`Published ruleset version ${result.value.version}.`)
+    onPublished(result.value)
   }
 
   return (
     <>
-      <p><strong>Active version {version}</strong></p>
-      <form onSubmit={save} noValidate>
-        <fieldset disabled={saving}>
-          <legend>Decision thresholds</legend>
-          <div className="fields">
-            <IntegerField
-              name="review_threshold"
-              label="Review threshold (points)"
-              value={draft.review_threshold}
-              error={fields.review_threshold}
-              onChange={(review_threshold) => setDraft((current) => ({ ...current, review_threshold }))}
-            />
-            <IntegerField
-              name="block_threshold"
-              label="Block threshold (points)"
-              value={draft.block_threshold}
-              error={fields.block_threshold}
-              onChange={(block_threshold) => setDraft((current) => ({ ...current, block_threshold }))}
-            />
-          </div>
-        </fieldset>
+      <p>
+        <strong>Active version {version}</strong>
+        {readOnly && <> — viewing version {selectedVersion} (read-only)</>}
+      </p>
+      {readOnly && (
+        <p>
+          <button type="button" className="secondary" onClick={() => selectVersion(version)}>
+            Edit active version ({version})
+          </button>
+        </p>
+      )}
+      {readOnly && loadingSelected && <LoadingSkeleton shape="form" label={`Loading version ${selectedVersion}…`} />}
+      {readOnly && selectedError && (
+        <ErrorState onRetry={retrySelected} pending={loadingSelected}>{selectedError}</ErrorState>
+      )}
+      {(!readOnly || selectedRuleset !== null) && (
+        <form onSubmit={save} noValidate>
+          <fieldset disabled={saving || readOnly}>
+            <legend>Decision thresholds</legend>
+            <div className="fields">
+              <IntegerField
+                name="review_threshold"
+                label="Review threshold (points)"
+                value={displayDraft.review_threshold}
+                error={readOnly ? undefined : fields.review_threshold}
+                onChange={(review_threshold) => setDraft((current) => ({ ...current, review_threshold }))}
+              />
+              <IntegerField
+                name="block_threshold"
+                label="Block threshold (points)"
+                value={displayDraft.block_threshold}
+                error={readOnly ? undefined : fields.block_threshold}
+                onChange={(block_threshold) => setDraft((current) => ({ ...current, block_threshold }))}
+              />
+            </div>
+          </fieldset>
 
-        {ruleDetails.map((detail) => {
-          const { name, label } = detail
-          const limitLabel = 'limit' in detail ? detail.limit : undefined
-          const savedRule = draft.rules[name]
-          const preset = 'preset' in detail ? detail.preset : undefined
-          const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
-          const field = `rules.${name}`
-          return (
-            <fieldset key={name} disabled={saving}>
-              <legend>{label}</legend>
-              <label className="ruleset-enabled">
-                <input
-                  type="checkbox"
-                  checked={rule.enabled}
-                  onChange={(event) => updateRule(name, { ...rule, enabled: event.target.checked })}
-                  aria-label={`Enable ${label.toLowerCase()}`}
-                  aria-invalid={fields[`${field}.enabled`] ? true : undefined}
-                  aria-describedby={fields[`${field}.enabled`] ? `${field}.enabled-error` : undefined}
-                />
-                Enabled
-              </label>
-              {fields[`${field}.enabled`] && (
-                <span id={`${field}.enabled-error`} className="error-text">{fields[`${field}.enabled`]}</span>
-              )}
-              <div className="fields">
-                <IntegerField
-                  name={`${field}.weight`}
-                  label="Weight (points)"
-                  value={rule.weight}
-                  error={fields[`${field}.weight`]}
-                  onChange={(weight) => updateRule(name, { ...rule, weight })}
-                  disabled={!savedRule && !preset}
-                />
-                {limitLabel && (
+          {ruleDetails.map((detail) => {
+            const { name, label } = detail
+            const limitLabel = 'limit' in detail ? detail.limit : undefined
+            const savedRule = displayDraft.rules[name]
+            const preset = 'preset' in detail ? detail.preset : undefined
+            const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
+            const field = `rules.${name}`
+            return (
+              <fieldset key={name} disabled={saving || readOnly}>
+                <legend>{label}</legend>
+                <label className="ruleset-enabled">
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled}
+                    onChange={(event) => updateRule(name, { ...rule, enabled: event.target.checked })}
+                    aria-label={`Enable ${label.toLowerCase()}`}
+                    aria-invalid={!readOnly && fields[`${field}.enabled`] ? true : undefined}
+                    aria-describedby={!readOnly && fields[`${field}.enabled`] ? `${field}.enabled-error` : undefined}
+                  />
+                  Enabled
+                </label>
+                {!readOnly && fields[`${field}.enabled`] && (
+                  <span id={`${field}.enabled-error`} className="error-text">{fields[`${field}.enabled`]}</span>
+                )}
+                <div className="fields">
                   <IntegerField
-                    name={`${field}.limit`}
-                    label={limitLabel}
-                    value={rule.limit ?? ''}
-                    error={fields[`${field}.limit`]}
-                    onChange={(limit) => updateRule(name, { ...rule, limit })}
+                    name={`${field}.weight`}
+                    label="Weight (points)"
+                    value={rule.weight}
+                    error={readOnly ? undefined : fields[`${field}.weight`]}
+                    onChange={(weight) => updateRule(name, { ...rule, weight })}
                     disabled={!savedRule && !preset}
                   />
-                )}
-                {name === 'new_device_spike' && (
-                  <>
+                  {limitLabel && (
                     <IntegerField
-                      name={`${field}.window_days`}
-                      label="Trusted history window (days)"
-                      value={rule.window_days ?? ''}
-                      error={fields[`${field}.window_days`]}
-                      onChange={(window_days) => updateRule(name, { ...rule, window_days })}
+                      name={`${field}.limit`}
+                      label={limitLabel}
+                      value={rule.limit ?? ''}
+                      error={readOnly ? undefined : fields[`${field}.limit`]}
+                      onChange={(limit) => updateRule(name, { ...rule, limit })}
+                      disabled={!savedRule && !preset}
                     />
-                    <IntegerField
-                      name={`${field}.min_amount_minor`}
-                      label="Minimum purchase amount (minor units)"
-                      value={rule.min_amount_minor ?? ''}
-                      error={fields[`${field}.min_amount_minor`]}
-                      onChange={(min_amount_minor) => updateRule(name, { ...rule, min_amount_minor })}
-                    />
-                    <IntegerField
-                      name={`${field}.amount_multiplier`}
-                      label="Minimum multiple of the trusted average"
-                      value={rule.amount_multiplier ?? ''}
-                      error={fields[`${field}.amount_multiplier`]}
-                      onChange={(amount_multiplier) => updateRule(name, { ...rule, amount_multiplier })}
-                    />
-                  </>
-                )}
+                  )}
+                  {name === 'new_device_spike' && (
+                    <>
+                      <IntegerField
+                        name={`${field}.window_days`}
+                        label="Trusted history window (days)"
+                        value={rule.window_days ?? ''}
+                        error={readOnly ? undefined : fields[`${field}.window_days`]}
+                        onChange={(window_days) => updateRule(name, { ...rule, window_days })}
+                      />
+                      <IntegerField
+                        name={`${field}.min_amount_minor`}
+                        label="Minimum purchase amount (minor units)"
+                        value={rule.min_amount_minor ?? ''}
+                        error={readOnly ? undefined : fields[`${field}.min_amount_minor`]}
+                        onChange={(min_amount_minor) => updateRule(name, { ...rule, min_amount_minor })}
+                      />
+                      <IntegerField
+                        name={`${field}.amount_multiplier`}
+                        label="Minimum multiple of the trusted average"
+                        value={rule.amount_multiplier ?? ''}
+                        error={readOnly ? undefined : fields[`${field}.amount_multiplier`]}
+                        onChange={(amount_multiplier) => updateRule(name, { ...rule, amount_multiplier })}
+                      />
+                    </>
+                  )}
+                </div>
+                {!readOnly && fields[field] && <p className="error-text">{fields[field]}</p>}
+              </fieldset>
+            )
+          })}
+
+          {!readOnly && (
+            <fieldset disabled={saving}>
+              <legend>Version note</legend>
+              <div className={fields.note ? 'field wide invalid' : 'field wide'}>
+                <label htmlFor="note">Why this version was made (optional)</label>
+                <input
+                  id="note"
+                  name="note"
+                  type="text"
+                  maxLength={500}
+                  value={draft.note}
+                  onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
+                  aria-invalid={fields.note ? true : undefined}
+                  aria-describedby={fields.note ? 'note-error' : undefined}
+                />
+                {fields.note && <span id="note-error" className="error-text">{fields.note}</span>}
               </div>
-              {fields[field] && <p className="error-text">{fields[field]}</p>}
             </fieldset>
-          )
-        })}
-        {error && (
-          <ErrorState retryLabel="Check active version" pending={checkingActive}
-            onRetry={Object.keys(fields).length === 0 ? () => setCheckingActive(true) : undefined}>
-            {error.error}
-            {fields.rules && <p>{fields.rules}</p>}
-            {checkError && <p>Could not check the active version. {checkError}</p>}
-          </ErrorState>
-        )}
-        <button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</button>
-      </form>
+          )}
+
+          {!readOnly && error && (
+            <ErrorState retryLabel="Check active version" pending={checkingActive}
+              onRetry={Object.keys(fields).length === 0 ? () => setCheckingActive(true) : undefined}>
+              {error.error}
+              {fields.rules && <p>{fields.rules}</p>}
+              {checkError && <p>Could not check the active version. {checkError}</p>}
+            </ErrorState>
+          )}
+          {!readOnly && (
+            <div className="field">
+              <label htmlFor="ruleset-operator-key">Operator key</label>
+              <input id="ruleset-operator-key" type="password" autoComplete="off" value={operatorKey}
+                disabled={saving} onChange={(event) => setOperatorKey(event.target.value)} />
+            </div>
+          )}
+          {!readOnly && (
+            <button type="submit" disabled={saving || checkingActive || !operatorKey.trim()}>{saving ? 'Publishing…' : 'Publish new version'}</button>
+          )}
+        </form>
+      )}
       <p className="muted" role="status">{notice}</p>
+
+      <h3>Version history</h3>
+      <TimeDisplayToggle display={time} />
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Version</th>
+            <th scope="col">Published</th>
+            <th scope="col">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {history.map((item) => (
+            <tr key={item.version}>
+              <th scope="row">
+                <button
+                  type="button"
+                  className="review-open"
+                  aria-current={item.version === selectedVersion ? 'true' : undefined}
+                  onClick={() => selectVersion(item.version)}
+                >
+                  Version {item.version}{item.version === version ? ' (active)' : ''}
+                </button>
+              </th>
+              <td><Timestamp value={item.created_at} display={time} /></td>
+              <td>{item.note || 'None'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   )
 }
 
-function RulesetPage() {
-  const [active, setActive] = useState<Ruleset | null>(null)
-  const [loadError, setLoadError] = useState('')
+type RulesetPageData = {
+  active: Ruleset
+  history: RulesetSummary[]
+}
 
-  const { retry, pending } = usePolling(getActiveRuleset, {
-    onSuccess: (ruleset) => {
-      setActive(ruleset)
+async function loadRulesetPage(signal?: AbortSignal): Promise<RulesetPageData> {
+  const [active, history] = await Promise.all([
+    getActiveRuleset(signal),
+    listRulesets(signal),
+  ])
+  return { active, history }
+}
+
+function RulesetPage() {
+  const [data, setData] = useState<RulesetPageData | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const time = useTimeDisplay()
+
+  const { retry, pending } = usePolling(loadRulesetPage, {
+    onSuccess: (loaded) => {
+      setData(loaded)
       setLoadError('')
     },
     onError: (error) => setLoadError(error instanceof Error ? error.message : 'Could not load the ruleset.'),
   })
 
+  const handlePublished = (published: Ruleset) => {
+    setData((current) => current && {
+      active: published,
+      history: [
+        { version: published.version, note: published.note, created_at: published.created_at },
+        ...current.history.filter((item) => item.version !== published.version),
+      ],
+    })
+  }
+
   return (
     <section className="ruleset-editor">
       <h2>Rulesets</h2>
       <p className="muted">Publish a new ruleset to change how future purchases are scored.</p>
-      {active && <RulesetForm initial={active} />}
-      {!active && (!loadError || pending) && <LoadingSkeleton shape="form" label="Loading the active ruleset…" />}
+      {data && <RulesetForm initial={data.active} history={data.history} time={time} onPublished={handlePublished} />}
+      {!data && (!loadError || pending) && <LoadingSkeleton shape="form" label="Loading the active ruleset…" />}
       {loadError && (
         <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>
       )}

@@ -1,0 +1,33 @@
+{
+	admin off
+}
+
+{$API_HOST} {
+	encode zstd gzip
+	@api path /score /health /ready
+	handle @api {
+		reverse_proxy backend:{$BACKEND_PORT}
+	}
+	handle {
+		respond 404
+	}
+}
+
+{$CONSOLE_HOST} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	@foreignOrigin {
+		header Origin *
+		not header Origin "https://{http.request.hostport}"
+	}
+	route {
+		basic_auth {
+			{$CONSOLE_USER} {$CONSOLE_PASSWORD_HASH}
+		}
+		respond @foreignOrigin 403
+		reverse_proxy frontend:8080 {
+			header_up Host localhost:8080
+			header_up Origin http://localhost:8080
+		}
+	}
+}

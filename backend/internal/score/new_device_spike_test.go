@@ -136,8 +136,8 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	rulesets.RegisterRoutes(mux, ruleStore, testKey)
-	reviews.RegisterRoutes(mux, reviews.NewStore(tx), keys)
+	rulesets.RegisterRoutes(mux, ruleStore, testKey, testOperators(t))
+	reviews.RegisterRoutes(mux, reviews.NewStore(tx), keys, false)
 	RegisterRoutes(mux, NewHandler(ruleStore, blocklist.NewStore(tx), purchaseStore), testKey)
 	request := func(method, path, body, key string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
@@ -176,7 +176,7 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 	published := request(http.MethodPost, "/rulesets", `{
 		"review_threshold":20,"block_threshold":40,"rules":{"new_device_spike":{
 			"enabled":true,"weight":50,"limit":3,"window_days":30,"min_amount_minor":1500,"amount_multiplier":4}}
-	}`, testKey)
+	}`, operatorTestKey)
 	if published.Code != http.StatusCreated {
 		t.Fatalf("publish: %d %s", published.Code, published.Body)
 	}
