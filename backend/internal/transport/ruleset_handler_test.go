@@ -1,4 +1,4 @@
-package rulesets
+package transport
 
 import (
 	"context"
@@ -14,19 +14,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
-
-const operatorTestKey = "operator-key"
-
-func testOperators(t *testing.T) platform.OperatorKeys {
-	t.Helper()
-	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"ruleset-operator","key":"`+operatorTestKey+`"}]`, "test-key", platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return keys
-}
 
 func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -38,7 +30,7 @@ func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptes
 
 func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/rulesets"},
 		{"GET", "/rulesets/active"},
@@ -173,7 +165,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	ctx := context.Background()
 	isolated := isolatedRulesetPool(t)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewStore(isolated), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolated))), "test-key", testOperators(t))
 	const requests = 4
 	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
 		t.Fatalf("service key publishing status = %d, want 401", w.Code)
@@ -191,7 +183,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 
 	listRes := rulesetRequest(mux, "GET", "/rulesets", "", "test-key")
 	var history struct {
-		Versions []VersionSummary `json:"versions"`
+		Versions []models.RulesetSummary `json:"versions"`
 	}
 	if listRes.Code != http.StatusOK || json.Unmarshal(listRes.Body.Bytes(), &history) != nil {
 		t.Fatalf("GET /rulesets: %d %s", listRes.Code, listRes.Body)
@@ -217,7 +209,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	if err := isolated.QueryRow(ctx, `
         SELECT count(*) FROM configuration_audit_events a
         JOIN rulesets r ON r.version = a.resource_id
-        WHERE a.action = 'ruleset.publish' AND a.actor_id = 'ruleset-operator'
+        WHERE a.action = 'ruleset.publish' AND a.actor_id = 'test-operator'
     `).Scan(&audited); err != nil || audited != requests {
 		t.Fatalf("audited publications = %d, error = %v, want %d", audited, err, requests)
 	}
@@ -231,7 +223,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 
 func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
 	for _, tc := range []struct {
 		name  string
 		rules string
@@ -256,7 +248,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 
 func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
 	for _, tc := range []struct {
 		name, rule string
 		fields     []string
@@ -286,7 +278,7 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 
 func TestPublishValidatesModelSettings(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
 	for _, tc := range []struct {
 		model string
 		field string

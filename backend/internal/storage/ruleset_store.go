@@ -1,49 +1,23 @@
-package rulesets
+package storage
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
-// ErrNotFound means no ruleset has the requested version.
-var ErrNotFound = errors.New("ruleset version not found")
-
-// VersionSummary is an entry in the ruleset version history.
-type VersionSummary struct {
-	Version   int       `json:"version"`
-	Note      string    `json:"note"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// Conn runs queries and starts transactions.
-type Conn interface {
-	platform.DBTX
-	Begin(context.Context) (pgx.Tx, error)
-}
-
-// Store reads and publishes rulesets.
-type Store struct {
+// RulesetStore reads and publishes rulesets.
+type RulesetStore struct {
 	conn Conn
-	// reportThresholds holds the thresholds from the loaded model's report.
-	// Publish saves them in a version that has none. It is nil without a model.
-	reportThresholds *scoring.ModelSettings
 }
 
-func NewStore(conn Conn) *Store {
-	return &Store{conn: conn}
-}
-
-// UseModelThresholds makes Publish save the thresholds of the loaded model's
-// report in a new version that does not set its own.
-func (s *Store) UseModelThresholds(p scoring.ModelPolicy) {
-	clearBelow, flagAt := p.ClearBelow, p.FlagAt
-	s.reportThresholds = &scoring.ModelSettings{ClearBelow: &clearBelow, FlagAt: &flagAt}
+func NewRulesetStore(conn Conn) *RulesetStore {
+	return &RulesetStore{conn: conn}
 }
 
 // rulesetColumns are the columns scanRuleset reads, in order.
@@ -73,7 +47,7 @@ func scanRuleset(row pgx.Row) (scoring.Ruleset, error) {
 }
 
 // Active returns the active ruleset with its rules.
-func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
+func (s *RulesetStore) Active(ctx context.Context) (scoring.Ruleset, error) {
 	rs, err := scanRuleset(s.conn.QueryRow(ctx, getActiveRuleset))
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("get active ruleset: %w", err)
@@ -81,11 +55,11 @@ func (s *Store) Active(ctx context.Context) (scoring.Ruleset, error) {
 	return loadRules(ctx, s.conn, rs)
 }
 
-// Version returns the ruleset with the given version, or ErrNotFound.
-func (s *Store) Version(ctx context.Context, version int32) (scoring.Ruleset, error) {
+// Version returns the ruleset with the given version, or models.ErrRulesetNotFound.
+func (s *RulesetStore) Version(ctx context.Context, version int32) (scoring.Ruleset, error) {
 	rs, err := scanRuleset(s.conn.QueryRow(ctx, getRuleset, version))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return scoring.Ruleset{}, ErrNotFound
+		return scoring.Ruleset{}, models.ErrRulesetNotFound
 	}
 	if err != nil {
 		return scoring.Ruleset{}, fmt.Errorf("get ruleset %d: %w", version, err)
@@ -99,13 +73,13 @@ FROM rulesets
 ORDER BY version DESC`
 
 // List returns all ruleset versions, newest first.
-func (s *Store) List(ctx context.Context) ([]VersionSummary, error) {
+func (s *RulesetStore) List(ctx context.Context) ([]models.RulesetSummary, error) {
 	rows, err := s.conn.Query(ctx, listRulesets)
 	if err != nil {
 		return nil, fmt.Errorf("list rulesets: %w", err)
 	}
-	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (VersionSummary, error) {
-		var v VersionSummary
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.RulesetSummary, error) {
+		var v models.RulesetSummary
 		err := row.Scan(&v.Version, &v.Note, &v.CreatedAt)
 		v.CreatedAt = v.CreatedAt.UTC()
 		return v, err
@@ -185,9 +159,11 @@ VALUES ('operator', $1, 'ruleset.publish', $2)`
 )
 
 // Publish saves a new version and activates it in the same transaction. A
-// ruleset without a model mode keeps the model settings of the active version.
-// Thresholds that are still missing are taken from the loaded model's report.
-func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset, operatorID string) (scoring.Ruleset, error) {
+// ruleset without a model mode keeps the model settings of the active version,
+// read under the same lock so concurrent publishers cannot copy stale settings.
+// Thresholds that are still missing are taken from reportThresholds, the
+// loaded model's report, when it is set.
+func (s *RulesetStore) Publish(ctx context.Context, rs scoring.Ruleset, operatorID string, reportThresholds *scoring.ModelSettings) (scoring.Ruleset, error) {
 	err := pgx.BeginFunc(ctx, s.conn, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, lockRulesets); err != nil {
 			return fmt.Errorf("lock rulesets: %w", err)
@@ -203,8 +179,8 @@ func (s *Store) Publish(ctx context.Context, rs scoring.Ruleset, operatorID stri
 				rs.Model = active.Model
 			}
 		}
-		if (rs.Model.ClearBelow == nil || rs.Model.FlagAt == nil) && s.reportThresholds != nil {
-			rs.Model.ClearBelow, rs.Model.FlagAt = s.reportThresholds.ClearBelow, s.reportThresholds.FlagAt
+		if (rs.Model.ClearBelow == nil || rs.Model.FlagAt == nil) && reportThresholds != nil {
+			rs.Model.ClearBelow, rs.Model.FlagAt = reportThresholds.ClearBelow, reportThresholds.FlagAt
 		}
 		if _, err := tx.Exec(ctx, deactivateRuleset); err != nil {
 			return fmt.Errorf("deactivate ruleset: %w", err)

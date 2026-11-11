@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
@@ -41,7 +40,7 @@ func TestScoreTrustedHistoryLookup(t *testing.T) {
 				scoring.RuleNewDeviceSpike: {Enabled: tc.enabled, Limit: 3, WindowDays: 90, MinAmountMinor: 1000, AmountMultiplier: 3},
 			}}
 			store := &fakePurchases{trustedHistoryErr: errors.New("trusted history unavailable")}
-			bl := &fakeBlocklist{matched: tc.blocked, entry: blocklist.Entry{Type: blocklist.TypeCard}}
+			bl := &fakeBlocklist{matched: tc.blocked, entry: models.BlocklistEntry{Type: models.BlocklistCard}}
 			rec := serveWith(t, fakeRulesets{rs: rs}, bl, store, testKey, tc.body)
 			if rec.Code != tc.wantStatus || store.trustedHistoryCalls != tc.wantCalls {
 				t.Errorf("status = %d, history calls = %d, want %d and %d: %s",
@@ -134,21 +133,21 @@ func (s *trustedHistoryStore) TrustedHistory(ctx context.Context, p models.Purch
 type spikeServer struct {
 	tx        pgx.Tx
 	mux       *http.ServeMux
-	rules     *rulesets.Store
+	rules     *storage.RulesetStore
 	purchases *trustedHistoryStore
 }
 
 func newSpikeServer(t *testing.T) spikeServer {
 	t.Helper()
 	tx := testTx(t)
-	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: rulesets.NewStore(tx), purchases: &trustedHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}}
+	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: storage.NewRulesetStore(tx), purchases: &trustedHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}}
 	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"test","key":"review-test-key"}]`, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rulesets.RegisterRoutes(srv.mux, srv.rules, testKey, testOperators(t))
+	RegisterRulesetRoutes(srv.mux, NewRulesetHandler(ruleset.NewService(srv.rules)), testKey, testOperators(t))
 	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), keys)
-	registerScore(srv.mux, newHandler(srv.rules, blocklist.NewStore(tx), srv.purchases), testKey)
+	registerScore(srv.mux, newHandler(srv.rules, storage.NewBlocklistStore(tx), srv.purchases), testKey)
 	return srv
 }
 

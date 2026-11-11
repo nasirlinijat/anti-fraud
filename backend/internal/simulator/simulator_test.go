@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -43,8 +42,8 @@ func (rulesets) Active(context.Context) (scoring.Ruleset, error) { return defaul
 
 type noBlocklist struct{}
 
-func (noBlocklist) Match(context.Context, blocklist.Subject) (blocklist.Entry, bool, error) {
-	return blocklist.Entry{}, false, nil
+func (noBlocklist) Match(context.Context, models.BlocklistSubject) (models.BlocklistEntry, bool, error) {
+	return models.BlocklistEntry{}, false, nil
 }
 
 // purchases keeps saved purchases in memory and counts card uses like

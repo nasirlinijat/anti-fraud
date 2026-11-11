@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
 
@@ -74,8 +73,8 @@ func (s *ReviewStore) Resolve(ctx context.Context, purchaseID int64, decision, a
 			return models.Resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
 		}
 		if device != nil {
-			_, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{
-				Type:   blocklist.TypeDevice,
+			_, added, err := NewBlocklistStore(tx).AddIfAbsent(ctx, models.BlocklistEntry{
+				Type:   models.BlocklistDevice,
 				Value:  *device,
 				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
 			}, analystID)

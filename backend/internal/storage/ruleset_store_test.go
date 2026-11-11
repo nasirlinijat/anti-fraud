@@ -1,9 +1,8 @@
-package rulesets
+package storage
 
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,21 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
-
-func testPool(t *testing.T) *pgxpool.Pool {
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // txWith runs statements in a transaction that is rolled back when the test ends.
 func txWith(t *testing.T, pool *pgxpool.Pool, statements ...string) pgx.Tx {
@@ -49,7 +36,7 @@ func txWith(t *testing.T, pool *pgxpool.Pool, statements ...string) pgx.Tx {
 func TestActiveDefault(t *testing.T) {
 	pool := testPool(t)
 
-	got, err := NewStore(pool).Active(context.Background())
+	got, err := NewRulesetStore(pool).Active(context.Background())
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
@@ -84,7 +71,7 @@ func TestActiveAfterSwitch(t *testing.T) {
 		`INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit) VALUES (99, 'high_amount', false, 10, 1000)`,
 	)
 
-	got, err := NewStore(tx).Active(context.Background())
+	got, err := NewRulesetStore(tx).Active(context.Background())
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
@@ -135,7 +122,7 @@ func TestActiveUnknownRule(t *testing.T) {
 		`INSERT INTO ruleset_rules (ruleset_version, rule_name, enabled, weight, rule_limit) VALUES (98, 'high_ammount', true, 10, 1000)`,
 	)
 
-	_, err := NewStore(tx).Active(context.Background())
+	_, err := NewRulesetStore(tx).Active(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "high_ammount") {
 		t.Errorf("Active() error = %v, want an error naming high_ammount", err)
 	}
@@ -151,7 +138,7 @@ func TestListAndVersionHistory(t *testing.T) {
 		 VALUES (50, 'high_amount', true, 35, 60000),
 		        (51, 'high_amount', true, 25, 40000)`,
 	)
-	store := NewStore(tx)
+	store := NewRulesetStore(tx)
 	ctx := context.Background()
 
 	list, err := store.List(ctx)
@@ -182,8 +169,8 @@ func TestListAndVersionHistory(t *testing.T) {
 		t.Errorf("Version(50) = %+v, want %+v", v50, want50)
 	}
 
-	if _, err := store.Version(ctx, 999999); !errors.Is(err, ErrNotFound) {
-		t.Errorf("Version(999999) error = %v, want ErrNotFound", err)
+	if _, err := store.Version(ctx, 999999); !errors.Is(err, models.ErrRulesetNotFound) {
+		t.Errorf("Version(999999) error = %v, want models.ErrRulesetNotFound", err)
 	}
 }
 
@@ -191,9 +178,10 @@ func TestPublishModelSettings(t *testing.T) {
 	tx := txWith(t, testPool(t))
 	ctx := context.Background()
 	rules := map[scoring.RuleName]scoring.RuleConfig{scoring.RuleHighAmount: {Enabled: true, Weight: 30, Limit: 50000}}
-	publish := func(store *Store, model scoring.ModelSettings) scoring.ModelSettings {
+	store := NewRulesetStore(tx)
+	publish := func(report *scoring.ModelSettings, model scoring.ModelSettings) scoring.ModelSettings {
 		t.Helper()
-		saved, err := store.Publish(ctx, scoring.Ruleset{ReviewThreshold: 50, BlockThreshold: 80, Rules: rules, Model: model}, "test-operator")
+		saved, err := store.Publish(ctx, scoring.Ruleset{ReviewThreshold: 50, BlockThreshold: 80, Rules: rules, Model: model}, "test-operator", report)
 		if err != nil {
 			t.Fatalf("Publish(%+v): %v", model, err)
 		}
@@ -208,15 +196,14 @@ func TestPublishModelSettings(t *testing.T) {
 	}
 	ptr := func(v float64) *float64 { return &v }
 
-	withReport := NewStore(tx)
-	withReport.UseModelThresholds(scoring.ModelPolicy{ClearBelow: 0.02, FlagAt: 0.4, PlayerBlendWeight: 0.3})
+	withReport := &scoring.ModelSettings{ClearBelow: ptr(0.02), FlagAt: ptr(0.4)}
 	got := publish(withReport, scoring.ModelSettings{})
 	want := scoring.ModelSettings{Mode: scoring.ModelAssist, ClearBelow: ptr(0.02), FlagAt: ptr(0.4)}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("first new version model = %+v, want assist from the active version with the report thresholds", got)
 	}
 
-	rulesOnly := NewStore(tx)
+	var rulesOnly *scoring.ModelSettings
 	shadow := scoring.ModelSettings{Mode: scoring.ModelShadow, ClearBelow: ptr(0.1), FlagAt: ptr(0.6)}
 	if got := publish(rulesOnly, shadow); !reflect.DeepEqual(got, shadow) {
 		t.Errorf("published model = %+v, want %+v", got, shadow)

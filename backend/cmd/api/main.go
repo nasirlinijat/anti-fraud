@@ -11,16 +11,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/simulations"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/simulation"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
@@ -39,19 +39,20 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
-	rulesetStore := rulesets.NewStore(pool)
-	rulesets.RegisterRoutes(mux, rulesetStore, cfg.APIKey, cfg.OperatorKeys)
-	scoreService := scoresvc.NewService(rulesetStore, blocklist.NewStore(pool), storage.NewPurchaseStore(pool))
-	useModel(cfg.ModelPath, scoreService, rulesetStore)
+	rulesetStore := storage.NewRulesetStore(pool)
+	rulesetService := ruleset.NewService(rulesetStore)
+	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), cfg.APIKey, cfg.OperatorKeys)
+	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
+	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
-	stats.RegisterRoutes(mux, stats.NewHandler(stats.NewStore(pool)), cfg.APIKey)
-	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(pool)), cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
+	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)
 	manager, evaluation := newSimulationManager(cfg, pool)
 	if evaluation != nil {
 		defer evaluation.Close()
 	}
-	simulations.RegisterRoutes(mux, manager, cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
 
 	server := platform.NewServer(":"+cfg.Port, mux)
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -69,9 +70,9 @@ func main() {
 }
 
 // useModel loads the fraud model and its policy and gives them to the score
-// service and the ruleset store. Without a model path the rules decide alone.
+// service and the ruleset service. Without a model path the rules decide alone.
 // It exits when the model cannot be loaded or used.
-func useModel(modelPath string, service *scoresvc.Service, rulesetStore *rulesets.Store) {
+func useModel(modelPath string, service *scoresvc.Service, rulesets *ruleset.Service) {
 	if modelPath == "" {
 		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
 		return
@@ -87,7 +88,7 @@ func useModel(modelPath string, service *scoresvc.Service, rulesetStore *ruleset
 	if err := service.UseModel(model, policy); err != nil {
 		log.Fatalf("use fraud model %s: %v", model.Version(), err)
 	}
-	rulesetStore.UseModelThresholds(policy)
+	rulesets.UseModelThresholds(policy)
 	log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
 		model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
 }
@@ -95,7 +96,7 @@ func useModel(modelPath string, service *scoresvc.Service, rulesetStore *ruleset
 // newSimulationManager returns the manager of console simulation runs and
 // its connection to the evaluation database, or nils when simulations are
 // disabled. It exits when the setup fails.
-func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulations.Manager, *pgxpool.Pool) {
+func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulation.Service, *pgxpool.Pool) {
 	if !cfg.SimulationEnabled {
 		return nil, nil
 	}
@@ -109,7 +110,7 @@ func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulations
 		log.Fatal(err)
 	}
 	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
-	manager, err := simulations.New(setupCtx, pool, cfg.DatabaseURL, client, evaluation)
+	manager, err := simulation.NewService(setupCtx, labels.NewSimulationStore(storage.NewSimulationStore(pool, cfg.DatabaseURL), evaluation), client)
 	if err != nil {
 		log.Fatalf("initialize simulations: %v", err)
 	}
@@ -119,7 +120,7 @@ func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulations
 // shutDownOnSignal waits for the signal context to end, then drains the
 // running simulation and shuts the server down. The returned channel is closed
 // when that is done.
-func shutDownOnSignal(signalCtx context.Context, server *http.Server, manager *simulations.Manager) <-chan struct{} {
+func shutDownOnSignal(signalCtx context.Context, server *http.Server, manager *simulation.Service) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

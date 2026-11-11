@@ -1,4 +1,4 @@
-package blocklist_test
+package transport
 
 import (
 	"context"
@@ -13,15 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
-
-const testKey = "test-key"
 
 func emptyTx(t *testing.T) pgx.Tx {
 	t.Helper()
@@ -49,17 +46,17 @@ func emptyTx(t *testing.T) pgx.Tx {
 func TestAddListRemove(t *testing.T) {
 	tx := emptyTx(t)
 	ctx := context.Background()
-	store := blocklist.NewStore(tx)
+	store := storage.NewBlocklistStore(tx)
 
-	card, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeCard, Value: "card-1", Reason: "stolen"}, "test-actor")
+	card, err := store.Add(ctx, models.BlocklistEntry{Type: models.BlocklistCard, Value: "card-1", Reason: "stolen"}, "test-actor")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypeIP, Value: "203.0.113.9", Reason: "proxy"}, "test-actor"); err != nil {
+	if _, err := store.Add(ctx, models.BlocklistEntry{Type: models.BlocklistIP, Value: "203.0.113.9", Reason: "proxy"}, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	// The same value is allowed for another type.
-	if _, err := store.Add(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "card-1", Reason: "same text"}, "test-actor"); err != nil {
+	if _, err := store.Add(ctx, models.BlocklistEntry{Type: models.BlocklistPlayer, Value: "card-1", Reason: "same text"}, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -74,7 +71,7 @@ func TestAddListRemove(t *testing.T) {
 	if err := store.Remove(ctx, card.ID, "test-actor"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if err := store.Remove(ctx, card.ID, "test-actor"); !errors.Is(err, blocklist.ErrNotFound) {
+	if err := store.Remove(ctx, card.ID, "test-actor"); !errors.Is(err, models.ErrBlocklistEntryNotFound) {
 		t.Fatalf("second Remove = %v, want ErrNotFound", err)
 	}
 	if entries, _ := store.List(ctx); len(entries) != 2 {
@@ -85,8 +82,8 @@ func TestAddListRemove(t *testing.T) {
 func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 	tx := emptyTx(t)
 	ctx := context.Background()
-	store := blocklist.NewStore(tx)
-	e := blocklist.Entry{Type: blocklist.TypeDevice, Value: "device-1", Reason: "emulator"}
+	store := storage.NewBlocklistStore(tx)
+	e := models.BlocklistEntry{Type: models.BlocklistDevice, Value: "device-1", Reason: "emulator"}
 	if _, err := store.Add(ctx, e, "test-actor"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -96,7 +93,7 @@ func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sp.Rollback(ctx)
-	if _, err := blocklist.NewStore(sp).Add(ctx, e, "test-actor"); !errors.Is(err, blocklist.ErrDuplicate) {
+	if _, err := storage.NewBlocklistStore(sp).Add(ctx, e, "test-actor"); !errors.Is(err, models.ErrBlocklistDuplicate) {
 		t.Fatalf("second Add = %v, want ErrDuplicate", err)
 	}
 }
@@ -104,11 +101,11 @@ func TestAddRejectsDuplicateInPostgres(t *testing.T) {
 func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
 	tx := emptyTx(t)
 	ctx := context.Background()
-	store := blocklist.NewStore(tx)
-	device := blocklist.Entry{Type: blocklist.TypeDevice, Value: "device-9", Reason: "first"}
+	store := storage.NewBlocklistStore(tx)
+	device := models.BlocklistEntry{Type: models.BlocklistDevice, Value: "device-9", Reason: "first"}
 
 	first, added, err := store.AddIfAbsent(ctx, device, "test-actor")
-	if err != nil || !added || first.ID == 0 || first.Type != blocklist.TypeDevice || first.Value != "device-9" || first.CreatedAt.IsZero() {
+	if err != nil || !added || first.ID == 0 || first.Type != models.BlocklistDevice || first.Value != "device-9" || first.CreatedAt.IsZero() {
 		t.Fatalf("first AddIfAbsent = %+v, %v, %v; want a saved entry", first, added, err)
 	}
 
@@ -123,7 +120,7 @@ func TestAddIfAbsentSavesOnceAndKeepsTheFirstReason(t *testing.T) {
 		t.Fatalf("entries = %+v, err = %v; want only the first entry", entries, err)
 	}
 	// The same value on another type is a different entry.
-	if _, added, err := store.AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypePlayer, Value: "device-9", Reason: "other type"}, "test-actor"); err != nil || !added {
+	if _, added, err := store.AddIfAbsent(ctx, models.BlocklistEntry{Type: models.BlocklistPlayer, Value: "device-9", Reason: "other type"}, "test-actor"); err != nil || !added {
 		t.Fatalf("other type: added = %v, err = %v; want saved", added, err)
 	}
 }
@@ -145,14 +142,14 @@ func TestAddIfAbsentIsPartOfItsTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, added, err := blocklist.NewStore(tx).AddIfAbsent(ctx, blocklist.Entry{Type: blocklist.TypeDevice, Value: value, Reason: "test"}, "test-actor"); err != nil || !added {
+	if _, added, err := storage.NewBlocklistStore(tx).AddIfAbsent(ctx, models.BlocklistEntry{Type: models.BlocklistDevice, Value: value, Reason: "test"}, "test-actor"); err != nil || !added {
 		t.Fatalf("AddIfAbsent added = %v, err = %v", added, err)
 	}
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	_, found, err := blocklist.NewStore(pool).Match(ctx, blocklist.Subject{CardToken: "c", PlayerID: "p", DeviceID: ptrTo(value)})
+	_, found, err := storage.NewBlocklistStore(pool).Match(ctx, models.BlocklistSubject{CardToken: "c", PlayerID: "p", DeviceID: ptrTo(value)})
 	if err != nil || found {
 		t.Fatalf("after rollback found = %v, err = %v; want the entry gone", found, err)
 	}
@@ -169,8 +166,8 @@ func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(tx)), testKey, keys)
-	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), testKey)
+	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), testKey, keys)
+	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), testKey)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

@@ -7,7 +7,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -20,7 +19,7 @@ type Rulesets interface {
 
 // Blocklist finds the blocklist entry that matches a purchase.
 type Blocklist interface {
-	Match(ctx context.Context, s blocklist.Subject) (blocklist.Entry, bool, error)
+	Match(ctx context.Context, s models.BlocklistSubject) (models.BlocklistEntry, bool, error)
 }
 
 // Purchases saves decisions and looks up saved decisions and purchase history.
@@ -129,7 +128,7 @@ func (s *Service) decide(ctx context.Context, p models.Purchase) (models.Decisio
 	}
 
 	// A blocklist match blocks the purchase before the rules run.
-	entry, blocked, err := s.blocklist.Match(ctx, blocklist.Subject{
+	entry, blocked, err := s.blocklist.Match(ctx, models.BlocklistSubject{
 		CardToken: p.CardToken,
 		PlayerID:  p.PlayerID,
 		DeviceID:  p.DeviceID,
