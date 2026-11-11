@@ -42,3 +42,14 @@ constraint and an advisory lock. History records the initiating and stopping
 operators. An in-flight transaction marker allows recovery after a score commits
 but before progress is checkpointed. An unresolved marker is shown explicitly;
 recovery interrupts unfinished runs and does not resume traffic automatically.
+
+## Evaluation answer isolation
+
+Simulator answers and replay imports use the separate `antifraud_labels`
+connection. The scoring role has no access to the final or pending answer tables;
+the evaluation role cannot insert purchases or change rule configuration. Final
+answers are immutable, repeated matching writes are idempotent, and conflicts
+stop ingestion. Private intents bridge the score-commit/label-write crash window.
+Console labels and progress finalize in one transaction. Existing runs without
+answer metadata remain unlabelled. Neither score requests nor public responses
+include per-purchase answers.

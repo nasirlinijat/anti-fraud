@@ -32,6 +32,17 @@ type Scorer interface {
 	Score(ctx context.Context, req Request) (Result, error)
 }
 
+// PurchaseScorer receives private metadata without changing the HTTP request.
+type PurchaseScorer interface {
+	ScorePurchase(context.Context, Purchase) (Result, error)
+}
+
+// FatalError stops dispatch when a persistence prerequisite fails.
+type FatalError struct{ Err error }
+
+func (e FatalError) Error() string { return e.Err.Error() }
+func (e FatalError) Unwrap() error { return e.Err }
+
 // Client calls POST /score on a running backend.
 type Client struct {
 	BaseURL string
@@ -140,8 +151,18 @@ func send(ctx context.Context, s Scorer, purchases iter.Seq[Purchase], rate floa
 		if live {
 			p.Request.EventTime = time.Now().UTC()
 		}
-		res, err := s.Score(ctx, p.Request)
+		var res Result
+		var err error
+		if observer, ok := s.(PurchaseScorer); ok {
+			res, err = observer.ScorePurchase(ctx, p)
+		} else {
+			res, err = s.Score(ctx, p.Request)
+		}
 		if err != nil {
+			var fatal FatalError
+			if errors.As(err, &fatal) {
+				return sum, err
+			}
 			if live && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return sum, ctx.Err()
 			}

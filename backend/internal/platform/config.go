@@ -13,6 +13,7 @@ const defaultPort = "8080"
 // Config holds the settings read from environment variables.
 type Config struct {
 	SimulationEnabled bool
+	LabelsDatabaseURL string
 	Port              string
 	DatabaseURL       string
 	// ModelPath is the fraud model file. When it is empty, scoring uses rules only.
@@ -27,10 +28,11 @@ type Config struct {
 // error if a required variable is missing or empty.
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		Port:        os.Getenv("PORT"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		ModelPath:   os.Getenv("MODEL_PATH"),
-		APIKey:      os.Getenv("API_KEY"),
+		Port:              os.Getenv("PORT"),
+		LabelsDatabaseURL: os.Getenv("LABELS_DATABASE_URL"),
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		ModelPath:         os.Getenv("MODEL_PATH"),
+		APIKey:            os.Getenv("API_KEY"),
 	}
 	if cfg.Port == "" {
 		cfg.Port = defaultPort
@@ -50,6 +52,9 @@ func LoadConfig() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("SIMULATION_ENABLED must be a boolean")
 		}
+	}
+	if cfg.SimulationEnabled && cfg.LabelsDatabaseURL == "" {
+		return Config{}, fmt.Errorf("SIMULATION_ENABLED requires LABELS_DATABASE_URL")
 	}
 	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
 	if err != nil {

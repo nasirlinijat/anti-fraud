@@ -15,8 +15,8 @@ Simulated game traffic written by the simulator's -dump option is replayed
 the same way, with the model trained on it:
     python replay.py --requests data/game/world1.jsonl --limit 10000 --model ../backend/models/lgbm-game-v2.json --api-key local-dev-key
 
-Fraud labels never reach the service: they stay in this script and in the
-report it writes.
+Fraud labels never reach the score API. A separate database importer can load
+the labels CSV after the decisions have been saved.
 """
 import argparse
 import http.client
@@ -94,8 +94,8 @@ class Client:
         self.headers = {"Content-Type": "application/json", "X-API-Key": api_key}
 
     def score(self, request, attempts=5):
-        # A 500 or a lost connection saves nothing, so the purchase can be sent
-        # again; this survives a database restart in the middle of a long replay.
+        # Retry the identical transaction: the service returns its saved decision
+        # if a previous attempt committed before its response was lost.
         for attempt in range(1, attempts + 1):
             try:
                 self.connection.request("POST", "/score", json.dumps(request), self.headers)
@@ -228,6 +228,14 @@ def build_report(rows, args, policy, test_first_day=TEST_FIRST_DAY):
     }
 
 
+def write_labels(rows, path):
+    """Write evaluation answers separately from score requests and model inputs."""
+    labels = rows[["transaction_id", "is_fraud"]].copy()
+    if "pattern" in rows:
+        labels["scenario"] = rows["pattern"]
+    labels.to_csv(path, index=False)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("csv", nargs="?", help="IEEE-CIS train_transaction.csv")
@@ -292,8 +300,7 @@ def main():
         rows["pattern"] = data["pattern"].to_numpy()
     rows = pd.concat([rows, live], axis=1)
     rows.to_csv(out_dir / "replay_rows.csv", index=False)
-    # Labels stay outside the service; train.py --inputs joins them with the export.
-    rows[["transaction_id", "is_fraud"]].to_csv(out_dir / "labels.csv", index=False)
+    write_labels(rows, out_dir / "labels.csv")
 
     report = build_report(rows, args, policy, test_first_day=0 if args.requests else TEST_FIRST_DAY)
     if args.requests:

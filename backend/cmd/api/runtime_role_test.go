@@ -27,6 +27,8 @@ func TestRuntimeRolePermissions(t *testing.T) {
 	for _, statement := range []string{
 		"CREATE TABLE public.runtime_role_should_not_create (id int)",
 		"SELECT version FROM schema_migrations",
+		"SELECT is_fraud FROM purchase_labels",
+		"SELECT is_fraud FROM pending_purchase_labels",
 		"SELECT actor_id FROM configuration_audit_events",
 		"UPDATE configuration_audit_events SET actor_id = 'changed'",
 		"DELETE FROM configuration_audit_events",

@@ -67,7 +67,7 @@ jobs:
       - name: Provision API database role
         run: >-
           docker run --rm --network host
-          -e PGPASSWORD=antifraud -e RUNTIME_DB_PASSWORD=ci-runtime-password
+          -e PGPASSWORD=antifraud -e RUNTIME_DB_PASSWORD=ci-runtime-password -e LABELS_DB_PASSWORD=ci-labels-password
           -v "$PWD/runtime-role.sql:/runtime-role.sql:ro"
           postgres:18-alpine
           psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U antifraud -d antifraud -f /runtime-role.sql
@@ -75,6 +75,7 @@ jobs:
       - name: Test
         env:
           TEST_RUNTIME_DATABASE_URL: postgres://antifraud_api:ci-runtime-password@localhost:5432/antifraud?sslmode=disable
+          TEST_LABELS_DATABASE_URL: postgres://antifraud_labels:ci-labels-password@localhost:5432/antifraud?sslmode=disable
         # Packages share one test database, so their tests run one package at a time.
         run: go test -race -p 1 ./...
 

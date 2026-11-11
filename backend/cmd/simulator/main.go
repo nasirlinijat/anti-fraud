@@ -14,6 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
 
@@ -34,11 +36,15 @@ func main() {
 	flag.Float64Var(&cfg.SuspiciousShare, "suspicious", cfg.SuspiciousShare, "share of events that start a special scenario (legitimate or fraud), from 0 to 1")
 	flag.IntVar(&cfg.Players, "players", cfg.Players, "number of regular players")
 	flag.DurationVar(&cfg.MeanGap, "gap", cfg.MeanGap, "mean simulated time between traffic events")
+	database := flag.String("labels-database", os.Getenv("LABELS_DATABASE_URL"), "evaluation database (required when scoring)")
 	dump := flag.String("dump", "", "write the purchases with their fraud labels to this JSON Lines file instead of sending them")
 	flag.Parse()
 
 	if *apiKey == "" && *dump == "" {
 		log.Fatal("API key is missing: set API_KEY or pass -api-key")
+	}
+	if *dump == "" && *database == "" {
+		log.Fatal("LABELS_DATABASE_URL is required for scored runs")
 	}
 	live := *count == 0
 	switch {
@@ -95,20 +101,36 @@ func main() {
 	defer stop()
 
 	client := &simulator.Client{BaseURL: *url, APIKey: *apiKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
+	pool, err := pgxpool.New(ctx, *database)
+	if err != nil {
+		log.Fatal("invalid labels database configuration")
+	}
+	defer pool.Close()
+	preflight, cancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := labels.Preflight(preflight, pool); err != nil {
+		cancel()
+		log.Fatal(err)
+	}
+	cancel()
+	if _, err := labels.Recover(ctx, pool, cfg.Run); err != nil {
+		log.Fatal(err)
+	}
+	observed := &labels.Scorer{Pool: pool, Client: client, RunID: cfg.Run}
 	started := time.Now()
 	onError := func(err error) { log.Print(err) }
 	var sum simulator.Summary
-	var err error
+	err = nil
 	if live {
 		log.Printf("sending live purchases to %s (seed %d, run %s), press Ctrl+C to stop", *url, cfg.Seed, cfg.Run)
-		sum, err = simulator.RunLive(ctx, client, cfg, *rate, onError)
+		sum, err = simulator.RunLive(ctx, observed, cfg, *rate, onError)
 	} else {
 		log.Printf("sending %d purchases to %s (seed %d, run %s)", len(purchases), *url, cfg.Seed, cfg.Run)
-		sum, err = simulator.Run(ctx, client, purchases, *rate, onError)
+		sum, err = simulator.Run(ctx, observed, purchases, *rate, onError)
 	}
 	runFailed := err != nil && err != ctx.Err()
 	if runFailed {
 		log.Printf("stopped early: %v", err)
+		log.Printf("evaluation may be pending for run %q; use import-labels -run <run-id> -recover after fixing the error", cfg.Run)
 	}
 	log.Printf("sent %d, failed %d in %s", sum.Sent, sum.Failed, time.Since(started).Round(time.Millisecond))
 	printSummary(sum)

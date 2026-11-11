@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
@@ -64,7 +65,15 @@ func main() {
 	var manager *simulations.Manager
 	if cfg.SimulationEnabled {
 		setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		manager, err = simulations.New(setupCtx, pool, cfg.DatabaseURL, &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}})
+		evaluation, openErr := platform.NewPool(setupCtx, cfg.LabelsDatabaseURL)
+		if openErr != nil {
+			log.Fatal("invalid labels database configuration")
+		}
+		defer evaluation.Close()
+		if err := labels.Preflight(setupCtx, evaluation); err != nil {
+			log.Fatal(err)
+		}
+		manager, err = simulations.New(setupCtx, pool, cfg.DatabaseURL, &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}, evaluation)
 		cancel()
 		if err != nil {
 			log.Fatalf("initialize simulations: %v", err)

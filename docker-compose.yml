@@ -20,6 +20,7 @@ services:
     build: ./backend
     environment:
       PORT: ${PORT:?set PORT in .env}
+      LABELS_DATABASE_URL: postgres://antifraud_labels:${LABELS_DB_PASSWORD:-}@db:5432/${POSTGRES_DB}?sslmode=disable
       SIMULATION_ENABLED: ${SIMULATION_ENABLED:-false}
       API_KEY: ${API_KEY:?set API_KEY in .env}
       REVIEW_ANALYST_KEYS: ${REVIEW_ANALYST_KEYS:-}
@@ -68,6 +69,7 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+      LABELS_DB_PASSWORD: ${LABELS_DB_PASSWORD:-}
       RUNTIME_DB_PASSWORD: ${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}
     volumes:
       - ./backend/runtime-role.sql:/runtime-role.sql:ro
