@@ -2,7 +2,7 @@ package platform
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -16,10 +16,9 @@ type ErrorResponse struct {
 // WriteJSON writes v as a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("write response: %v", err)
+		slog.Error("write response", "error", err)
 	}
 }
 

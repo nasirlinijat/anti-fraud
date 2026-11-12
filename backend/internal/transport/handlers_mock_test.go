@@ -26,7 +26,7 @@ const (
 
 var errServiceDown = errors.New("database is down")
 
-func send(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
+func send(mux http.Handler, method, path, key, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
 		req.Header.Set("X-API-Key", key)

@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,12 +51,12 @@ func run(m *testing.M) int {
 	if ownerURL == "" {
 		db, err := testdb.Start(ctx)
 		if err != nil {
-			log.Printf("start postgres: %v", err)
+			slog.Error("start postgres", "error", err)
 			return 1
 		}
 		defer func() {
 			if err := db.Stop(); err != nil {
-				log.Printf("stop postgres: %v", err)
+				slog.Error("stop postgres", "error", err)
 			}
 		}()
 		ownerURL, runtimeURL = db.OwnerURL, db.RuntimeURL
@@ -64,21 +64,21 @@ func run(m *testing.M) int {
 
 	var err error
 	if ownerPool, err = pgxpool.New(ctx, ownerURL); err != nil {
-		log.Printf("connect as owner: %v", err)
+		slog.Error("connect as owner", "error", err)
 		return 1
 	}
 	defer ownerPool.Close()
 	runtimePool = ownerPool
 	if runtimeURL != "" {
 		if runtimePool, err = pgxpool.New(ctx, runtimeURL); err != nil {
-			log.Printf("connect as the runtime role: %v", err)
+			slog.Error("connect as the runtime role", "error", err)
 			return 1
 		}
 		defer runtimePool.Close()
 		runtimeRole = true
 	}
 	if err := runtimePool.Ping(ctx); err != nil {
-		log.Printf("ping the database: %v", err)
+		slog.Error("ping the database", "error", err)
 		return 1
 	}
 	return m.Run()

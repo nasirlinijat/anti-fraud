@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -53,29 +53,29 @@ func run(m *testing.M) int {
 	ctx := context.Background()
 	db, err := testdb.Start(ctx)
 	if err != nil {
-		log.Printf("start postgres: %v", err)
+		slog.Error("start postgres", "error", err)
 		return 1
 	}
 	defer func() {
 		if err := db.Stop(); err != nil {
-			log.Printf("stop postgres: %v", err)
+			slog.Error("stop postgres", "error", err)
 		}
 	}()
 	if ownerPool, err = pgxpool.New(ctx, db.OwnerURL); err != nil {
-		log.Printf("connect as owner: %v", err)
+		slog.Error("connect as owner", "error", err)
 		return 1
 	}
 	defer ownerPool.Close()
 	runtimePool, err := pgxpool.New(ctx, db.RuntimeURL)
 	if err != nil {
-		log.Printf("connect as the runtime role: %v", err)
+		slog.Error("connect as the runtime role", "error", err)
 		return 1
 	}
 	defer runtimePool.Close()
 
 	mux, err := newMux(runtimePool)
 	if err != nil {
-		log.Printf("wire the API: %v", err)
+		slog.Error("wire the API", "error", err)
 		return 1
 	}
 	server = httptest.NewServer(mux)

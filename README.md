@@ -84,7 +84,7 @@ cd backend
 go test -race -tags=integration ./test/concurrency/...
 ```
 
-`make test-integration` runs both folders (`./test/...`).
+`make test-integration` runs both folders one after the other (`go test -p 1 -tags=integration ./test/...`).
 
 ## Demo Traffic
 
@@ -276,6 +276,22 @@ OPERATOR_API_KEYS=[{"operator_id":"operator-1","key":"replace-with-an-individual
 When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASSWORD` to `.env` before starting the stack. Keep the existing `POSTGRES_USER` and `POSTGRES_PASSWORD` for migrations and backups. If you run the backend on the host, update `DATABASE_URL` to use `antifraud_api` and the runtime password.
 
 The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
+
+## Logs
+
+The backend writes one JSON object per line to standard output with `log/slog`, so Datadog reads every field as an attribute. Every line has `time`, `level`, `msg` and `service` (`anti-fraud-backend`). Each HTTP request is logged once:
+
+```json
+{"time":"2026-11-12T09:08:46Z","level":"INFO","msg":"http request","service":"anti-fraud-backend","http":{"method":"POST","route":"/score","status_code":200},"duration":134506800,"request_id":"bus-demo-1"}
+```
+
+- `duration` is in nanoseconds, and `http.route` is the route pattern, not the raw URL.
+- Every request gets a request ID. A client can send its own in `X-Request-ID` (1 to 64 letters, digits, `-`, `_` or `.`); otherwise the backend makes one. It comes back in the `X-Request-ID` response header and is on every log line of that request, so one ID finds all lines of a failed request.
+- Responses with status 500 or more are logged at `ERROR`. Successful `/health` and `/ready` checks are not logged.
+- A panic in a handler is recovered: the client gets a 500 JSON error and the log gets the stack.
+- API keys, card tokens and IP addresses are never logged; a test checks this.
+
+The same middleware sets the security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` and `Referrer-Policy: no-referrer`. HTTPS and HSTS are added by the Caddy edge in production.
 
 ## Database Queries
 

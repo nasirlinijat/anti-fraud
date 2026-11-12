@@ -2,7 +2,7 @@ package transport
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -56,7 +56,7 @@ func (h *StatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sum, err := h.service.Summary(r.Context(), window)
 	if err != nil {
-		log.Printf("stats for period %s: %v", period, err)
+		slog.ErrorContext(r.Context(), "read stats", "period", period, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

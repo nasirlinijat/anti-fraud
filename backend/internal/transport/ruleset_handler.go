@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,7 +71,7 @@ type rulePayload struct {
 func (h *RulesetHandler) list(w http.ResponseWriter, r *http.Request) {
 	versions, err := h.service.List(r.Context())
 	if err != nil {
-		log.Printf("list rulesets: %v", err)
+		slog.ErrorContext(r.Context(), "list rulesets", "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -83,7 +83,7 @@ func (h *RulesetHandler) list(w http.ResponseWriter, r *http.Request) {
 func (h *RulesetHandler) getActive(w http.ResponseWriter, r *http.Request) {
 	rs, err := h.service.Active(r.Context())
 	if err != nil {
-		log.Printf("read active ruleset: %v", err)
+		slog.ErrorContext(r.Context(), "read active ruleset", "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -102,7 +102,7 @@ func (h *RulesetHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("read ruleset %d: %v", version, err)
+		slog.ErrorContext(r.Context(), "read ruleset", "version", version, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -134,7 +134,7 @@ func (h *RulesetHandler) publish(w http.ResponseWriter, r *http.Request, operato
 		return
 	}
 	if err != nil {
-		log.Printf("%v", err)
+		slog.ErrorContext(r.Context(), "publish ruleset", "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

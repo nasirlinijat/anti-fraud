@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"reflect"
@@ -110,7 +110,7 @@ func (h *ScoreHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Fields: map[string]string{"transaction_id": "is already scored"},
 		})
 	case err != nil:
-		log.Printf("score purchase %s: %v", p.TransactionID, err)
+		slog.ErrorContext(r.Context(), "score purchase", "transaction_id", p.TransactionID, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 	default:
 		writeScoreResponse(w, p.TransactionID, decision)
