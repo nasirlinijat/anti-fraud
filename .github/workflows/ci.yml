@@ -109,6 +109,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser checks
+        run: npm run test:browser -- --project=chromium
+
   ml:
     runs-on: ubuntu-latest
     timeout-minutes: 10
