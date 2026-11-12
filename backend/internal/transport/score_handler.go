@@ -126,6 +126,10 @@ func (h *ScoreHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "score purchase stopped", "transaction_id", p.TransactionID, "error", err)
 		w.Header().Set("Retry-After", "1")
 		platform.WriteError(w, http.StatusServiceUnavailable, "scoring took too long, nothing was saved; retry later")
+	case platform.DatabaseUnavailable(err):
+		slog.WarnContext(r.Context(), "score purchase: database unavailable", "transaction_id", p.TransactionID, "error", err)
+		w.Header().Set("Retry-After", "1")
+		platform.WriteError(w, http.StatusServiceUnavailable, "the database is unavailable, nothing was saved; retry later")
 	case err != nil:
 		slog.ErrorContext(r.Context(), "score purchase", "transaction_id", p.TransactionID, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")

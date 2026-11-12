@@ -188,6 +188,12 @@ Measured on November 11, 2026, on an Apple M4 with 10 CPU cores and 16 GiB RAM, 
 
 Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run. `pg_stat_statements` ranked issuer history first by mean and total execution time. Its mean was 28.09 ms in the baseline and 10.30 ms and 11.47 ms in the final runs. `EXPLAIN (ANALYZE, BUFFERS)` showed index-only scans for the typical, missing, and common issuer samples. The player, card, model history, device-card count, and trusted-purchase history plans used their indexes with no sequential scans. The issuer query still counts distinct values across both indexes. Rows with wide text use the index with the original keys.
 
+### Load test of the deployed server
+
+[LOAD_TEST.md](LOAD_TEST.md) has the k6 test of the AWS server: steady, ramp and spike scenarios with simulated purchases (`scripts/k6/score.js`), the capacity found, the bottleneck, and how to run it.
+
+[CHAOS_TEST.md](CHAOS_TEST.md) has the chaos test: the backend restarted and killed, PostgreSQL restarted and the gateway stopped while purchases kept arriving (`scripts/k6/chaos.js`), with SQL checks that every purchase was saved exactly once.
+
 ## Ruleset API
 
 Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
