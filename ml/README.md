@@ -520,7 +520,34 @@ Scores drift over time, so the thresholds should be checked against recent data 
 
 ## History of changes
 
-Each table below compares versions **on the test month**, which is how these choices were made. The current results are in [Current results](#current-results).
+Each table below compares versions **on the test month**, which is how these choices were made, except the first, which was chosen on the validation month. The current results are in [Current results](#current-results).
+
+### Purchase-history inputs tried for v6 (not kept)
+
+Each candidate uses only the request and earlier purchases, so the service could compute it. They were compared without the test month: training days 31-105, early stopping on days 106-120, scored on the validation month (days 136-152), each number the average of 3 LightGBM models with different seeds. The rule, written before any test month score: an input is kept only if it raises validation PR-AUC by at least 0.002 and does not lower the fraud caught when 0.5% of legitimate purchases are flagged. **None qualified**, so the feature list is unchanged.
+
+| Added to the 54 features | Definition | Validation PR-AUC | Fraud caught at 0.5% |
+|---|---|---|---|
+| None | | 0.221 | 11.2% |
+| `amount_to_max` | Amount divided by the player's largest earlier amount | 0.219 | 10.5% |
+| `card_txn_count` | Earlier purchases with the card | 0.219 | 10.3% |
+| `card_secs_since_first` | Seconds since the card's first purchase | 0.203 | 9.7% |
+| `card_secs_since_first`, capped at 30 days | | 0.223 | 10.8% |
+| `card_secs_since_last` | Seconds since the card's previous purchase | 0.220 | 10.8% |
+| `amount_to_card_avg` | Amount divided by the card's average earlier amount | 0.220 | 10.4% |
+| `card_distinct_emails` | Email domains used with the card before | 0.220 | 10.6% |
+| `email_is_new_for_card` | The card has earlier purchases, none with this email domain | 0.222 | 11.0% |
+| `product_is_new_for_player` | The player has earlier purchases, none with this product code | 0.221 | 10.5% |
+| `device_distinct_cards` | Cards seen with this device name before | 0.201 | 9.1% |
+| `card_uses_7d`, `player_uses_7d` | Earlier purchases by the card or player in the last 7 days | 0.223, 0.221 | 11.0%, 11.3% |
+| `card_players_30d`, `player_cards_30d`, `player_emails_30d` | Distinct players on the card, cards and email domains of the player, in the last 30 days | 0.221, 0.223, 0.220 | 11.0%, 10.9%, 10.6% |
+
+- The PR-AUC of one model changes by up to 0.003 with its seed, so every difference except the two drops is within noise.
+- The two lifetime inputs, `card_secs_since_first` and `device_distinct_cards`, lower PR-AUC by about 0.02: they grow with the history the data has collected, so their values on later days are outside the training range (the problem of AF-95). Their capped and windowed versions do no harm but add nothing.
+- The distinct email domains of a player are already an input, `player_distinct_emails`.
+- IEEE-CIS has no device ID, so cards per device can only be counted per device name (`DeviceInfo`, such as `Windows`), which thousands of unrelated purchases share.
+
+The 54 features retrained without a new input (as `lgbm-ieee-v6-combined`) reached test PR-AUC 0.237 against 0.240 for v5, and caught 10.9% of fraud at 0.5% of legitimate purchases flagged against 10.5%. The rule required both to be higher, so v5 stays the IEEE-CIS model and v6 was not added.
 
 ### Blending with the player's earlier scores (v5 combined)
 
