@@ -128,13 +128,18 @@ Local setup is described in `README.md`. Create the environment file once with `
 
 | Command | What it does |
 |---|---|
-| `make up` | Builds and starts PostgreSQL and the backend in Docker |
+| `make up` | Builds and starts the whole stack in Docker: PostgreSQL, Redis, migrations, the backend, and the console |
 | `make down` | Stops the containers and keeps the database data |
-| `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
-| `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
+| `make db` | Starts only PostgreSQL in Docker |
+| `make run` | Applies migrations, starts Redis in Docker, and runs the backend directly with Go |
+| `make test` | Applies migrations, starts Redis in Docker, and runs the backend tests |
+| `make test-integration` | Runs the integration and concurrency tests in `backend/test` |
+| `make test-ml` | Runs the ML tests with `ml/.venv` |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
+| `make lint-frontend` | Runs the frontend lint, type check, and unit tests |
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
+| `make simulate` | Sends seeded demo purchases to the running backend |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REDIS_URL` is optional: when empty, the blocklist cache is disabled and lookups query PostgreSQL directly. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
 

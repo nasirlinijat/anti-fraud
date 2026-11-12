@@ -4,7 +4,7 @@ export
 TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 TEST_REDIS_URL ?= redis://localhost:$(REDIS_PORT)/0
 
-.PHONY: up down db run test test-integration lint migrate docs simulate
+.PHONY: up down db run test test-integration test-ml lint lint-frontend migrate docs simulate
 
 up:
 	docker compose up -d --build --wait
@@ -35,6 +35,12 @@ lint:
 		exit 1; \
 	fi
 	cd backend && go vet ./...
+
+lint-frontend:
+	cd frontend && npm run check
+
+test-ml:
+	cd ml && .venv/bin/python -m pytest tests
 
 migrate:
 	docker compose run --rm migrate
