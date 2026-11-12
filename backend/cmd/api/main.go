@@ -21,6 +21,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/simulation"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
+	quality "github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
@@ -50,10 +51,15 @@ func main() {
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)
-	manager, evaluation := newSimulationManager(cfg, pool)
+	evaluation, err := openEvaluationPool(cfg)
+	if err != nil {
+		fatal("open the evaluation database", err)
+	}
 	if evaluation != nil {
 		defer evaluation.Close()
 	}
+	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), cfg.APIKey)
+	manager := newSimulationManager(cfg, pool, evaluation)
 	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
 
 	server := platform.NewServer(":"+cfg.Port, transport.Middleware(mux))
@@ -97,28 +103,47 @@ func useModel(modelPath string, service *scoresvc.Service, rulesets *ruleset.Ser
 		"flag_at", policy.FlagAt, "clear_below", policy.ClearBelow)
 }
 
-// newSimulationManager returns the manager of console simulation runs and
-// its connection to the evaluation database, or nils when simulations are
-// disabled. It exits when the setup fails.
-func newSimulationManager(cfg platform.Config, pool *pgxpool.Pool) (*simulation.Service, *pgxpool.Pool) {
-	if !cfg.SimulationEnabled {
+// openEvaluationPool keeps reporting optional while requiring healthy private
+// persistence before simulation traffic can be dispatched.
+func openEvaluationPool(cfg platform.Config) (*pgxpool.Pool, error) {
+	if cfg.LabelsDatabaseURL == "" {
+		if cfg.SimulationEnabled {
+			return nil, errors.New("simulations require evaluation access")
+		}
 		return nil, nil
 	}
 	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	evaluation, err := platform.NewPool(setupCtx, cfg.LabelsDatabaseURL)
 	if err != nil {
-		fatal("invalid labels database configuration", nil)
+		if cfg.SimulationEnabled {
+			return nil, errors.New("invalid labels database configuration")
+		}
+		slog.Warn("quality reporting is unavailable: invalid evaluation configuration")
+		return nil, nil
 	}
-	if err := labels.Preflight(setupCtx, evaluation); err != nil {
-		fatal("check the labels database", err)
+	if cfg.SimulationEnabled {
+		if err := labels.Preflight(setupCtx, evaluation); err != nil {
+			evaluation.Close()
+			return nil, err
+		}
 	}
+	return evaluation, nil
+}
+
+// newSimulationManager registers no controller or recovery when disabled.
+func newSimulationManager(cfg platform.Config, pool, evaluation *pgxpool.Pool) *simulation.Service {
+	if !cfg.SimulationEnabled {
+		return nil
+	}
+	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
 	manager, err := simulation.NewService(setupCtx, labels.NewSimulationStore(storage.NewSimulationStore(pool, cfg.DatabaseURL), evaluation), client)
 	if err != nil {
 		fatal("initialize simulations", err)
 	}
-	return manager, evaluation
+	return manager
 }
 
 // shutDownOnSignal waits for the signal context to end, then drains the

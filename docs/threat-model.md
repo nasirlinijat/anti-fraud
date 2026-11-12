@@ -79,3 +79,12 @@ stop ingestion. Private intents bridge the score-commit/label-write crash window
 Console labels and progress finalize in one transaction. Existing runs without
 answer metadata remain unlabelled. Neither score requests nor public responses
 include per-purchase answers.
+
+
+Quality reporting reads the separate evaluation connection in read-only
+transactions. Its service-key endpoints expose per-run aggregates and run IDs,
+never purchase-level answers. Source and run ID scope every evaluation. Scoring
+credentials remain unable to read the answer tables. Optional evaluation failures
+do not disable scoring; simulation dispatch still requires successful private
+persistence preflight. Quality routes are exposed through the console proxy and
+remain excluded from the public production API hostname.

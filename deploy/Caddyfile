@@ -1,8 +1,26 @@
 {
 	admin off
+	metrics {
+		per_host
+	}
+}
+
+(access_log) {
+	log {
+		format filter {
+			request>headers>X-Api-Key delete
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
+}
+
+:2019 {
+	metrics /metrics
 }
 
 {$API_HOST} {
+	import access_log
 	encode zstd gzip
 	@api path /score /health /ready
 	handle @api {
@@ -14,6 +32,7 @@
 }
 
 {$CONSOLE_HOST} {
+	import access_log
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
 	@foreignOrigin {

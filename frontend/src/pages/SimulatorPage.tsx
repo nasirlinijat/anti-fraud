@@ -47,7 +47,7 @@ export default function SimulatorPage() {
 
   return (
     <div className="simulator">
-      <h2>Simulator</h2>
+      <h1>Simulator</h1>
       <p className="muted">
         Send simulated purchases through scoring and follow the actual decisions. Runs keep going when you
         leave this page.
@@ -407,7 +407,7 @@ async function stopRun({ form, writes, outcome, runs }: Simulator) {
 function DisabledNotice({ onRecheck }: { onRecheck: () => void }) {
   return (
     <div className="panel" role="status">
-      <h3>Simulations are disabled or unavailable</h3>
+      <h2>Simulations are disabled or unavailable</h2>
       <p>
         Ask the operator to enable <code>SIMULATION_ENABLED</code> on this backend and restart it.
       </p>
@@ -435,7 +435,7 @@ function StartForm({ form, runs, writing, locked, onSubmit }: {
       noValidate
       onSubmit={onSubmit}
     >
-      <h3 id="simulation-settings-title">Start a run</h3>
+      <h2 id="simulation-settings-title">Start a run</h2>
       <fieldset disabled={locked || disabled || !history}>
         <legend>Traffic settings</legend>
         <ScenarioField value={draft.scenario} error={fields.scenario} available={runs.available}
@@ -618,7 +618,7 @@ function RunProgress({ runs, time, stopBlocked, pendingStopId, onStop }: {
   const { run, missing, history, checkedAt } = runs
   return (
     <section className="panel simulation-progress" aria-labelledby="simulation-progress-title">
-      <h3 id="simulation-progress-title">Run progress</h3>
+      <h2 id="simulation-progress-title">Run progress</h2>
       {missing && (
         <ErrorState>
           The selected run is no longer available. Start a new run or choose another recent run.
@@ -741,7 +741,7 @@ function RecentRuns({ items, currentId, onFollow }: {
 }) {
   return (
     <section className="panel simulation-history" aria-labelledby="simulation-history-title">
-      <h3 id="simulation-history-title">Recent runs</h3>
+      <h2 id="simulation-history-title">Recent runs</h2>
       <ul>
         {items.map((item) => (
           <li key={item.id}>
