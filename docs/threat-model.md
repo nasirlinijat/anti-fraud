@@ -41,8 +41,10 @@ CI runs these on every pull request and push to `main`. A finding fails the buil
 | Go vulnerabilities | govulncheck 1.1.4 | Known vulnerabilities in the Go standard library and modules that the backend's code actually calls |
 | Code issues | gosec 2.30.0 | Risky patterns in the backend source |
 | Image | Trivy 0.76.1 | The built backend image (Debian packages and the Go binary); critical findings fail, high findings are printed |
+| Console packages | npm audit | Every package in `frontend/package-lock.json`; high and critical findings fail |
+| ML packages | pip-audit 2.10.1 | Every Python package the ML job installed, including indirect ones such as scipy; any known vulnerability fails |
 
-The first run found 23 vulnerabilities in the Go 1.26.5 standard library (HTTP, TLS, X.509, XML, URL parsing). The backend now builds with Go 1.26.11, which fixes all of them, and govulncheck and Trivy report none. gosec findings about file paths and unchecked errors were fixed in the code.
+The first run found 23 vulnerabilities in the Go 1.26.5 standard library (HTTP, TLS, X.509, XML, URL parsing). The backend now builds with Go 1.26.11, which fixes all of them, and govulncheck and Trivy report none. gosec findings about file paths and unchecked errors were fixed in the code. The first ML audit found CVE-2025-71176 in pytest 8.4.2 (unsafe temporary directories); the ML code now uses pytest 9.2.0.
 
 ### Accepted findings
 
