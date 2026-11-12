@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,6 +89,9 @@ type scoreRequest struct {
 	ClientOS             *string    `json:"client_os"`
 	ClientBrowser        *string    `json:"client_browser"`
 	ScreenResolution     *string    `json:"screen_resolution"`
+	CVVResult            *string    `json:"cvv_result"`
+	AVSResult            *string    `json:"avs_result"`
+	ThreeDSResult        *string    `json:"three_ds_result"`
 }
 
 type scoreResponse struct {
@@ -274,7 +278,44 @@ func (req scoreRequest) purchase(now time.Time) (models.Purchase, map[string]str
 	}
 	p.IPAddress = ipAddress(req.IPAddress, fields)
 	p.AccountCreatedAt = req.accountCreatedAt(p.EventTime, fields)
+	p.CVVResult, p.AVSResult, p.ThreeDSResult = req.verification(fields)
 	return p, fields
+}
+
+// verification returns the optional gateway verification results and records
+// a problem in fields for each value that is not a known result.
+func (req scoreRequest) verification(fields map[string]string) (*scoring.CVVResult, *scoring.AVSResult, *scoring.ThreeDSResult) {
+	return enumValue("cvv_result", req.CVVResult, scoring.CVVResults, fields),
+		enumValue("avs_result", req.AVSResult, scoring.AVSResults, fields),
+		enumValue("three_ds_result", req.ThreeDSResult, scoring.ThreeDSResults, fields)
+}
+
+// enumValue returns the optional value when it is one of allowed, and records
+// a problem in fields when it is not. Values are compared exactly, after
+// trimming, like the other optional strings.
+func enumValue[T ~string](name string, s *string, allowed []T, fields map[string]string) *T {
+	text := optional(s)
+	if text == nil {
+		return nil
+	}
+	value := T(*text)
+	if !slices.Contains(allowed, value) {
+		fields[name] = "must be " + choiceList(allowed)
+		return nil
+	}
+	return &value
+}
+
+// choiceList writes the values as "a, b, or c".
+func choiceList[T ~string](values []T) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = string(v)
+	}
+	if len(quoted) < 2 {
+		return strings.Join(quoted, "")
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + ", or " + quoted[len(quoted)-1]
 }
 
 // ipAddress parses the optional IP address and records a problem in fields.

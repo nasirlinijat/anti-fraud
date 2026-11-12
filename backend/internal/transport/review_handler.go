@@ -93,6 +93,9 @@ type caseResponse struct {
 	RulesetVersion  int                      `json:"ruleset_version"`
 	PlayerPurchases []playerPurchaseResponse `json:"player_purchases"`
 	DeviceActivity  *deviceActivityResponse  `json:"device_activity"`
+	CVVResult       *scoring.CVVResult       `json:"cvv_result"`
+	AVSResult       *scoring.AVSResult       `json:"avs_result"`
+	ThreeDSResult   *scoring.ThreeDSResult   `json:"three_ds_result"`
 }
 
 type networkResponse struct {
@@ -221,6 +224,10 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	platform.WriteJSON(w, http.StatusOK, newCaseResponse(item))
+}
+
+func newCaseResponse(item models.CaseItem) caseResponse {
 	playerPurchases := make([]playerPurchaseResponse, 0, len(item.PlayerPurchases))
 	for _, p := range item.PlayerPurchases {
 		playerPurchases = append(playerPurchases, playerPurchaseResponse{
@@ -238,12 +245,15 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 			LastSeenAt:    item.DeviceActivity.LastSeenAt.UTC(),
 		}
 	}
-	platform.WriteJSON(w, http.StatusOK, caseResponse{
+	return caseResponse{
 		reviewResponse:  newReviewResponse(item.QueueItem),
 		RulesetVersion:  item.RulesetVersion,
 		PlayerPurchases: playerPurchases,
 		DeviceActivity:  deviceActivity,
-	})
+		CVVResult:       item.CVVResult,
+		AVSResult:       item.AVSResult,
+		ThreeDSResult:   item.ThreeDSResult,
+	}
 }
 
 func (h *ReviewHandler) serveNetwork(w http.ResponseWriter, r *http.Request) {

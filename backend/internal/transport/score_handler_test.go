@@ -304,6 +304,11 @@ func TestScoreRejectsInvalidRequests(t *testing.T) {
 		{"event time as number", strings.Replace(minimalBody, `"2026-11-08T10:00:00Z"`, `1762596000`, 1), "", "RFC 3339"},
 		{"invalid IP address", with(`"amount_minor": 1999, "ip_address": "300.1.1.1"`), "ip_address", ""},
 		{"negative distance", with(`"amount_minor": 1999, "billing_distance": -1`), "billing_distance", ""},
+		{"unknown CVV result", with(`"amount_minor": 1999, "cvv_result": "passed"`), "cvv_result", ""},
+		{"CVV result in capitals", with(`"amount_minor": 1999, "cvv_result": "MATCH"`), "cvv_result", ""},
+		{"CVV result as boolean", with(`"amount_minor": 1999, "cvv_result": true`), "cvv_result", ""},
+		{"unknown AVS result", with(`"amount_minor": 1999, "avs_result": "zip_only"`), "avs_result", ""},
+		{"unknown 3-D Secure result", with(`"amount_minor": 1999, "three_ds_result": "challenged"`), "three_ds_result", ""},
 		{"account created after event", with(`"amount_minor": 1999, "account_created_at": "2026-11-08T11:00:00Z"`), "account_created_at", ""},
 		{"event time far in the future", strings.Replace(minimalBody, `2026-11-08T10:00:00Z`, `2099-01-01T00:00:00Z`, 1), "event_time", ""},
 		{"malformed JSON", `{"transaction_id": `, "", "not valid JSON"},
@@ -832,6 +837,7 @@ func fullRetryFields() map[string]any {
 		"ip_address": "203.0.113.9", "ip_country": "TR",
 		"account_created_at": "2026-11-08T09:00:00.987654321Z",
 		"client_os":          "iOS", "client_browser": "Safari", "screen_resolution": "1920x1080",
+		"cvv_result": "match", "avs_result": "partial", "three_ds_result": "authenticated",
 	}
 }
 
@@ -873,6 +879,7 @@ func TestScoreRetryComparesStoredPurchase(t *testing.T) {
 	retry["event_time"] = "2026-11-08T14:00:00.123456001+04:00"
 	retry["account_created_at"] = "2026-11-08T13:00:00.987654999+04:00"
 	retry["ip_address"] = "::ffff:203.0.113.9"
+	retry["cvv_result"] = " match "
 	for _, payload := range []map[string]any{fields, retry} {
 		if rec := post(payload); rec.Code != http.StatusOK || rec.Body.String() != first.Body.String() {
 			t.Fatalf("retry: %d %s, want %s", rec.Code, rec.Body, first.Body)
@@ -890,6 +897,7 @@ func TestScoreRetryComparesStoredPurchase(t *testing.T) {
 		"ip_address": "203.0.113.10", "ip_country": "AZ",
 		"account_created_at": "2026-11-08T09:00:00.987655Z",
 		"client_os":          "Android", "client_browser": "Chrome", "screen_resolution": "1080x1920",
+		"cvv_result": "mismatch", "avs_result": nil, "three_ds_result": "failed",
 	}
 	for name, value := range changed {
 		t.Run(name, func(t *testing.T) {

@@ -24,6 +24,7 @@ type Input struct {
 	CardPurchasesLastHour int   // earlier purchases in the hour before EventTime
 	DeviceCardsLastHour   int64 // distinct cards including the current card, or zero without device history
 	TrustedHistory        *TrustedPurchaseHistory
+	Verification          PaymentVerification
 }
 
 // TrustedPurchaseHistory summarizes earlier allowed or approved purchases.

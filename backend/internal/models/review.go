@@ -38,6 +38,11 @@ type CaseItem struct {
 	PlayerPurchases []PlayerPurchase
 	// DeviceActivity summarizes activity on the same device, or is nil when the purchase had no device ID.
 	DeviceActivity *DeviceActivity
+	// The gateway verification results of the purchase are nil when the
+	// request did not send them.
+	CVVResult     *scoring.CVVResult
+	AVSResult     *scoring.AVSResult
+	ThreeDSResult *scoring.ThreeDSResult
 }
 
 // PlayerPurchase is an earlier purchase by the same player.

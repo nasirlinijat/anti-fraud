@@ -209,10 +209,17 @@ export interface DeviceActivity {
   last_seen_at: string
 }
 
+export type CvvResult = 'match' | 'mismatch' | 'not_checked'
+export type AvsResult = 'match' | 'partial' | 'mismatch' | 'not_checked'
+export type ThreeDsResult = 'authenticated' | 'attempted' | 'failed' | 'not_enrolled'
+
 export interface ReviewCase extends Review {
   ruleset_version: number
   player_purchases: PlayerPurchase[]
   device_activity: DeviceActivity | null
+  cvv_result: CvvResult | null
+  avs_result: AvsResult | null
+  three_ds_result: ThreeDsResult | null
 }
 
 export interface QueuePage {

@@ -92,6 +92,9 @@ func fullPurchase() models.Purchase {
 		IPAddress:            ptr(netip.MustParseAddr("203.0.113.7")),
 		IPCountry:            ptr("TR"),
 		AccountCreatedAt:     ptr(time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)),
+		CVVResult:            ptr(scoring.CVVMatch),
+		AVSResult:            ptr(scoring.AVSPartial),
+		ThreeDSResult:        ptr(scoring.ThreeDSFailed),
 	}
 }
 
@@ -124,6 +127,7 @@ func readSaved(t *testing.T, tx pgx.Tx, id int64) (models.Purchase, savedDecisio
 		       p.product_code, p.billing_region, p.billing_country, p.billing_distance,
 		       p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
 		       p.ip_address, p.ip_country, p.account_created_at,
+		       p.cvv_result, p.avs_result, p.three_ds_result,
 		       d.ruleset_version, d.outcome, d.rule_score, d.fired_rules, d.model_inputs, d.model_score
 		FROM purchases p JOIN decisions d ON d.purchase_id = p.id
 		WHERE p.id = $1`, id).Scan(
@@ -132,6 +136,7 @@ func readSaved(t *testing.T, tx pgx.Tx, id int64) (models.Purchase, savedDecisio
 		&got.ProductCode, &got.BillingRegion, &got.BillingCountry, &got.BillingDistance,
 		&got.EmailDomain, &got.RecipientEmailDomain, &got.DeviceType, &got.DeviceName, &got.DeviceID,
 		&ip, &got.IPCountry, &accountAt,
+		&got.CVVResult, &got.AVSResult, &got.ThreeDSResult,
 		&d.version, &d.outcome, &d.ruleScore, &firedJSON, &inputsJSON, &d.modelScore,
 	)
 	if err != nil {
@@ -214,7 +219,8 @@ func TestSaveWithoutOptionalFields(t *testing.T) {
 		  AND num_nonnulls(p.card_issuer, p.card_network, p.card_type, p.card_country, p.card_category,
 		                   p.product_code, p.billing_region, p.billing_country, p.billing_distance,
 		                   p.email_domain, p.recipient_email_domain, p.device_type, p.device_name,
-		                   p.device_id, p.ip_address, p.ip_country, p.account_created_at) = 0
+		                   p.device_id, p.ip_address, p.ip_country, p.account_created_at,
+		                   p.cvv_result, p.avs_result, p.three_ds_result) = 0
 		  AND d.model_score IS NULL
 		  AND d.fired_rules = '[]'::jsonb
 		  AND d.model_inputs = '{}'::jsonb`, id)

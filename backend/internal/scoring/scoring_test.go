@@ -207,6 +207,9 @@ func TestRuleNameKnown(t *testing.T) {
 		{RuleCountryMismatch, true},
 		{RuleDeviceCardCount, true},
 		{RuleNewDeviceSpike, true},
+		{RuleCVVMismatch, true},
+		{RuleAVSMismatch, true},
+		{RuleThreeDSFailed, true},
 		{"high_ammount", false},
 		{"", false},
 	}

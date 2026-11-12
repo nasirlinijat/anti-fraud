@@ -138,7 +138,7 @@ func (s *PurchaseStore) PlayerEarlierModelScores(ctx context.Context, playerID s
 }
 
 // savedScore returns the decision saved for transaction ID $1, and whether the
-// saved purchase has the same fields as $1 to $25, which bind purchaseArgs.
+// saved purchase has the same fields as $1 to $28, which bind purchaseArgs.
 const savedScore = `
 SELECT
     ROW(
@@ -147,7 +147,8 @@ SELECT
         p.product_code, p.billing_region, p.billing_country, p.billing_distance,
         p.email_domain, p.recipient_email_domain, p.device_type, p.device_name, p.device_id,
         p.ip_address, p.ip_country, p.account_created_at,
-        p.client_os, p.client_browser, p.screen_resolution
+        p.client_os, p.client_browser, p.screen_resolution,
+        p.cvv_result, p.avs_result, p.three_ds_result
     ) IS NOT DISTINCT FROM ROW(
         $1::text, $2::timestamptz, $3::bigint,
         $4::text, $5::text,
@@ -157,7 +158,8 @@ SELECT
         $15::text, $16::text,
         $17::text, $18::text, $19::text,
         $20::inet, $21::text, $22::timestamptz,
-        $23::text, $24::text, $25::text
+        $23::text, $24::text, $25::text,
+        $26::text, $27::text, $28::text
     ) AS request_matches,
     d.outcome, d.rule_score, d.fired_rules, d.ruleset_version, d.model_score, d.model_version
 FROM purchases p
@@ -195,14 +197,16 @@ INSERT INTO purchases (
     product_code, billing_region, billing_country, billing_distance,
     email_domain, recipient_email_domain, device_type, device_name, device_id,
     ip_address, ip_country, account_created_at,
-    client_os, client_browser, screen_resolution
+    client_os, client_browser, screen_resolution,
+    cvv_result, avs_result, three_ds_result
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17, $18, $19,
     $20, $21, $22,
-    $23, $24, $25
+    $23, $24, $25,
+    $26, $27, $28
 )
 RETURNING id`
 
@@ -283,6 +287,7 @@ func purchaseArgs(p models.Purchase) []any {
 		p.EmailDomain, p.RecipientEmailDomain, p.DeviceType, p.DeviceName, p.DeviceID,
 		p.IPAddress, p.IPCountry, accountCreatedAt,
 		p.ClientOS, p.ClientBrowser, p.ScreenResolution,
+		p.CVVResult, p.AVSResult, p.ThreeDSResult,
 	}
 }
 

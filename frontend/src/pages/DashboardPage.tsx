@@ -25,6 +25,9 @@ const ruleNames: Record<string, string> = {
   card_velocity: 'Card velocity',
   new_account: 'New account',
   country_mismatch: 'Country mismatch',
+  cvv_mismatch: 'CVV mismatch',
+  avs_mismatch: 'AVS mismatch',
+  three_ds_failed: '3-D Secure failed',
 }
 
 const number = new Intl.NumberFormat()

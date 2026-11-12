@@ -232,7 +232,7 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
-SELECT ` + queueItemColumns + `, d.ruleset_version
+SELECT ` + queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result
 FROM ` + queueItemTables + `
 WHERE d.purchase_id = $1
   AND d.outcome = 'review'
@@ -265,7 +265,8 @@ WHERE device_id IS NOT NULL
 // returns models.ErrReviewNotFound if there is none.
 func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	var c models.CaseItem
-	item, err := scanQueueItem(s.conn.QueryRow(ctx, getReviewCase, purchaseID), &c.RulesetVersion)
+	item, err := scanQueueItem(s.conn.QueryRow(ctx, getReviewCase, purchaseID),
+		&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.CaseItem{}, models.ErrReviewNotFound
 	}

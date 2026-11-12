@@ -37,6 +37,11 @@ type Purchase struct {
 	ClientOS             *string
 	ClientBrowser        *string
 	ScreenResolution     *string
+	// The gateway verification results are rule inputs only, never model
+	// inputs, so FeatureInput leaves them out.
+	CVVResult     *scoring.CVVResult
+	AVSResult     *scoring.AVSResult
+	ThreeDSResult *scoring.ThreeDSResult
 }
 
 // Decision is the scoring result saved with a purchase.
@@ -94,4 +99,20 @@ func (p Purchase) FeatureInput() features.Input {
 		ClientBrowser:        p.ClientBrowser,
 		ScreenResolution:     p.ScreenResolution,
 	}
+}
+
+// Verification returns the gateway verification results the rules check. A
+// result the request omitted stays empty.
+func (p Purchase) Verification() scoring.PaymentVerification {
+	var v scoring.PaymentVerification
+	if p.CVVResult != nil {
+		v.CVV = *p.CVVResult
+	}
+	if p.AVSResult != nil {
+		v.AVS = *p.AVSResult
+	}
+	if p.ThreeDSResult != nil {
+		v.ThreeDS = *p.ThreeDSResult
+	}
+	return v
 }

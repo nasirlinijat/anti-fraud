@@ -336,3 +336,18 @@ def test_non_finite_code_text_is_missing(tmp_path, text):
 
     for name in ["card_country", "card_category", "billing_country", "card_issuer_code", "billing_region_code"]:
         assert built[name].tolist() == [features.MISSING], name
+
+
+def test_gateway_verification_results_are_not_model_inputs(tmp_path):
+    purchases = [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
+                           "card_token": "c1", "ip_country": "AZ", "device_id": "d1"}),
+        ("stolen_card", True, {"event_time": "2026-01-02T10:00:00Z", "amount_minor": 20000, "player_id": "p2",
+                               "card_token": "c1", "ip_country": "TR", "device_id": "d2"}),
+    ]
+    verified = [(pattern, fraud, {**request, "cvv_result": "mismatch", "avs_result": "partial",
+                                  "three_ds_result": "failed"}) for pattern, fraud, request in purchases]
+    without = features.build(features.load_requests(write_dump(tmp_path / "without.jsonl", purchases)))
+    with_results = features.build(features.load_requests(write_dump(tmp_path / "with.jsonl", verified)))
+
+    pd.testing.assert_frame_equal(with_results, without)

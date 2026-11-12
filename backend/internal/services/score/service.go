@@ -226,6 +226,7 @@ func (s *Service) ruleInput(ctx context.Context, p models.Purchase, rs scoring.R
 		AccountCreatedAt:      p.AccountCreatedAt,
 		EventTime:             p.EventTime,
 		CardPurchasesLastHour: cardUses,
+		Verification:          p.Verification(),
 	}
 	if p.CardCountry != nil {
 		in.CardCountry = *p.CardCountry

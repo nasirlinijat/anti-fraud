@@ -27,6 +27,9 @@ const ruleDetails = [
       window_days: '90', min_amount_minor: '1000', amount_multiplier: '3',
     },
   },
+  { name: 'cvv_mismatch', label: 'CVV mismatch', preset: { enabled: false, weight: '35' } },
+  { name: 'avs_mismatch', label: 'AVS mismatch (partial matches do not count)', preset: { enabled: false, weight: '15' } },
+  { name: 'three_ds_failed', label: '3-D Secure failed', preset: { enabled: false, weight: '50' } },
 ] as const
 
 const maxInt32 = 2_147_483_647n
