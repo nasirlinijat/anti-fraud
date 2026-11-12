@@ -75,7 +75,16 @@ cd backend
 go test -tags=integration ./test/integration/...
 ```
 
-`make test-integration` runs the same. To use an existing, migrated database instead, set `TEST_DATABASE_URL`, and `TEST_RUNTIME_DATABASE_URL` for the role checks.
+To use an existing, migrated database instead, set `TEST_DATABASE_URL`, and `TEST_RUNTIME_DATABASE_URL` for the role checks.
+
+The concurrency tests in `backend/test/concurrency` send requests at the same moment to a real HTTP server and check that the database stays correct: 20 scores of one transaction save one decision, 10 ruleset publishes leave one active version with consecutive numbers, and two analysts deciding one review save one decision. They always start their own PostgreSQL, because they commit data and change the active ruleset. CI runs them with the race detector:
+
+```bash
+cd backend
+go test -race -tags=integration ./test/concurrency/...
+```
+
+`make test-integration` runs both folders (`./test/...`).
 
 ## Demo Traffic
 

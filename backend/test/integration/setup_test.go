@@ -9,10 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -26,15 +23,10 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/nasirlinijat/anti-fraud/backend/test/testdb"
 )
 
 const (
-	postgresImage   = "postgres:18-alpine"
-	runtimePassword = "integration-runtime-password"
-	labelsPassword  = "integration-labels-password"
-
 	serviceKey  = "integration-service-key"
 	operatorKey = "integration-operator-key"
 	analystKey  = "integration-analyst-key"
@@ -57,24 +49,17 @@ func run(m *testing.M) int {
 	ownerURL := os.Getenv("TEST_DATABASE_URL")
 	runtimeURL := os.Getenv("TEST_RUNTIME_DATABASE_URL")
 	if ownerURL == "" {
-		container, err := startPostgres(ctx)
+		db, err := testdb.Start(ctx)
 		if err != nil {
 			log.Printf("start postgres: %v", err)
 			return 1
 		}
 		defer func() {
-			if err := testcontainers.TerminateContainer(container); err != nil {
+			if err := db.Stop(); err != nil {
 				log.Printf("stop postgres: %v", err)
 			}
 		}()
-		if ownerURL, err = container.ConnectionString(ctx, "sslmode=disable"); err != nil {
-			log.Printf("postgres address: %v", err)
-			return 1
-		}
-		if runtimeURL, err = withUser(ownerURL, "antifraud_api", runtimePassword); err != nil {
-			log.Printf("runtime address: %v", err)
-			return 1
-		}
+		ownerURL, runtimeURL = db.OwnerURL, db.RuntimeURL
 	}
 
 	var err error
@@ -97,38 +82,6 @@ func run(m *testing.M) int {
 		return 1
 	}
 	return m.Run()
-}
-
-func startPostgres(ctx context.Context) (*postgres.PostgresContainer, error) {
-	scripts, err := filepath.Glob("../../migrations/*.up.sql")
-	if err != nil {
-		return nil, err
-	}
-	if len(scripts) == 0 {
-		return nil, fmt.Errorf("no migrations found")
-	}
-	slices.Sort(scripts)
-	scripts = append(scripts, "../../runtime-role.sql")
-	return postgres.Run(ctx, postgresImage,
-		postgres.WithDatabase("antifraud"),
-		postgres.WithUsername("antifraud"),
-		postgres.WithPassword("antifraud"),
-		postgres.WithInitScripts(scripts...),
-		testcontainers.WithEnv(map[string]string{
-			"RUNTIME_DB_PASSWORD": runtimePassword,
-			"LABELS_DB_PASSWORD":  labelsPassword,
-		}),
-		postgres.BasicWaitStrategies(),
-	)
-}
-
-func withUser(dsn, user, password string) (string, error) {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return "", err
-	}
-	u.User = url.UserPassword(user, password)
-	return u.String(), nil
 }
 
 type app struct {
