@@ -11,7 +11,7 @@ import (
 func (p Pattern) Fraud() bool {
 	switch p {
 	case PatternCardTesting, PatternAccountTakeover, PatternNewAccountSpend, PatternStolenCard, PatternLowAndSlow,
-		PatternSlowCardTesting, PatternQuietTakeover:
+		PatternSlowCardTesting, PatternQuietTakeover, PatternDeviceFarm:
 		return true
 	}
 	return false

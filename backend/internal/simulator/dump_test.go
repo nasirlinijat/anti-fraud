@@ -18,6 +18,7 @@ func TestFraudMarksTheFraudScenarios(t *testing.T) {
 		simulator.PatternLowAndSlow:      true,
 		simulator.PatternSlowCardTesting: true,
 		simulator.PatternQuietTakeover:   true,
+		simulator.PatternDeviceFarm:      true,
 	}
 	for _, p := range simulator.Patterns {
 		if got := p.Fraud(); got != fraud[p] {

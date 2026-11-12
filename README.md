@@ -163,6 +163,7 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 | `session_shopper` | A player with an older account makes two to four small purchases with their own card, minutes apart on the simulated timeline |
 | `slow_card_testing` | Fraud tries three to five cards with one small purchase each from an older account in the cards' country, minutes apart on the simulated timeline, and can pass the rules |
 | `quiet_takeover` | Fraud uses an established account from a new phone in the player's own country for a mid-sized amount, and can pass the rules |
+| `device_farm` | Fraud uses one emulator and one connection for four to six accounts created between ten minutes and ten hours earlier, each with its own card, one to three purchases each, minutes apart, ending in a larger purchase |
 
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 

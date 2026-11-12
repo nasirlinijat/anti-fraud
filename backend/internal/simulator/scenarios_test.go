@@ -254,6 +254,36 @@ func TestSinglePurchaseFromHome(t *testing.T) {
 	}
 }
 
+func TestDeviceFarmLinksNewAccountsThroughOneEmulator(t *testing.T) {
+	g := generateScenario(t, PatternDeviceFarm, (*generator).deviceFarm, 4, 18)
+	first := g.pending[0].Request
+	cards := map[string]string{}
+	purchases := map[string]int{}
+	last := map[string]Request{}
+	for _, p := range g.pending {
+		req := p.Request
+		if *req.DeviceID != *first.DeviceID || *req.IPAddress != *first.IPAddress || *req.IPCountry != *first.IPCountry ||
+			*req.DeviceType != "mobile" || *req.DeviceName != "Android Emulator" {
+			t.Fatalf("purchase did not use the shared emulator and connection: %+v", req)
+		}
+		if owner, ok := cards[req.CardToken]; ok && owner != req.PlayerID {
+			t.Fatalf("card %s used by %s and %s", req.CardToken, owner, req.PlayerID)
+		}
+		cards[req.CardToken] = req.PlayerID
+		purchases[req.PlayerID]++
+		last[req.PlayerID] = req
+		checkRange(t, "account age", req.EventTime.Sub(*req.AccountCreatedAt), 10*time.Minute, 24*time.Hour)
+	}
+	checkRange(t, "players", len(purchases), 4, 6)
+	if len(cards) != len(purchases) {
+		t.Fatalf("%d cards for %d players, want one each", len(cards), len(purchases))
+	}
+	for id, n := range purchases {
+		checkRange(t, "purchases of "+id, n, 1, 3)
+		checkRange(t, "closing amount of "+id, last[id].AmountMinor, 50000, 70000)
+	}
+}
+
 func generateScenario(t *testing.T, pattern Pattern, generate func(*generator, time.Time), minCount, maxCount int) *generator {
 	t.Helper()
 	cfg := DefaultConfig()
