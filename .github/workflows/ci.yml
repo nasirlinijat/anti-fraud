@@ -79,6 +79,11 @@ jobs:
         # Packages share one test database, so their tests run one package at a time.
         run: go test -race -p 1 ./...
 
+      - name: Integration tests
+        env:
+          TEST_DATABASE_URL: ""
+        run: go test -race -tags=integration ./test/integration/...
+
       - name: Verify modules
         run: go mod verify
 

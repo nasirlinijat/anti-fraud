@@ -3,7 +3,7 @@ export
 
 TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
-.PHONY: up down db run test lint migrate docs simulate
+.PHONY: up down db run test test-integration lint migrate docs simulate
 
 up:
 	docker compose up -d --build --wait
@@ -20,6 +20,9 @@ run: migrate
 # Packages share one test database, so their tests run one package at a time.
 test: migrate
 	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -p 1 ./...
+
+test-integration:
+	cd backend && TEST_DATABASE_URL= go test -tags=integration ./test/integration/...
 
 lint:
 	@unformatted="$$(gofmt -l backend)"; \

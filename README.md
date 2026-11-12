@@ -68,6 +68,15 @@ go generate ./internal/...
 
 Tests that read or write the database are skipped unless `TEST_DATABASE_URL` is set; `make test` sets it and runs them all.
 
+The integration tests in `backend/test/integration` run the API the way `cmd/api/main.go` wires it, against a real PostgreSQL, as the restricted `antifraud_api` role. They start their own PostgreSQL 18 in Docker with [Testcontainers](https://golang.testcontainers.org/), apply every migration and `runtime-role.sql`, so they need only Docker running:
+
+```bash
+cd backend
+go test -tags=integration ./test/integration/...
+```
+
+`make test-integration` runs the same. To use an existing, migrated database instead, set `TEST_DATABASE_URL`, and `TEST_RUNTIME_DATABASE_URL` for the role checks.
+
 ## Demo Traffic
 
 The simulator sends generated purchases to `POST /score` in the same format as real clients. With Go and GNU Make installed and the backend running, run:
