@@ -87,6 +87,7 @@
 }
 
 .console-navigation a {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -104,12 +105,24 @@
   color: var(--text);
 }
 
+/* The marker of the current page is its own element, so it can grow into place. */
+.console-navigation a::before {
+  content: '';
+  position: absolute;
+  inset: 8px auto 8px 0;
+  inline-size: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
+  transform: scaleY(0);
+}
+
 .console-navigation a[aria-current='page'] {
   background: var(--surface-subtle);
-  box-shadow: inset 3px 0 var(--brand);
   color: var(--text);
   font-weight: 600;
 }
+
+.console-navigation a[aria-current='page']::before { transform: none; }
 
 .account-card {
   display: flex;
@@ -343,5 +356,5 @@
 }
 
 @media (forced-colors: active) {
-  .console-navigation a[aria-current='page'] { outline: 2px solid Highlight; box-shadow: none; }
+  .console-navigation a[aria-current='page'] { outline: 2px solid Highlight; }
 }
