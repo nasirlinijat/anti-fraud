@@ -1,0 +1,61 @@
+ad_identifiers:
+  - postgres
+
+init_config:
+
+instances:
+  - host: "%%host%%"
+    port: 5432
+    username: "%%env_POSTGRES_USER%%"
+    password: "%%env_POSTGRES_PASSWORD%%"
+    dbname: "%%env_POSTGRES_DB%%"
+    tags:
+      - service:anti-fraud-db
+    custom_queries:
+      - metric_prefix: antifraud
+        query: >-
+          SELECT o.outcome, count(d.purchase_id)
+          FROM unnest(ARRAY['allow', 'review', 'block']) AS o(outcome)
+          LEFT JOIN decisions d ON d.outcome = o.outcome AND d.decided_at > now() - interval '1 minute'
+          GROUP BY o.outcome
+        columns:
+          - name: outcome
+            type: tag
+          - name: decisions.last_minute
+            type: gauge
+      - metric_prefix: antifraud
+        query: >-
+          SELECT
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY scoring_latency_us) / 1000.0,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY scoring_latency_us) / 1000.0,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY scoring_latency_us) / 1000.0
+          FROM decisions
+          WHERE decided_at > now() - interval '5 minutes' AND scoring_latency_us IS NOT NULL
+          HAVING count(*) > 0
+        columns:
+          - name: scoring.latency_ms.p50
+            type: gauge
+          - name: scoring.latency_ms.p95
+            type: gauge
+          - name: scoring.latency_ms.p99
+            type: gauge
+      - metric_prefix: antifraud
+        query: >-
+          SELECT count(*)
+          FROM decisions d
+          WHERE d.outcome = 'review'
+            AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+        columns:
+          - name: review_queue.size
+            type: gauge
+      - metric_prefix: antifraud
+        query: >-
+          SELECT avg(model_score), count(model_score)
+          FROM decisions
+          WHERE decided_at > now() - interval '5 minutes' AND model_score IS NOT NULL
+          HAVING count(model_score) > 0
+        columns:
+          - name: model.score.avg
+            type: gauge
+          - name: model.scored.last_5m
+            type: gauge

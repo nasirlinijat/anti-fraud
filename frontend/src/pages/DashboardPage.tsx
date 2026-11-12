@@ -1,3 +1,5 @@
+import { Button } from '@xsolla/xui-button'
+import { Typography } from '@xsolla/xui-typography'
 import { lazy, Suspense, useCallback, useState } from 'react'
 import { getStats, periods, type Period, type Stats } from '../api'
 import { OutcomeBadge, TimeDisplayToggle, Timestamp } from '../Display'
@@ -5,6 +7,7 @@ import { formatUsdMinor } from '../displayFormat'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { QualityPanel } from './QualityPanel'
 
 const DecisionChart = lazy(() => import('./DecisionChart'))
 
@@ -61,7 +64,7 @@ function DashboardPage() {
   return (
     <div className="dashboard">
       <div className="dashboard-head">
-        <h2>Dashboard</h2>
+        <div><p className="eyebrow">Operations overview</p><Typography as="h1" variant="h3">Dashboard</Typography></div>
         <PeriodButtons period={period} onChange={changePeriod} />
       </div>
       {error && (
@@ -109,6 +112,7 @@ function DashboardPage() {
           )}
         </>
       )}
+      <QualityPanel />
     </div>
   )
 }
@@ -117,9 +121,9 @@ function PeriodButtons({ period, onChange }: { period: Period; onChange: (period
   return (
     <div className="periods" role="group" aria-label="Period">
       {periods.map((p) => (
-        <button key={p} type="button" className={p === period ? '' : 'secondary'} aria-pressed={p === period} onClick={() => onChange(p)}>
+        <Button key={p} type="button" size="md" tone={p === period ? 'brand' : 'mono'} variant={p === period ? 'primary' : 'secondary'} aria-pressed={p === period} onPress={() => onChange(p)}>
           {periodNames[p]}
-        </button>
+        </Button>
       ))}
     </div>
   )
@@ -128,42 +132,46 @@ function PeriodButtons({ period, onChange }: { period: Period; onChange: (period
 function OutcomeTiles({ stats }: { stats: Stats }) {
   const { outcomes } = stats
   return (
-    <div className="tiles">
-      <div className="tile">
-        <span className="tile-label">Decisions</span>
-        <span className="tile-value">{number.format(outcomes.total)}</span>
+    <>
+      <div className="tiles headline-metrics">
+        <div className="tile">
+          <span className="tile-label">Decisions</span>
+          <span className="tile-value">{number.format(outcomes.total)}</span>
+        </div>
+        <div className="tile tile-allow">
+          <span className="tile-label"><OutcomeBadge outcome="allow" /></span>
+          <span className="tile-value">{number.format(outcomes.allow)}</span>
+          <span className="tile-note">{share(outcomes.allow, outcomes.total)}</span>
+        </div>
+        <div className="tile tile-review">
+          <span className="tile-label"><OutcomeBadge outcome="review" /></span>
+          <span className="tile-value">{number.format(outcomes.review)}</span>
+          <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
+        </div>
+        <div className="tile tile-block">
+          <span className="tile-label"><OutcomeBadge outcome="block" /></span>
+          <span className="tile-value">{number.format(outcomes.block)}</span>
+          <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
+        </div>
       </div>
-      <div className="tile tile-allow">
-        <span className="tile-label"><OutcomeBadge outcome="allow" /></span>
-        <span className="tile-value">{number.format(outcomes.allow)}</span>
-        <span className="tile-note">{share(outcomes.allow, outcomes.total)}</span>
+      <div className="tiles operational-metrics">
+        <div className="tile">
+          <span className="tile-label">p95 scoring latency</span>
+          <span className="tile-value">
+            {stats.p95_scoring_latency_us == null ? '–' : `${latency.format(stats.p95_scoring_latency_us / 1000)} ms`}
+          </span>
+        </div>
+        <div className="tile">
+          <span className="tile-label">Blocked value (USD)</span>
+          <span className="tile-value tile-money">{formatUsdMinor(stats.blocked_value_minor)}</span>
+        </div>
+        <div className="tile">
+          <span className="tile-label">Review queue now</span>
+          <span className="tile-value">{number.format(stats.review_queue)}</span>
+          <span className="tile-note">all time, waiting for an analyst</span>
+        </div>
       </div>
-      <div className="tile tile-review">
-        <span className="tile-label"><OutcomeBadge outcome="review" /></span>
-        <span className="tile-value">{number.format(outcomes.review)}</span>
-        <span className="tile-note">Review rate {share(outcomes.review, outcomes.total)}</span>
-      </div>
-      <div className="tile tile-block">
-        <span className="tile-label"><OutcomeBadge outcome="block" /></span>
-        <span className="tile-value">{number.format(outcomes.block)}</span>
-        <span className="tile-note">Block rate {share(outcomes.block, outcomes.total)}</span>
-      </div>
-      <div className="tile">
-        <span className="tile-label">p95 scoring latency</span>
-        <span className="tile-value">
-          {stats.p95_scoring_latency_us == null ? '–' : `${latency.format(stats.p95_scoring_latency_us / 1000)} ms`}
-        </span>
-      </div>
-      <div className="tile">
-        <span className="tile-label">Blocked value (USD)</span>
-        <span className="tile-value tile-money">{formatUsdMinor(stats.blocked_value_minor)}</span>
-      </div>
-      <div className="tile">
-        <span className="tile-label">Review queue now</span>
-        <span className="tile-value">{number.format(stats.review_queue)}</span>
-        <span className="tile-note">all time, waiting for an analyst</span>
-      </div>
-    </div>
+    </>
   )
 }
 
@@ -171,7 +179,7 @@ function TopRules({ rules, decisions }: { rules: Stats['top_rules']; decisions: 
   const maxFired = Math.max(1, ...rules.map((r) => r.fired))
   return (
     <section className="panel">
-      <h3>Most fired rules</h3>
+      <Typography as="h2" variant="h5" marginBottom={16}>Most fired rules</Typography>
       {rules.length === 0 ? (
         <EmptyState>No rule fired in this period.</EmptyState>
       ) : (
@@ -199,7 +207,7 @@ function TopRules({ rules, decisions }: { rules: Stats['top_rules']; decisions: 
 function ModelPanel({ model }: { model: Stats['model'] }) {
   return (
     <section className="panel">
-      <h3>Fraud model</h3>
+      <Typography as="h2" variant="h5" marginBottom={16}>Fraud model</Typography>
       {model.scored === 0 ? (
         <EmptyState>No decision in this period has a model score. The backend may run with rules only.</EmptyState>
       ) : (

@@ -1,0 +1,59 @@
+[
+  {
+    "name": "Anti-fraud backend or database is down",
+    "type": "service check",
+    "query": "\"http.can_connect\".over(\"instance:backend-ready\").by(\"host\").last(3).count_by_status()",
+    "message": "The backend's /ready check failed 2 times in a row. The API cannot score purchases or the database is unreachable. Check `dc ps` and `dc logs backend` on the server.",
+    "tags": ["project:anti-fraud"],
+    "options": {
+      "thresholds": { "critical": 2, "warning": 1, "ok": 1 },
+      "notify_no_data": true,
+      "no_data_timeframe": 10,
+      "renotify_interval": 0
+    }
+  },
+  {
+    "name": "Anti-fraud scoring is slow",
+    "type": "query alert",
+    "query": "avg(last_10m):max:antifraud.scoring.latency_ms.p95{*} > 200",
+    "message": "p95 scoring latency is above 200 ms over the last 10 minutes (normal is about 20 ms).",
+    "tags": ["project:anti-fraud"],
+    "options": {
+      "thresholds": { "critical": 200, "warning": 100 },
+      "notify_no_data": false
+    }
+  },
+  {
+    "name": "Anti-fraud gateway returns server errors",
+    "type": "query alert",
+    "query": "sum(last_5m):sum:antifraud.gateway.request.duration.count{server:srv1,code:5*}.as_count() > 5",
+    "message": "More than 5 responses with status 5xx in 5 minutes. Check the backend logs in Datadog.",
+    "tags": ["project:anti-fraud"],
+    "options": {
+      "thresholds": { "critical": 5, "warning": 1 },
+      "notify_no_data": false
+    }
+  },
+  {
+    "name": "Anti-fraud server is low on memory",
+    "type": "query alert",
+    "query": "avg(last_10m):avg:system.mem.pct_usable{host:anti-fraud-prod} < 0.1",
+    "message": "Less than 10% of the server's memory is free for 10 minutes. Consider a larger instance or stopping the Datadog agent.",
+    "tags": ["project:anti-fraud"],
+    "options": {
+      "thresholds": { "critical": 0.1, "warning": 0.2 },
+      "notify_no_data": false
+    }
+  },
+  {
+    "name": "Anti-fraud review queue is growing",
+    "type": "query alert",
+    "query": "max(last_15m):max:antifraud.review_queue.size{*} > 500",
+    "message": "More than 500 purchases are waiting for an analyst.",
+    "tags": ["project:anti-fraud"],
+    "options": {
+      "thresholds": { "critical": 500, "warning": 200 },
+      "notify_no_data": false
+    }
+  }
+]
