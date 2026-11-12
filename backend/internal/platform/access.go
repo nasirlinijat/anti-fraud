@@ -95,6 +95,14 @@ func (a Access) Review(next func(http.ResponseWriter, *http.Request, Actor)) htt
 	}
 }
 
+// Admin accepts only an admin session, with no key in its place. It passes
+// the username to next.
+func (a Access) Admin(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		a.requireRole(w, r, []string{RoleAdmin}, next)
+	}
+}
+
 func hasAuthorization(r *http.Request) bool {
 	return len(r.Header.Values("Authorization")) > 0
 }

@@ -36,6 +36,8 @@ tags:
     description: Manage blocked cards, devices, players and IP addresses.
   - name: Reviews
     description: Browse purchases awaiting review.
+  - name: Admin
+    description: Oversee reviewers. Admin sessions only.
 
   - name: Rulesets
     description: Read and publish scoring configuration.
@@ -929,6 +931,90 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+    delete:
+      tags: [Reviews]
+      operationId: releaseReviewClaim
+      summary: Release a claim back to the shared queue
+      description: >-
+        Removes the open claim on a purchase awaiting review, so that any
+        reviewer can claim it. Only admins can release claims. A decided
+        purchase keeps its claim as the record of who held it.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*$'
+          description: Positive 64-bit purchase ID, represented as a decimal string.
+      responses:
+        "204":
+          description: The claim was released.
+        "400":
+          description: The purchase ID is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: The purchase has no open claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The purchase has already been decided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The claim could not be released.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/assignments:
+    get:
+      tags: [Admin]
+      operationId: listAssignments
+      summary: See what each reviewer is working on
+      description: >-
+        Lists every active reviewer, and any other account that still holds an
+        open claim, with its open claims and the number of purchases it has
+        decided. Decisions are counted by username. Only admins can use it.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The work of each reviewer, ordered by username.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignments"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The assignments could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /reviews/{purchase_id}/decision:
     post:
       tags: [Reviews]
@@ -1450,6 +1536,59 @@ components:
           format: date-time
           nullable: true
           description: When the claim was made, in UTC, or null while the purchase is unclaimed.
+
+    Assignments:
+      type: object
+      required: [reviewers]
+      properties:
+        reviewers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerWork"
+
+    ReviewerWork:
+      type: object
+      required: [username, role, disabled, decided, open_claims]
+      properties:
+        username: {type: string, example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+        disabled:
+          type: boolean
+          description: True for a disabled account that still holds open claims.
+        decided:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Purchases decided under this username, all time.
+        open_claims:
+          type: array
+          description: Claimed purchases still awaiting a decision, oldest claim first.
+          items:
+            $ref: "#/components/schemas/OpenClaim"
+
+    OpenClaim:
+      type: object
+      required: [purchase_id, amount_minor, rule_score, model_score, claimed_at]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        amount_minor:
+          type: string
+          description: The integer amount in minor units as a decimal string.
+        rule_score:
+          type: integer
+          minimum: 0
+        model_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+        claimed_at:
+          type: string
+          format: date-time
+          description: When the claim was made, in UTC.
 
     ReviewClaim:
       type: object

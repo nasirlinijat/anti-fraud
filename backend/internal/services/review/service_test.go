@@ -227,3 +227,34 @@ func TestQueuePassesTheClaimFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReleaseClaimMapsTheStoreStatus(t *testing.T) {
+	tests := []struct {
+		status models.ReleaseStatus
+		want   error
+	}{
+		{models.ReleaseSaved, nil},
+		{models.ReleaseNoOpenClaim, review.ErrNoOpenClaim},
+		{models.ReleaseAlreadyResolved, review.ErrAlreadyDecided},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			svc, store := newService(t)
+			store.EXPECT().ReleaseClaim(gomock.Any(), int64(7)).Return(tt.status, nil)
+
+			err := svc.ReleaseClaim(context.Background(), 7)
+
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+		})
+	}
+
+	t.Run("unknown status", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().ReleaseClaim(gomock.Any(), int64(7)).Return(models.ReleaseStatus("unexpected"), nil)
+		if err := svc.ReleaseClaim(context.Background(), 7); err == nil {
+			t.Fatal("an unknown store status was accepted")
+		}
+	})
+}

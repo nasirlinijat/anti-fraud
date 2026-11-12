@@ -55,6 +55,14 @@ func (fakeReviewReads) Claim(context.Context, int64, string) (models.Claim, erro
 	panic("unexpected claim request")
 }
 
+func (fakeReviewReads) Assignments(context.Context) ([]models.ReviewerWork, error) {
+	panic("unexpected assignments request")
+}
+
+func (fakeReviewReads) ReleaseClaim(context.Context, int64) (models.ReleaseStatus, error) {
+	panic("unexpected release request")
+}
+
 const secondAnalystTestKey = "second-queue-test-key"
 const serviceTestKey = "service-test-key"
 

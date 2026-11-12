@@ -103,6 +103,34 @@ const (
 	ClaimHeldByOther     ClaimStatus = "held_by_other"
 )
 
+// ReviewerWork is what one account is working on: its open claims and the
+// number of purchases it has decided.
+type ReviewerWork struct {
+	Username   string
+	Role       Role
+	Disabled   bool
+	Decided    int64
+	OpenClaims []OpenClaim
+}
+
+// OpenClaim is a claimed purchase that is still awaiting a decision.
+type OpenClaim struct {
+	PurchaseID  int64
+	AmountMinor int64
+	RuleScore   int
+	// ModelScore is nil when the purchase was scored without a model.
+	ModelScore *float64
+	ClaimedAt  time.Time
+}
+
+type ReleaseStatus string
+
+const (
+	ReleaseSaved           ReleaseStatus = "released"
+	ReleaseNoOpenClaim     ReleaseStatus = "no_open_claim"
+	ReleaseAlreadyResolved ReleaseStatus = "already_resolved"
+)
+
 // Claim is the result of claiming a purchase under review.
 type Claim struct {
 	Status    ClaimStatus

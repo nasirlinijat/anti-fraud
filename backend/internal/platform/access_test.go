@@ -214,3 +214,23 @@ func configWriteHandler(access Access, actor *string) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
+
+func TestAdminAcceptsOnlyAnAdminSession(t *testing.T) {
+	for _, tc := range []accessCase{
+		{name: "admin session", authorization: "Bearer admin-token", want: http.StatusNoContent, wantActor: "ada"},
+		{name: "reviewer session", authorization: "Bearer reviewer-token", want: http.StatusForbidden},
+		{name: "service key", apiKey: "service-key", want: http.StatusUnauthorized},
+		{name: "operator key", apiKey: "operator-key", want: http.StatusUnauthorized},
+		{name: "analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var actor string
+			handler := testAccess(t).Admin(func(w http.ResponseWriter, _ *http.Request, username string) {
+				actor = username
+				w.WriteHeader(http.StatusNoContent)
+			})
+
+			serveAccessCase(t, handler, &actor, tc)
+		})
+	}
+}

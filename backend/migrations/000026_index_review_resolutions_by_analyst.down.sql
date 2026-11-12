@@ -1,0 +1,1 @@
+DROP INDEX review_resolutions_analyst;

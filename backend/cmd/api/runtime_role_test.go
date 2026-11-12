@@ -82,6 +82,7 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		"INSERT INTO sessions (token_hash, account_id, expires_at) SELECT sha256('runtime-role-test'), id, now() + interval '1 hour' FROM accounts WHERE username = 'runtime-role-test'",
 		"UPDATE accounts SET disabled_at = now() WHERE username = 'runtime-role-test'",
 		"DELETE FROM sessions WHERE token_hash = sha256('runtime-role-test')",
+		"DELETE FROM review_claims WHERE purchase_id = -1",
 	} {
 		if _, err := tx.Exec(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

@@ -36,6 +36,14 @@ func (rejectUnexpectedReviewAccess) Claim(context.Context, int64, string) (model
 	panic("unexpected claim write")
 }
 
+func (rejectUnexpectedReviewAccess) Assignments(context.Context) ([]models.ReviewerWork, error) {
+	panic("unexpected assignments read")
+}
+
+func (rejectUnexpectedReviewAccess) ReleaseClaim(context.Context, int64) (models.ReleaseStatus, error) {
+	panic("unexpected claim release")
+}
+
 func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {

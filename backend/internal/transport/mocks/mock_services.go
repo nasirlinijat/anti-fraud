@@ -84,6 +84,21 @@ func (m *MockReviewService) EXPECT() *MockReviewServiceMockRecorder {
 	return m.recorder
 }
 
+// Assignments mocks base method.
+func (m *MockReviewService) Assignments(ctx context.Context) ([]models.ReviewerWork, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Assignments", ctx)
+	ret0, _ := ret[0].([]models.ReviewerWork)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Assignments indicates an expected call of Assignments.
+func (mr *MockReviewServiceMockRecorder) Assignments(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Assignments", reflect.TypeOf((*MockReviewService)(nil).Assignments), ctx)
+}
+
 // Case mocks base method.
 func (m *MockReviewService) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	m.ctrl.T.Helper()
@@ -157,6 +172,20 @@ func (m *MockReviewService) Queue(ctx context.Context, order models.QueueOrder, 
 func (mr *MockReviewServiceMockRecorder) Queue(ctx, order, after, claimedBy any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockReviewService)(nil).Queue), ctx, order, after, claimedBy)
+}
+
+// ReleaseClaim mocks base method.
+func (m *MockReviewService) ReleaseClaim(ctx context.Context, purchaseID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseClaim", ctx, purchaseID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReleaseClaim indicates an expected call of ReleaseClaim.
+func (mr *MockReviewServiceMockRecorder) ReleaseClaim(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseClaim", reflect.TypeOf((*MockReviewService)(nil).ReleaseClaim), ctx, purchaseID)
 }
 
 // MockRulesetService is a mock of RulesetService interface.

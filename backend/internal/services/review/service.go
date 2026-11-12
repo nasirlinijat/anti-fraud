@@ -20,6 +20,7 @@ var (
 	ErrAlreadyDecided         = errors.New("purchase has already been decided")
 	ErrNotClaimed             = errors.New("purchase must be claimed by you before you decide it")
 	ErrClaimedByOther         = errors.New("purchase is claimed by another account")
+	ErrNoOpenClaim            = errors.New("purchase has no open claim")
 )
 
 type Store interface {
@@ -27,6 +28,8 @@ type Store interface {
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
+	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
+	ReleaseClaim(ctx context.Context, purchaseID int64) (models.ReleaseStatus, error)
 }
 
 type Service struct {
@@ -139,5 +142,31 @@ func (s *Service) Claim(ctx context.Context, purchaseID int64, username string) 
 		return models.Claim{}, ErrClaimedByOther
 	default:
 		return models.Claim{}, fmt.Errorf("unexpected review claim status %q", claim.Status)
+	}
+}
+
+// Assignments returns each reviewer with their open claims and the number of
+// purchases they decided.
+func (s *Service) Assignments(ctx context.Context) ([]models.ReviewerWork, error) {
+	return s.store.Assignments(ctx)
+}
+
+// ReleaseClaim returns a claimed purchase to the shared queue, so that any
+// reviewer can claim it. It returns ErrNoOpenClaim for a purchase without a
+// claim and ErrAlreadyDecided for one that was decided.
+func (s *Service) ReleaseClaim(ctx context.Context, purchaseID int64) error {
+	status, err := s.store.ReleaseClaim(ctx, purchaseID)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case models.ReleaseSaved:
+		return nil
+	case models.ReleaseNoOpenClaim:
+		return ErrNoOpenClaim
+	case models.ReleaseAlreadyResolved:
+		return ErrAlreadyDecided
+	default:
+		return fmt.Errorf("unexpected claim release status %q", status)
 	}
 }

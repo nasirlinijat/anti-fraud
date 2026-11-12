@@ -28,6 +28,8 @@ type ReviewService interface {
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
 	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
+	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
+	ReleaseClaim(ctx context.Context, purchaseID int64) error
 }
 
 type ReviewHandler struct {
@@ -49,6 +51,8 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
+	mux.HandleFunc("DELETE /reviews/{purchase_id}/claim", access.Admin(h.serveRelease))
+	mux.HandleFunc("GET /admin/assignments", access.Admin(h.serveAssignments))
 }
 
 type reviewResponse struct {
@@ -106,6 +110,26 @@ type claimResponse struct {
 	PurchaseID string    `json:"purchase_id"`
 	ClaimedBy  string    `json:"claimed_by"`
 	ClaimedAt  time.Time `json:"claimed_at"`
+}
+
+type openClaimResponse struct {
+	PurchaseID  string    `json:"purchase_id"`
+	AmountMinor string    `json:"amount_minor"`
+	RuleScore   int       `json:"rule_score"`
+	ModelScore  *float64  `json:"model_score"`
+	ClaimedAt   time.Time `json:"claimed_at"`
+}
+
+type reviewerWorkResponse struct {
+	Username   string              `json:"username"`
+	Role       models.Role         `json:"role"`
+	Disabled   bool                `json:"disabled"`
+	Decided    int64               `json:"decided"`
+	OpenClaims []openClaimResponse `json:"open_claims"`
+}
+
+type assignmentsResponse struct {
+	Reviewers []reviewerWorkResponse `json:"reviewers"`
 }
 
 // decisionRequest is the body of a review decision.
@@ -236,6 +260,49 @@ func (h *ReviewHandler) serveClaim(w http.ResponseWriter, r *http.Request, actor
 	platform.WriteJSON(w, status, claimResponse{PurchaseID: id, ClaimedBy: claim.ClaimedBy, ClaimedAt: claim.ClaimedAt.UTC()})
 }
 
+func (h *ReviewHandler) serveRelease(w http.ResponseWriter, r *http.Request, _ string) {
+	purchaseID, ok := parsePurchaseID(r.PathValue("purchase_id"))
+	if !ok {
+		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
+		return
+	}
+	if err := h.service.ReleaseClaim(r.Context(), purchaseID); err != nil {
+		writeReviewError(w, err, "release claim")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ReviewHandler) serveAssignments(w http.ResponseWriter, r *http.Request, _ string) {
+	work, err := h.service.Assignments(r.Context())
+	if err != nil {
+		log.Printf("read assignments: %v", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	reviewers := make([]reviewerWorkResponse, 0, len(work))
+	for _, reviewer := range work {
+		reviewers = append(reviewers, newReviewerWorkResponse(reviewer))
+	}
+	platform.WriteJSON(w, http.StatusOK, assignmentsResponse{Reviewers: reviewers})
+}
+
+func newReviewerWorkResponse(work models.ReviewerWork) reviewerWorkResponse {
+	claims := make([]openClaimResponse, 0, len(work.OpenClaims))
+	for _, c := range work.OpenClaims {
+		claims = append(claims, openClaimResponse{
+			PurchaseID:  strconv.FormatInt(c.PurchaseID, 10),
+			AmountMinor: strconv.FormatInt(c.AmountMinor, 10),
+			RuleScore:   c.RuleScore,
+			ModelScore:  c.ModelScore,
+			ClaimedAt:   c.ClaimedAt.UTC(),
+		})
+	}
+	return reviewerWorkResponse{
+		Username: work.Username, Role: work.Role, Disabled: work.Disabled, Decided: work.Decided, OpenClaims: claims,
+	}
+}
+
 // parsePurchaseID accepts only the canonical decimal form of a positive ID.
 func parsePurchaseID(id string) (int64, bool) {
 	purchaseID, err := strconv.ParseInt(id, 10, 64)
@@ -286,7 +353,7 @@ func writeReviewError(w http.ResponseWriter, err error, action string) {
 	switch {
 	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject):
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, review.ErrPurchaseNotFound):
+	case errors.Is(err, review.ErrPurchaseNotFound), errors.Is(err, review.ErrNoOpenClaim):
 		platform.WriteError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, review.ErrNotUnderReview), errors.Is(err, review.ErrAlreadyDecided),
 		errors.Is(err, review.ErrNotClaimed), errors.Is(err, review.ErrClaimedByOther):
