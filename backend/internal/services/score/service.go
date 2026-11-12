@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
@@ -66,6 +67,7 @@ type Service struct {
 	// model takes.
 	modelFeatures int
 	policy        scoring.ModelPolicy
+	ipIntel       IPIntel
 }
 
 func NewService(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Service {
@@ -107,7 +109,7 @@ func (s *Service) Score(ctx context.Context, p models.Purchase, started time.Tim
 	if saved != nil {
 		return *saved, nil
 	}
-	decision, err := s.decide(ctx, p)
+	decision, err := s.decide(ctx, p, s.lookupIP(ctx, p))
 	if err != nil {
 		return models.Decision{}, err
 	}
@@ -136,9 +138,9 @@ func (s *Service) save(ctx context.Context, p models.Purchase, decision models.D
 	return decision, nil
 }
 
-// decide scores a purchase that has no saved decision. The caller sets the
-// latency.
-func (s *Service) decide(ctx context.Context, p models.Purchase) (models.Decision, error) {
+// decide scores a purchase that has no saved decision. ipIntel is the IP
+// lookup result, or nil without one. The caller sets the latency.
+func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipintel.Result) (models.Decision, error) {
 	rs, err := s.rulesets.Active(ctx)
 	if err != nil {
 		return models.Decision{}, err
@@ -173,7 +175,7 @@ func (s *Service) decide(ctx context.Context, p models.Purchase) (models.Decisio
 	if blocked {
 		result = scoring.Result{Outcome: scoring.OutcomeBlock, FiredRules: []scoring.FiredRule{scoring.BlocklistMatch(string(entry.Type))}}
 	} else {
-		result, err = s.evaluateRules(ctx, p, rs, model.score)
+		result, err = s.evaluateRules(ctx, p, rs, ruleSignals{modelScore: model.score, ip: ipReputation(ipIntel)})
 		if err != nil {
 			return models.Decision{}, err
 		}
@@ -186,6 +188,7 @@ func (s *Service) decide(ctx context.Context, p models.Purchase) (models.Decisio
 		ModelScoreUnblended: model.unblended,
 		ModelVersion:        model.version,
 		FeatureHistory:      history,
+		IPIntel:             ipIntel,
 	}, nil
 }
 
@@ -212,17 +215,25 @@ func (s *Service) runModel(ctx context.Context, p models.Purchase, rs scoring.Ru
 	return modelResult{score: &final, unblended: &own, version: &version}, nil
 }
 
+// ruleSignals are the inputs of the rules that come from outside the
+// purchase and its history.
+type ruleSignals struct {
+	// modelScore is nil when the model did not run.
+	modelScore *float64
+	ip         scoring.IPReputation
+}
+
 // evaluateRules runs the rules on a purchase that is not blocklisted. In
-// assist mode the model score then adjusts the outcome. modelScore is nil when
-// the model did not run.
-func (s *Service) evaluateRules(ctx context.Context, p models.Purchase, rs scoring.Ruleset, modelScore *float64) (scoring.Result, error) {
+// assist mode the model score then adjusts the outcome.
+func (s *Service) evaluateRules(ctx context.Context, p models.Purchase, rs scoring.Ruleset, signals ruleSignals) (scoring.Result, error) {
 	in, err := s.ruleInput(ctx, p, rs)
 	if err != nil {
 		return scoring.Result{}, err
 	}
+	in.IPReputation = signals.ip
 	result := scoring.Evaluate(in, rs)
-	if modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
-		result.Outcome = scoring.ApplyModel(result.Outcome, *modelScore, rs.Model.Policy(s.policy))
+	if signals.modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
+		result.Outcome = scoring.ApplyModel(result.Outcome, *signals.modelScore, rs.Model.Policy(s.policy))
 	}
 	return result, nil
 }

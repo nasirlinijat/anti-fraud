@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -45,6 +46,9 @@ type CaseItem struct {
 	ThreeDSResult *scoring.ThreeDSResult
 	// AccountEvents lists the player's recent account events before this purchase, newest first.
 	AccountEvents []AccountEvent
+	// IPIntel is the IP intelligence lookup saved with the decision, or nil
+	// when no lookup was made.
+	IPIntel *ipintel.Result
 }
 
 // PlayerPurchase is an earlier purchase by the same player.

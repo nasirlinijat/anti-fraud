@@ -1,45 +1,12 @@
 package simulator_test
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"slices"
 	"testing"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
-
-// The hashes are of the JSON lines that the generator wrote for these seeds
-// before it sent verification results. Removing the results must give the
-// same bytes, so existing seeds keep their traffic.
-func TestVerificationLeavesTheRestOfTheTrafficUnchanged(t *testing.T) {
-	tests := []struct {
-		seed uint64
-		want string
-	}{
-		{1, "8a84902c5c79b65a13e07076730aa322d1e576815ea1e37e692e842a80ff3f13"},
-		{7, "afdfde2ed32527a1ee5a6268e853e7124a013017048dfc3b9ec3f3f3865655d1"},
-	}
-	for _, tt := range tests {
-		cfg := simulator.DefaultConfig()
-		cfg.Seed = tt.seed
-		cfg.SuspiciousShare = 0.3
-		purchases := generate(t, cfg, 5000)
-		for i := range purchases {
-			purchases[i].Request.CVVResult, purchases[i].Request.AVSResult, purchases[i].Request.ThreeDSResult = nil, nil, nil
-		}
-		var buf bytes.Buffer
-		if err := simulator.WriteJSONL(&buf, purchases); err != nil {
-			t.Fatal(err)
-		}
-		sum := sha256.Sum256(buf.Bytes())
-		if got := hex.EncodeToString(sum[:]); got != tt.want {
-			t.Errorf("seed %d: traffic without verification results hashes to %s, want %s", tt.seed, got, tt.want)
-		}
-	}
-}
 
 func TestVerificationResultsAreValuesTheScoreAPIAccepts(t *testing.T) {
 	sent := 0

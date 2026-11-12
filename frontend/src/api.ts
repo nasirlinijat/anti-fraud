@@ -235,6 +235,16 @@ export interface ReviewCase extends Review {
   avs_result: AvsResult | null
   three_ds_result: ThreeDsResult | null
   account_events: AccountEvent[]
+  ip_intel: IpIntel | null
+}
+
+export interface IpIntel {
+  provider: string
+  available: boolean
+  hosting: boolean
+  vpn: boolean
+  proxy: boolean
+  tor: boolean
 }
 
 export interface QueuePage {

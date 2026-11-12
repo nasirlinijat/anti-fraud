@@ -1,6 +1,6 @@
 import { ChevronLeft } from '@xsolla/xui-icons-base'
 import { useCallback, useState } from 'react'
-import { getReviewCase, type AvsResult, type CvvResult, type ReviewCase, type ThreeDsResult } from '../api'
+import { getReviewCase, type AvsResult, type CvvResult, type IpIntel, type ReviewCase, type ThreeDsResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
 import { ApiError } from '../request'
@@ -88,6 +88,10 @@ function CaseDetails({ review, time, handlers }: { review: ReviewCase; time: Tim
         <h3 id="case-verification">Payment verification</h3>
         <VerificationFacts review={review} />
       </section>
+      <section className="panel" aria-labelledby="case-ip-intel">
+        <h3 id="case-ip-intel">IP intelligence</h3>
+        <IpIntelFacts intel={review.ip_intel} />
+      </section>
       <section className="panel" aria-labelledby="case-rules">
         <h3 id="case-rules">Fired rules</h3>
         <FiredRules review={review} />
@@ -167,6 +171,28 @@ function VerificationFacts({ review }: { review: ReviewCase }) {
       <dd>{verificationLabel(review.avs_result)}</dd>
       <dt>3-D Secure</dt>
       <dd>{verificationLabel(review.three_ds_result)}</dd>
+    </dl>
+  )
+}
+
+function networkKinds(intel: IpIntel): string {
+  const kinds = [
+    intel.hosting && 'Hosting or data centre',
+    intel.vpn && 'VPN',
+    intel.proxy && 'Public proxy',
+    intel.tor && 'Tor exit',
+  ].filter((kind): kind is string => typeof kind === 'string')
+  return kinds.length > 0 ? kinds.join(', ') : 'Ordinary address'
+}
+
+function IpIntelFacts({ intel }: { intel: IpIntel | null | undefined }) {
+  if (!intel) return <EmptyState>No IP lookup was made: the lookup is off or the purchase had no IP address.</EmptyState>
+  return (
+    <dl className="facts">
+      <dt>Provider</dt>
+      <dd>{intel.provider}</dd>
+      <dt>Network</dt>
+      <dd>{intel.available ? networkKinds(intel) : 'Unknown: the lookup failed or timed out'}</dd>
     </dl>
   )
 }

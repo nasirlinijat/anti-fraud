@@ -239,7 +239,7 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
-SELECT ` + queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result
+SELECT ` + queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel
 FROM ` + queueItemTables + `
 WHERE d.purchase_id = $1
   AND d.outcome = 'review'
@@ -283,8 +283,9 @@ LIMIT $4`
 // returns models.ErrReviewNotFound if there is none.
 func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	var c models.CaseItem
+	var ipIntel []byte
 	item, err := scanQueueItem(s.conn.QueryRow(ctx, getReviewCase, purchaseID),
-		&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult)
+		&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.CaseItem{}, models.ErrReviewNotFound
 	}
@@ -292,6 +293,11 @@ func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseIt
 		return models.CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
 	}
 	c.QueueItem = item
+	if ipIntel != nil {
+		if err := json.Unmarshal(ipIntel, &c.IPIntel); err != nil {
+			return models.CaseItem{}, fmt.Errorf("decode IP intelligence of case %d: %w", purchaseID, err)
+		}
+	}
 	if c.PlayerPurchases, err = s.casePlayerPurchases(ctx, item); err != nil {
 		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
 	}

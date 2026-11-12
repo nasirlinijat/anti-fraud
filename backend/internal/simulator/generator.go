@@ -444,6 +444,7 @@ func (g *generator) add(pattern Pattern, req Request) {
 		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
 	}
 	req = g.withVerification(pattern, req)
+	req = g.withNetwork(pattern, req)
 	req = g.withoutMissingFields(req)
 	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: req, AccountEvents: g.accountEvents(pattern, req)})
 }

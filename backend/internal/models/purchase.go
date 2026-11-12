@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -66,6 +67,10 @@ type Decision struct {
 	// FeatureHistory is the history the model inputs were computed from. Save
 	// uses it to add the purchase to the feature running totals.
 	FeatureHistory features.History
+	// IPIntel is the IP intelligence lookup the rules saw. It is nil when no
+	// lookup was made: the provider is off or the purchase had no IP address.
+	// It is evidence and a rule input only, never a model input.
+	IPIntel *ipintel.Result
 }
 
 // ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.

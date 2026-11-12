@@ -12,9 +12,14 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
-var verificationRuleNames = []scoring.RuleName{scoring.RuleCVVMismatch, scoring.RuleAVSMismatch, scoring.RuleThreeDSFailed}
+// rulesWithoutLimit are the rules that read a value reported for the purchase
+// and have no threshold.
+var rulesWithoutLimit = []scoring.RuleName{
+	scoring.RuleCVVMismatch, scoring.RuleAVSMismatch, scoring.RuleThreeDSFailed,
+	scoring.RuleDatacenterIP, scoring.RuleAnonymousIP,
+}
 
-func TestPublishRejectsInvalidVerificationRules(t *testing.T) {
+func TestPublishRejectsInvalidRulesWithoutLimit(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	tests := []struct {
@@ -25,7 +30,7 @@ func TestPublishRejectsInvalidVerificationRules(t *testing.T) {
 		{"negative limit", `{"enabled":true,"weight":30,"limit":-1}`, "limit"},
 		{"spike settings", `{"enabled":true,"weight":30,"window_days":30}`, ""},
 	}
-	for _, name := range verificationRuleNames {
+	for _, name := range rulesWithoutLimit {
 		for _, tt := range tests {
 			t.Run(string(name)+" "+tt.name, func(t *testing.T) {
 				body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{%q:%s}}`, name, tt.rule)
@@ -44,14 +49,16 @@ func TestPublishRejectsInvalidVerificationRules(t *testing.T) {
 	}
 }
 
-func TestPublishAcceptsVerificationRulesWithoutLimit(t *testing.T) {
+func TestPublishAcceptsRulesWithoutLimit(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolatedRulesetPool(t)))),
 		platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	body := `{"review_threshold":50,"block_threshold":80,"rules":{
 		"cvv_mismatch":{"enabled":true,"weight":30},
 		"avs_mismatch":{"enabled":false,"weight":15,"limit":0},
-		"three_ds_failed":{"enabled":true,"weight":45}
+		"three_ds_failed":{"enabled":true,"weight":45},
+		"datacenter_ip":{"enabled":true,"weight":30},
+		"anonymous_ip":{"enabled":false,"weight":20}
 	}}`
 
 	published := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
@@ -72,6 +79,8 @@ func TestPublishAcceptsVerificationRulesWithoutLimit(t *testing.T) {
 		scoring.RuleCVVMismatch:   {true, 30},
 		scoring.RuleAVSMismatch:   {false, 15},
 		scoring.RuleThreeDSFailed: {true, 45},
+		scoring.RuleDatacenterIP:  {true, 30},
+		scoring.RuleAnonymousIP:   {false, 20},
 	}
 	if len(got.Rules) != len(want) {
 		t.Fatalf("active rules = %v, want %v", got.Rules, want)

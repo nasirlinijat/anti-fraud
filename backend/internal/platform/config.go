@@ -45,6 +45,19 @@ type Config struct {
 	// ChargebackWebhookSecret signs chargeback webhook deliveries. While it
 	// is empty, the chargeback endpoint returns 503.
 	ChargebackWebhookSecret string
+	IPIntel                 IPIntelConfig
+}
+
+// IPIntelMock selects the mock IP intelligence provider.
+const IPIntelMock = "mock"
+
+// IPIntelConfig selects the IP intelligence provider.
+type IPIntelConfig struct {
+	// Provider is IPIntelMock, or empty when IP lookups are off.
+	Provider string
+	// MockRangesPath is an optional JSON file of ranges that replaces the
+	// mock's default ranges.
+	MockRangesPath string
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -101,6 +114,27 @@ func LoadConfig() (Config, error) {
 	cfg.ChargebackWebhookSecret, err = loadChargebackWebhookSecret(cfg.APIKey, cfg.AnalystKeys, cfg.OperatorKeys)
 	if err != nil {
 		return Config{}, err
+	}
+	cfg.IPIntel, err = loadIPIntel()
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// loadIPIntel reads IP_INTEL_PROVIDER, where empty, off, and none turn the
+// lookups off, and IP_INTEL_MOCK_RANGES, which only the mock reads.
+func loadIPIntel() (IPIntelConfig, error) {
+	cfg := IPIntelConfig{MockRangesPath: os.Getenv("IP_INTEL_MOCK_RANGES")}
+	switch provider := os.Getenv("IP_INTEL_PROVIDER"); provider {
+	case "", "off", "none":
+	case IPIntelMock:
+		cfg.Provider = provider
+	default:
+		return IPIntelConfig{}, fmt.Errorf("IP_INTEL_PROVIDER must be mock, off, none, or empty")
+	}
+	if cfg.MockRangesPath != "" && cfg.Provider != IPIntelMock {
+		return IPIntelConfig{}, fmt.Errorf("IP_INTEL_MOCK_RANGES requires IP_INTEL_PROVIDER=mock")
 	}
 	return cfg, nil
 }

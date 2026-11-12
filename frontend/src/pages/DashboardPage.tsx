@@ -28,6 +28,8 @@ const ruleNames: Record<string, string> = {
   cvv_mismatch: 'CVV mismatch',
   avs_mismatch: 'AVS mismatch',
   three_ds_failed: '3-D Secure failed',
+  datacenter_ip: 'Data-centre IP',
+  anonymous_ip: 'VPN, proxy, or Tor IP',
 }
 
 const number = new Intl.NumberFormat()

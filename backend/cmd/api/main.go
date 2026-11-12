@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
@@ -62,6 +63,9 @@ func main() {
 	accountEventStore := storage.NewAccountEventStore(pool)
 	scoreService := scoresvc.NewService(rulesetStore, blocklistStorage, storage.NewPurchaseStore(pool)).UseAccountEvents(accountEventStore)
 	useModel(cfg.ModelPath, scoreService, rulesetService)
+	if err := useIPIntel(cfg.IPIntel, scoreService); err != nil {
+		fatal("load IP intelligence ranges", err)
+	}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
 	transport.RegisterAccountEventRoutes(mux,
 		transport.NewAccountEventHandler(accountevent.NewService(accountEventStore)).UseTimeout(cfg.ScoreLimits.Timeout), cfg.APIKey)
@@ -154,6 +158,34 @@ func useModel(modelPath string, service *scoresvc.Service, rulesets *ruleset.Ser
 	slog.Info("fraud model loaded",
 		"model_version", model.Version(), "trees", model.Trees(), "features", len(model.Features()),
 		"flag_at", policy.FlagAt, "clear_below", policy.ClearBelow)
+}
+
+// useIPIntel gives the score service the configured IP intelligence provider.
+func useIPIntel(cfg platform.IPIntelConfig, service *scoresvc.Service) error {
+	mock, err := newIPIntel(cfg)
+	if err != nil || mock == nil {
+		return err
+	}
+	service.UseIPIntel(mock)
+	return nil
+}
+
+// newIPIntel returns the configured mock, or nil when IP intelligence is off.
+// A mock ranges file replaces the default ranges.
+func newIPIntel(cfg platform.IPIntelConfig) (*ipintel.Mock, error) {
+	if cfg.Provider == "" {
+		slog.Info("IP_INTEL_PROVIDER is off, so purchases are scored without IP intelligence")
+		return nil, nil
+	}
+	ranges := ipintel.DefaultRanges
+	if cfg.MockRangesPath != "" {
+		var err error
+		if ranges, err = ipintel.LoadRanges(cfg.MockRangesPath); err != nil {
+			return nil, err
+		}
+	}
+	slog.Info("IP intelligence enabled", "provider", ipintel.MockName, "ranges", len(ranges))
+	return ipintel.NewMock(ranges), nil
 }
 
 // openEvaluationPool keeps reporting optional while requiring healthy private

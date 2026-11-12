@@ -60,7 +60,7 @@ const groups: Group[] = [
       { name: 'device_type', label: 'Device type', kind: 'text', options: ['desktop', 'mobile'] },
       { name: 'device_name', label: 'Device name', kind: 'text' },
       { name: 'device_id', label: 'Device ID', kind: 'text' },
-      { name: 'ip_address', label: 'IP address', kind: 'text' },
+      { name: 'ip_address', label: 'IP address', kind: 'text', hint: 'The mock IP intelligence flags 192.0.2.0/24 by default' },
       { name: 'ip_country', label: 'IP country', kind: 'text' },
       { name: 'account_created_at', label: 'Account created at', kind: 'time' },
       { name: 'client_os', label: 'Client OS', kind: 'text', options: ['Windows 10', 'Mac OS X 10_13', 'iOS 11.2.1', 'Android 8.0'] },

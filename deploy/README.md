@@ -66,6 +66,7 @@ POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RUNTIME_DB_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=antifraud
 MODEL_FILE=lgbm-game-v5.json
+IP_INTEL_PROVIDER=off
 CONSOLE_HOST=console.$DASHED.sslip.io
 API_HOST=api.$DASHED.sslip.io
 CONSOLE_USER=team
@@ -205,6 +206,10 @@ Remove the `DD_` lines from `~/anti-fraud/.env` and run `bash deploy/deploy.sh` 
 - The gateway rejects console requests from other sites, and the console's own checks still apply behind it.
 - SSH is open only to the IP that created the instance. When your IP changes, edit the instance's security group.
 - Secrets live only in `~/anti-fraud/.env` on the server.
+
+## IP intelligence upgrade
+
+The release that adds IP intelligence runs no lookup in production: `deploy/compose.prod.yml` sets `IP_INTEL_PROVIDER` to `off` unless `.env` sets it. Leave it off. The only provider is a mock that flags documentation addresses, so turning it on adds lookup work without useful results. Migration 000030 adds the nullable `decisions.ip_intel` column, which stays null while the provider is off. The `datacenter_ip` and `anonymous_ip` rules start off and never fire without a provider.
 
 ## Evaluation credential upgrade
 

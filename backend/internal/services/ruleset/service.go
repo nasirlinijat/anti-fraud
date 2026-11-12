@@ -181,6 +181,8 @@ var rulesWithoutLimit = map[scoring.RuleName]bool{
 	scoring.RuleCVVMismatch:     true,
 	scoring.RuleAVSMismatch:     true,
 	scoring.RuleThreeDSFailed:   true,
+	scoring.RuleDatacenterIP:    true,
+	scoring.RuleAnonymousIP:     true,
 }
 
 // limit returns the rule's limit, or zero with a problem added to fields.

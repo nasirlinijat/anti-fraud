@@ -1519,9 +1519,10 @@ paths:
         and points, the version of the ruleset that scored it, the model
         score when one was recorded, the player's recent purchases before this
         one, activity on the same device, the payment gateway's CVV, AVS,
-        and 3-D Secure results when the score request sent them, and the
+        and 3-D Secure results when the score request sent them, the
         player's logins and password resets in the 30 days before the
-        purchase.
+        purchase, and the IP intelligence lookup made when the purchase was
+        scored.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -2108,7 +2109,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events]
+          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events, ip_intel]
           properties:
             ruleset_version:
               type: integer
@@ -2148,6 +2149,39 @@ components:
                 not have seen them.
               items:
                 $ref: "#/components/schemas/CaseAccountEvent"
+            ip_intel:
+              $ref: "#/components/schemas/CaseIPIntel"
+
+    CaseIPIntel:
+      type: object
+      nullable: true
+      description: >-
+        The IP intelligence lookup saved with the decision. Null when no lookup
+        was made: IP_INTEL_PROVIDER is off, or the purchase carried no
+        ip_address. It is a rule input and evidence only, never a model input.
+      required: [provider, available, hosting, vpn, proxy, tor]
+      properties:
+        provider:
+          type: string
+          description: The provider that answered, such as `mock`.
+          example: mock
+        available:
+          type: boolean
+          description: >-
+            False when the lookup failed or took longer than its 40 ms limit.
+            The purchase was then scored as if the address were unknown, and
+            the network flags are all false.
+        hosting:
+          type: boolean
+          description: The address belongs to a hosting or data-centre network.
+        vpn:
+          type: boolean
+        proxy:
+          type: boolean
+          description: The address is a public proxy.
+        tor:
+          type: boolean
+          description: The address is a Tor exit.
 
     CasePlayerPurchase:
       type: object
@@ -2342,9 +2376,10 @@ components:
             Settings keyed by `high_amount`, `card_velocity`, `new_account`,
             `country_mismatch`, `device_card_count`, `new_device_spike`,
             `cvv_mismatch`, `avs_mismatch`, `three_ds_failed`,
-            `recent_password_reset`, `new_device_login`, or
-            `new_country_login`. An omitted rule is disabled. An empty
-            object disables all weighted rules.
+            `recent_password_reset`, `new_device_login`,
+            `new_country_login`, `datacenter_ip`, or `anonymous_ip`. An
+            omitted rule is disabled. An empty object disables all weighted
+            rules.
             Enabled rule weights must add up to at most 2147483647.
           additionalProperties:
             type: object
@@ -2369,8 +2404,9 @@ components:
                   For `recent_password_reset`, `new_device_login`, and
                   `new_country_login` it is the window before the purchase in
                   hours, from 1 to 720. Required except for `country_mismatch`,
-                  `cvv_mismatch`, `avs_mismatch`, and `three_ds_failed`, which
-                  have no threshold; a limit sent for them is saved but not used.
+                  `cvv_mismatch`, `avs_mismatch`, `three_ds_failed`,
+                  `datacenter_ip`, and `anonymous_ip`, which have no threshold;
+                  a limit sent for them is saved but not used.
               window_days:
                 type: integer
                 format: int32
@@ -2555,7 +2591,8 @@ components:
           type: string
           description: >-
             IPv4 or IPv6 address of the purchase. Checked against the
-            blocklist.
+            blocklist and, when IP_INTEL_PROVIDER is set, looked up for the
+            datacenter_ip and anonymous_ip rules. Never a model input.
           example: 203.0.113.9
         ip_country:
           type: string
@@ -2692,7 +2729,7 @@ components:
           type: string
           enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike,
             cvv_mismatch, avs_mismatch, three_ds_failed, recent_password_reset, new_device_login,
-            new_country_login, blocklist]
+            new_country_login, datacenter_ip, anonymous_ip, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
@@ -2712,7 +2749,11 @@ components:
             that no earlier login and no earlier allowed or approved purchase
             used. new_country_login does the same for the IP country. The two
             login rules need an earlier login or trusted purchase with a device
-            or country to compare with. blocklist is the entry of a purchase
+            or country to compare with. datacenter_ip fires when the IP
+            intelligence provider reports a hosting or data-centre address,
+            and anonymous_ip when it reports a VPN, a public proxy, or a Tor
+            exit; neither fires without a lookup or when the lookup failed.
+            blocklist is the entry of a purchase
             blocked because its card, device, player or IP address is on the
             blocklist. It adds no points.
           example: card_velocity

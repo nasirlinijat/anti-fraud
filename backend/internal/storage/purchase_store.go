@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -218,10 +219,10 @@ RETURNING id`
 const insertDecision = `
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended, scoring_latency_us, model_version
+    model_score_unblended, scoring_latency_us, model_version, ip_intel
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10
+    $8, $9, $10, $11
 )`
 
 // Save stores a purchase and its decision in one transaction and returns the
@@ -244,6 +245,10 @@ func (s *PurchaseStore) Save(ctx context.Context, p models.Purchase, d models.De
 	if err != nil {
 		return 0, fmt.Errorf("encode model inputs: %w", err)
 	}
+	ipIntelJSON, err := ipIntelJSON(d.IPIntel)
+	if err != nil {
+		return 0, err
+	}
 
 	tx, err := s.conn.Begin(ctx)
 	if err != nil {
@@ -262,7 +267,7 @@ func (s *PurchaseStore) Save(ctx context.Context, p models.Purchase, d models.De
 
 	_, err = tx.Exec(ctx, insertDecision,
 		id, int32(d.RulesetVersion), string(d.Result.Outcome), int32(d.Result.Score), firedJSON, inputsJSON,
-		d.ModelScore, d.ModelScoreUnblended, d.Latency.Microseconds(), d.ModelVersion,
+		d.ModelScore, d.ModelScoreUnblended, d.Latency.Microseconds(), d.ModelVersion, ipIntelJSON,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)
@@ -294,6 +299,19 @@ func purchaseArgs(p models.Purchase) []any {
 		p.ClientOS, p.ClientBrowser, p.ScreenResolution,
 		p.CVVResult, p.AVSResult, p.ThreeDSResult,
 	}
+}
+
+// ipIntelJSON encodes the lookup result, or returns nil to save NULL when no
+// lookup was made.
+func ipIntelJSON(r *ipintel.Result) ([]byte, error) {
+	if r == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("encode IP intelligence: %w", err)
+	}
+	return data, nil
 }
 
 const uniqueViolation = "23505"

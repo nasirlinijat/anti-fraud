@@ -286,6 +286,8 @@ func TestDeviceFarmLinksNewAccountsThroughOneEmulator(t *testing.T) {
 
 func generateScenario(t *testing.T, pattern Pattern, generate func(*generator, time.Time), minCount, maxCount int) *generator {
 	t.Helper()
+	// The scenario tests compare addresses with the players' home connections.
+	withoutNetworkPlacement(t)
 	cfg := DefaultConfig()
 	cfg.Players = 1
 	// The scenario tests read every field of the request.
