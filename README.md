@@ -192,6 +192,8 @@ Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run
 
 [LOAD_TEST.md](LOAD_TEST.md) has the k6 test of the AWS server: steady, ramp and spike scenarios with simulated purchases (`scripts/k6/score.js`), the capacity found, the bottleneck, and how to run it.
 
+[CHAOS_TEST.md](CHAOS_TEST.md) has the chaos test: the backend restarted and killed, PostgreSQL restarted and the gateway stopped while purchases kept arriving (`scripts/k6/chaos.js`), with SQL checks that every purchase was saved exactly once.
+
 ## Ruleset API
 
 Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
