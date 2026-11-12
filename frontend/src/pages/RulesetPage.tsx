@@ -28,7 +28,7 @@ const ruleDetails = [
     },
   },
   { name: 'cvv_mismatch', label: 'CVV mismatch', preset: { enabled: false, weight: '35' } },
-  { name: 'avs_mismatch', label: 'AVS mismatch (partial matches do not count)', preset: { enabled: false, weight: '15' } },
+  { name: 'avs_mismatch', label: 'AVS mismatch', hint: 'Partial matches do not count.', preset: { enabled: false, weight: '15' } },
   { name: 'three_ds_failed', label: '3-D Secure failed', preset: { enabled: false, weight: '50' } },
 ] as const
 
@@ -330,6 +330,7 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
 }) {
   const { name, label } = detail
   const limitLabel = 'limit' in detail ? detail.limit : undefined
+  const hint = 'hint' in detail ? detail.hint : undefined
   const preset = 'preset' in detail ? detail.preset : undefined
   const rule: RuleDraft = savedRule ?? preset ?? { enabled: false, weight: '0', limit: limitLabel ? '0' : undefined }
   const field = `rules.${name}`
@@ -342,12 +343,13 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
           type="checkbox"
           checked={rule.enabled}
           onChange={(event) => onChange({ ...rule, enabled: event.target.checked })}
-          aria-label={`Enable ${label.toLowerCase()}`}
+          aria-label={`Enable ${label}`}
           aria-invalid={enabledError ? true : undefined}
           aria-describedby={enabledError ? `${field}.enabled-error` : undefined}
         />
         <span>Enabled</span>
       </label>
+      {hint && <p className="field-hint">{hint}</p>}
       {enabledError && (
         <span id={`${field}.enabled-error`} className="error-text">{enabledError}</span>
       )}

@@ -217,6 +217,8 @@ A payment gateway checks the card during authorization and reports the results, 
 | `avs_mismatch` | `avs_result` is `mismatch` | 15 | A weak signal: many issuers outside a few countries do not support the check, and a recent move gives a genuine mismatch. `partial` does not fire, because a differently written street or postcode is common |
 | `three_ds_failed` | `three_ds_result` is `failed` | 50 | The card issuer could not authenticate the cardholder, which is strong evidence on its own, so it reaches the review threshold alone |
 
+Before rolling back to a service version that predates these rules, publish a new ruleset that omits `cvv_mismatch`, `avs_mismatch`, and `three_ds_failed`: an older version returns an error for a rule name it does not know, so it cannot load the active ruleset.
+
 A result the request leaves out never fires its rule. The results are saved with the purchase, take part in the retry comparison, and are shown as evidence on the review case. They are not model inputs.
 
 The rules start off, so existing rulesets keep their behaviour. To enable them with the suggested weights, publish the seeded settings plus the three rules (the Rulesets page offers the same weights):
