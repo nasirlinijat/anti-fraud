@@ -27,8 +27,8 @@ func NewStatsHandler(service StatsService) *StatsHandler {
 }
 
 // RegisterStatsRoutes registers GET /stats behind API key authentication.
-func RegisterStatsRoutes(mux *http.ServeMux, h *StatsHandler, apiKey string) {
-	mux.Handle("GET /stats", platform.RequireAPIKey(apiKey, h))
+func RegisterStatsRoutes(mux *http.ServeMux, h *StatsHandler, access platform.Access) {
+	mux.Handle("GET /stats", access.ConfigRead(h))
 }
 
 type statsResponse struct {

@@ -20,7 +20,7 @@ import (
 
 type rejectUnexpectedReviewAccess struct{}
 
-func (rejectUnexpectedReviewAccess) Queue(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error) {
+func (rejectUnexpectedReviewAccess) Queue(context.Context, int, models.QueueOrder, *models.QueueCursor, *string) ([]models.QueueItem, error) {
 	panic("unexpected queue read")
 }
 
@@ -28,8 +28,20 @@ func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (models.CaseIte
 	panic("unexpected case read")
 }
 
-func (rejectUnexpectedReviewAccess) Resolve(context.Context, int64, string, string, bool) (models.Resolution, error) {
+func (rejectUnexpectedReviewAccess) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected models.Resolution write")
+}
+
+func (rejectUnexpectedReviewAccess) Claim(context.Context, int64, string) (models.Claim, error) {
+	panic("unexpected claim write")
+}
+
+func (rejectUnexpectedReviewAccess) Assignments(context.Context) ([]models.ReviewerWork, error) {
+	panic("unexpected assignments read")
+}
+
+func (rejectUnexpectedReviewAccess) ReleaseClaim(context.Context, int64) (models.ReleaseStatus, error) {
+	panic("unexpected claim release")
 }
 
 func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
@@ -44,7 +56,7 @@ func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest
 
 func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.AnalystKeys{})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.Access{})
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
@@ -59,7 +71,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 
 func TestReviewDecisionRejectsInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), testAnalystKeys(t))
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.Access{Analysts: testAnalystKeys(t)})
 	const target = "/reviews/1/decision"
 	const body = `{"decision":"approve"}`
 	for _, tc := range []struct {
@@ -179,7 +191,7 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	second := insertReviewDecision(t, tx, "resolution-second", "review", at, nil, `[]`)
 	allowed := insertReviewDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
 	until := time.Now().UTC()
 	before := readReviewStats(t, tx, at, until)
 	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
@@ -248,7 +260,7 @@ func deviceBlocked(t *testing.T, tx pgx.Tx, device string) bool {
 func TestRejectCanBlockTheDevice(t *testing.T) {
 	tx := testTx(t)
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
 	decide := func(id int64, body string) *httptest.ResponseRecorder {
 		return postDecision(mux, id, queueTestKey, body)
 	}
@@ -312,7 +324,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
 	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {

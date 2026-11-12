@@ -24,6 +24,8 @@ servers:
     description: Local development server.
 
 tags:
+  - name: Auth
+    description: Sign reviewers and admins in and out.
   - name: Simulations
     description: Control simulation runs when explicitly enabled.
   - name: Score
@@ -34,11 +36,128 @@ tags:
     description: Manage blocked cards, devices, players and IP addresses.
   - name: Reviews
     description: Browse purchases awaiting review.
+  - name: Admin
+    description: Oversee reviewers. Admin sessions only.
 
   - name: Rulesets
     description: Read and publish scoring configuration.
 
 paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in with a username and password
+      description: >-
+        Starts a session that lasts 12 hours. Send the returned token as
+        `Authorization: Bearer <token>`. The username is not case-sensitive.
+        After 5 sign-in attempts for a username within 15 minutes, further
+        attempts are rejected until the 15 minutes have passed. A successful
+        sign-in resets the count.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: The body is not a single sign-in object, or the username or password is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The username or password is wrong, or the account is disabled. All
+            three return the same message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The body is larger than 1024 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: The username has no sign-in attempts left.
+          headers:
+            Retry-After:
+              description: Seconds until the username may sign in again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The sign-in could not be checked or saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getSignedInAccount
+      summary: Get the signed-in account
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The account of the session.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "500":
+          description: The session could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: End the session
+      description: The token stops working immediately. Other sessions of the account stay signed in.
+      security:
+        - SessionAuth: []
+      responses:
+        "204":
+          description: Signed out.
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "500":
+          description: The session could not be ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /simulations:
     post:
       tags: [Simulations]
@@ -49,7 +168,7 @@ paths:
         can be starting, running or stopping. Purchases use POST /score.
         A matching request_id for the same operator returns the original run;
         changing its settings returns 409. Runs are interrupted after restart.
-      security: [{OperatorKeyAuth: []}]
+      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
       requestBody:
         required: true
         content:
@@ -69,7 +188,8 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
         '400': {description: Invalid JSON or settings.}
-        '401': {description: Missing or invalid operator key.}
+        '401': {description: "Missing or invalid operator key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
         '409': {description: Active run conflict (includes active_run_id when available), or request_id settings conflict.}
         '503': {description: Operator access, database or simulation controller unavailable.}
@@ -77,7 +197,7 @@ paths:
       tags: [Simulations]
       operationId: listSimulations
       summary: Read simulation history
-      security: [{ApiKeyAuth: []}]
+      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
       parameters:
         - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
         - {in: query, name: before, description: Previous next_cursor value., schema: {type: string}}
@@ -94,7 +214,8 @@ paths:
                   next_cursor: {type: string}
                   available_scenarios: {type: array, items: {type: string}}
         '400': {description: Invalid cursor or limit.}
-        '401': {description: Missing or invalid service key.}
+        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
         '503': {description: Database unavailable.}
   /simulations/{id}:
@@ -102,7 +223,7 @@ paths:
       tags: [Simulations]
       operationId: getSimulation
       summary: Read durable simulation progress
-      security: [{ApiKeyAuth: []}]
+      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
       parameters:
         - {in: path, name: id, required: true, schema: {type: string}}
       responses:
@@ -111,7 +232,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-        '401': {description: Missing or invalid service key.}
+        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Database unavailable.}
   /simulations/{id}/stop:
@@ -119,7 +241,7 @@ paths:
       tags: [Simulations]
       operationId: stopSimulation
       summary: Stop a simulation after settling its in-flight purchase
-      security: [{OperatorKeyAuth: []}]
+      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
       parameters:
         - {in: path, name: id, required: true, schema: {type: string}}
       responses:
@@ -133,7 +255,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-        '401': {description: Missing or invalid operator key.}
+        '401': {description: "Missing or invalid operator key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Operator access or database unavailable.}
   /score:
@@ -353,7 +476,7 @@ paths:
         change these results. Sources never mix. No individual answers are returned.
         This whole-run report ignores dashboard periods. Reporting can operate with
         simulation controls disabled when evaluation access is configured.
-      security: [{ApiKeyAuth: []}]
+      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
       parameters:
         - name: source
           in: query
@@ -374,7 +497,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
-        '401': {description: Missing or invalid service key.}
+        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: No run is known under this source and ID.}
         '503': {description: Evaluation access is absent or temporarily unavailable.}
 
@@ -388,7 +512,7 @@ paths:
         runs without labels. CLI and imported runs are discoverable without enabling
         simulation controls. IDs are ordered ascending using database text ordering.
         Only aggregate run identities are exposed, never individual answers.
-      security: [{ApiKeyAuth: []}]
+      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
       parameters:
         - name: source
           in: query
@@ -413,7 +537,8 @@ paths:
                   run_ids: {type: array, items: {type: string}}
                   next_cursor: {type: string, description: Absent after the final page.}
         '400': {description: Invalid, duplicate or unsupported query parameters.}
-        '401': {description: Missing or invalid service key.}
+        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '503': {description: Evaluation access is absent or temporarily unavailable.}
 
   /stats:
@@ -428,6 +553,7 @@ paths:
         The review queue size is always the current one, whatever the period.
       security:
         - ApiKeyAuth: []
+        - SessionAuth: []
       parameters:
         - name: period
           in: query
@@ -455,13 +581,16 @@ paths:
                 fields:
                   period: must be one of 15m, 1h, 24h, 7d, all
         "401":
-          description: The API key is missing or wrong.
+          description: >-
+            The API key is missing or wrong. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: missing or invalid API key
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The statistics could not be read.
           content:
@@ -479,6 +608,7 @@ paths:
       description: Returns all entries, the newest first.
       security:
         - ApiKeyAuth: []
+        - SessionAuth: []
       responses:
         "200":
           description: All entries.
@@ -493,13 +623,16 @@ paths:
                     items:
                       $ref: "#/components/schemas/BlocklistEntry"
         "401":
-          description: The API key is missing or wrong.
+          description: >-
+            The API key is missing or wrong. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: missing or invalid API key
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The entries could not be read.
           content:
@@ -519,6 +652,7 @@ paths:
         is saved as `203.0.113.9`.
       security:
         - OperatorKeyAuth: []
+        - SessionAuth: []
       requestBody:
         required: true
         content:
@@ -558,13 +692,16 @@ paths:
                   value: must be an IPv4 or IPv6 address
                   reason: is required
         "401":
-          description: The operator key is missing or invalid.
+          description: >-
+            The operator key is missing or invalid. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: missing or invalid operator key
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "409":
           description: The same type and value are already on the blocklist.
           content:
@@ -600,6 +737,7 @@ paths:
       description: The value is no longer blocked from the next scored purchase on.
       security:
         - OperatorKeyAuth: []
+        - SessionAuth: []
       parameters:
         - name: id
           in: path
@@ -620,13 +758,16 @@ paths:
               example:
                 error: the entry ID must be a positive integer
         "401":
-          description: The operator key is missing or invalid.
+          description: >-
+            The operator key is missing or invalid. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: missing or invalid operator key
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "404":
           description: No entry has this ID.
           content:
@@ -657,6 +798,7 @@ paths:
         missing scores last. Follow next_cursor with the same sort order.
       security:
         - AnalystKeyAuth: []
+        - SessionAuth: []
       parameters:
         - in: query
           name: sort
@@ -672,6 +814,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 128
+        - in: query
+          name: claimed
+          description: >-
+            `mine` lists only the purchases claimed by the signed-in account.
+            Needs a session. Omit to list every purchase awaiting review.
+          schema:
+            type: string
+            enum: [mine]
       responses:
         "200":
           description: A page of purchases awaiting review.
@@ -685,17 +835,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewPage"
         "400":
-          description: The sort order or cursor is invalid, or the cursor belongs to a different sort order.
+          description: >-
+            The sort order, cursor, or claimed filter is invalid, the cursor
+            belongs to a different sort order, or claimed=mine was sent with
+            an analyst key.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: The X-API-Key header is missing or contains an invalid analyst key.
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The review queue could not be loaded.
           content:
@@ -705,13 +861,308 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}/claim:
+    post:
+      tags: [Reviews]
+      operationId: claimReview
+      summary: Claim a purchase awaiting review
+      description: >-
+        Gives the purchase to the signed-in reviewer or admin, so that only
+        that account can decide it. Claiming a purchase you already hold
+        returns the original claim with 200. Analyst keys cannot claim, and
+        decide without a claim.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*$'
+          description: Positive 64-bit purchase ID from the review queue, represented as a decimal string.
+      responses:
+        "201":
+          description: The purchase is now claimed by you.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewClaim"
+        "200":
+          description: You already held the claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewClaim"
+        "400":
+          description: The purchase ID is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          description: The request used an analyst key, which cannot claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The scored purchase does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >-
+            Another account holds the claim, the purchase has already been
+            decided, or it was scored with a different outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The claim could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
+    delete:
+      tags: [Reviews]
+      operationId: releaseReviewClaim
+      summary: Release a claim back to the shared queue
+      description: >-
+        Removes the open claim on a purchase awaiting review, so that any
+        reviewer can claim it. Only admins can release claims. A decided
+        purchase keeps its claim as the record of who held it.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*$'
+          description: Positive 64-bit purchase ID, represented as a decimal string.
+      responses:
+        "204":
+          description: The claim was released.
+        "400":
+          description: The purchase ID is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: The purchase has no open claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The purchase has already been decided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The claim could not be released.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/accounts:
+    post:
+      tags: [Admin]
+      operationId: createAccount
+      summary: Create a reviewer or admin account
+      description: The username is saved in lowercase. Only admins can create accounts.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewAccount"
+      responses:
+        "201":
+          description: The account was created and can sign in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetails"
+        "400":
+          description: >-
+            The body is not a single account object, or a field is invalid.
+            fields names the invalid field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "409":
+          description: The username is already taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The body is larger than 1024 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The account could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [Admin]
+      operationId: listAccounts
+      summary: List every account
+      description: Lists every account, disabled ones included, ordered by username. Password hashes are never returned.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The accounts.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AccountDetails"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The accounts could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/accounts/{username}/disable:
+    post:
+      tags: [Admin]
+      operationId: disableAccount
+      summary: Disable an account and sign it out
+      description: >-
+        The account can no longer sign in, and all its sessions end at once.
+        Its open claims stay until an admin releases them. Disabling an account
+        that is already disabled returns it again. An admin cannot disable
+        their own account.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema:
+            type: string
+          description: The username of the account. It is not case-sensitive.
+      responses:
+        "200":
+          description: The account is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetails"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No account has the username.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The username is your own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The account could not be disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/assignments:
+    get:
+      tags: [Admin]
+      operationId: listAssignments
+      summary: See what each reviewer is working on
+      description: >-
+        Lists every active reviewer, and any other account that still holds an
+        open claim, with its open claims and the number of purchases it has
+        decided. Decisions are counted by username. Only admins can use it.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The work of each reviewer, ordered by username.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignments"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The assignments could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /reviews/{purchase_id}/decision:
     post:
       tags: [Reviews]
       operationId: resolveReview
       summary: Approve or reject a purchase awaiting review
+      description: >-
+        A session must first claim the purchase with POST
+        /reviews/{purchase_id}/claim. An analyst key decides without a claim.
       security:
         - AnalystKeyAuth: []
+        - SessionAuth: []
       parameters:
         - in: path
           name: purchase_id
@@ -756,11 +1207,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: The X-API-Key header is missing or contains an invalid analyst key.
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "404":
           description: The scored purchase does not exist.
           content:
@@ -768,7 +1222,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: The purchase has already been decided or was scored with a different outcome.
+          description: >-
+            The purchase has already been decided or was scored with a
+            different outcome, or a session that does not hold the claim on
+            the purchase tried to decide it.
           content:
             application/json:
               schema:
@@ -800,6 +1257,7 @@ paths:
         one, and activity on the same device.
       security:
         - AnalystKeyAuth: []
+        - SessionAuth: []
       parameters:
         - in: path
           name: purchase_id
@@ -827,11 +1285,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: The X-API-Key header is missing or contains an invalid analyst key.
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "404":
           description: No purchase under review has this ID.
           content:
@@ -855,6 +1316,7 @@ paths:
       description: Returns all published ruleset versions, newest first, with their version number, optional note, and creation time.
       security:
         - ApiKeyAuth: []
+        - SessionAuth: []
       responses:
         "200":
           description: All ruleset versions.
@@ -869,7 +1331,10 @@ paths:
                     items:
                       $ref: "#/components/schemas/RulesetSummary"
         "401":
-          description: Missing or invalid API key.
+          description: >-
+            Missing or invalid API key. With an Authorization header, a missing or invalid session.
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The ruleset history could not be read.
     post:
@@ -887,6 +1352,7 @@ paths:
         report of the loaded model; without a loaded model they stay null.
       security:
         - OperatorKeyAuth: []
+        - SessionAuth: []
       requestBody:
         required: true
         content:
@@ -907,7 +1373,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid operator key.
+          description: >-
+            Missing or invalid operator key. With an Authorization header, a missing or invalid session.
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "413":
           description: The request body exceeds 65536 bytes.
         "500":
@@ -922,6 +1391,7 @@ paths:
       summary: Read the active ruleset
       security:
         - ApiKeyAuth: []
+        - SessionAuth: []
       responses:
         "200":
           description: The current version and its settings.
@@ -930,7 +1400,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ruleset"
         "401":
-          description: Missing or invalid API key.
+          description: >-
+            Missing or invalid API key. With an Authorization header, a missing or invalid session.
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The ruleset could not be read.
 
@@ -941,6 +1414,7 @@ paths:
       summary: Read a ruleset version
       security:
         - ApiKeyAuth: []
+        - SessionAuth: []
       parameters:
         - name: version
           in: path
@@ -963,7 +1437,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid API key.
+          description: >-
+            Missing or invalid API key. With an Authorization header, a missing or invalid session.
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
         "404":
           description: No ruleset has this version.
           content:
@@ -994,7 +1471,40 @@ components:
       name: X-API-Key
       description: The individual key assigned to the operator in OPERATOR_API_KEYS.
 
+    SessionAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        The token returned by POST /auth/login. Only its SHA-256 hash is
+        stored, and it expires 12 hours after sign-in. Reviewers can use the
+        review endpoints. Admins can use the review endpoints and every
+        statistics, quality, ruleset, blocklist, and simulation endpoint. A
+        request with an Authorization header is checked as a session, and any
+        X-API-Key header on it is ignored. POST /score accepts only the
+        service key.
+
   responses:
+    RoleNotAllowed:
+      description: >-
+        The session is valid, but its account role cannot use this endpoint.
+        Reviewers can use only the review endpoints.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    SessionRequired:
+      description: The Authorization header is missing, or the session is unknown, expired, ended, or belongs to a disabled account.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            enum: [Bearer]
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
     OperatorAccessUnavailable:
       description: No operator keys are configured.
       content:
@@ -1010,6 +1520,26 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: {type: string, minLength: 1, example: alice}
+        password: {type: string, minLength: 1, format: password}
+    Account:
+      type: object
+      required: [username, role]
+      properties:
+        username: {type: string, description: Lowercase username., example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+    Session:
+      type: object
+      required: [token, expires_at, account]
+      properties:
+        token: {type: string, description: Session token. It is returned only once.}
+        expires_at: {type: string, format: date-time}
+        account: {$ref: '#/components/schemas/Account'}
     SimulationSettings:
       type: object
       additionalProperties: false
@@ -1088,7 +1618,7 @@ components:
 
     ReviewItem:
       type: object
-      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, device_id, rule_score, model_score, model_version, fired_rules]
+      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, device_id, rule_score, model_score, model_version, fired_rules, claimed_by, claimed_at]
       properties:
         purchase_id:
           type: string
@@ -1133,6 +1663,114 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FiredRule"
+        claimed_by:
+          type: string
+          nullable: true
+          description: Username holding the claim on the purchase, or null while it is unclaimed.
+          example: alice
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the claim was made, in UTC, or null while the purchase is unclaimed.
+
+    NewAccount:
+      type: object
+      additionalProperties: false
+      required: [username, password, role]
+      properties:
+        username:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$'
+          description: Saved in lowercase.
+          example: alice
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: 12 to 72 bytes.
+        role: {type: string, enum: [reviewer, admin]}
+
+    AccountDetails:
+      type: object
+      required: [username, role, disabled, created_at]
+      properties:
+        username: {type: string, example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+        disabled: {type: boolean}
+        created_at:
+          type: string
+          format: date-time
+          description: When the account was created, in UTC.
+
+    Assignments:
+      type: object
+      required: [reviewers]
+      properties:
+        reviewers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerWork"
+
+    ReviewerWork:
+      type: object
+      required: [username, role, disabled, decided, open_claims]
+      properties:
+        username: {type: string, example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+        disabled:
+          type: boolean
+          description: True for a disabled account that still holds open claims.
+        decided:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Purchases decided under this username, all time.
+        open_claims:
+          type: array
+          description: Claimed purchases still awaiting a decision, oldest claim first.
+          items:
+            $ref: "#/components/schemas/OpenClaim"
+
+    OpenClaim:
+      type: object
+      required: [purchase_id, amount_minor, rule_score, model_score, claimed_at]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        amount_minor:
+          type: string
+          description: The integer amount in minor units as a decimal string.
+        rule_score:
+          type: integer
+          minimum: 0
+        model_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+        claimed_at:
+          type: string
+          format: date-time
+          description: When the claim was made, in UTC.
+
+    ReviewClaim:
+      type: object
+      required: [purchase_id, claimed_by, claimed_at]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        claimed_by:
+          type: string
+          example: alice
+        claimed_at:
+          type: string
+          format: date-time
+          description: When the claim was made, in UTC.
 
     ReviewCase:
       allOf:

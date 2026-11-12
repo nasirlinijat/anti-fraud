@@ -14,6 +14,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
@@ -42,15 +44,19 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
+	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
+	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
+	access := platform.Access{ServiceKey: cfg.APIKey, Analysts: cfg.AnalystKeys, Operators: cfg.OperatorKeys, Sessions: authService}
+	transport.RegisterAccountRoutes(mux, transport.NewAccountHandler(account.NewService(storage.NewAccountStore(pool))), access)
 	rulesetStore := storage.NewRulesetStore(pool)
 	rulesetService := ruleset.NewService(rulesetStore)
-	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), access)
 	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
-	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
-	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), access)
+	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
+	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), access)
 	evaluation, err := openEvaluationPool(cfg)
 	if err != nil {
 		fatal("open the evaluation database", err)
@@ -58,9 +64,9 @@ func main() {
 	if evaluation != nil {
 		defer evaluation.Close()
 	}
-	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), cfg.APIKey)
+	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), access)
 	manager := newSimulationManager(cfg, pool, evaluation)
-	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, access)
 
 	server := platform.NewServer(":"+cfg.Port, transport.Middleware(mux))
 	server.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelWarn)

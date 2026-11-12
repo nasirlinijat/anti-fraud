@@ -41,6 +41,21 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 	return m.recorder
 }
 
+// Assignments mocks base method.
+func (m *MockStore) Assignments(ctx context.Context) ([]models.ReviewerWork, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Assignments", ctx)
+	ret0, _ := ret[0].([]models.ReviewerWork)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Assignments indicates an expected call of Assignments.
+func (mr *MockStoreMockRecorder) Assignments(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Assignments", reflect.TypeOf((*MockStore)(nil).Assignments), ctx)
+}
+
 // Case mocks base method.
 func (m *MockStore) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	m.ctrl.T.Helper()
@@ -56,32 +71,62 @@ func (mr *MockStoreMockRecorder) Case(ctx, purchaseID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Case", reflect.TypeOf((*MockStore)(nil).Case), ctx, purchaseID)
 }
 
-// Queue mocks base method.
-func (m *MockStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor) ([]models.QueueItem, error) {
+// Claim mocks base method.
+func (m *MockStore) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Queue", ctx, limit, order, after)
+	ret := m.ctrl.Call(m, "Claim", ctx, purchaseID, username)
+	ret0, _ := ret[0].(models.Claim)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Claim indicates an expected call of Claim.
+func (mr *MockStoreMockRecorder) Claim(ctx, purchaseID, username any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockStore)(nil).Claim), ctx, purchaseID, username)
+}
+
+// Queue mocks base method.
+func (m *MockStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Queue", ctx, limit, order, after, claimedBy)
 	ret0, _ := ret[0].([]models.QueueItem)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Queue indicates an expected call of Queue.
-func (mr *MockStoreMockRecorder) Queue(ctx, limit, order, after any) *gomock.Call {
+func (mr *MockStoreMockRecorder) Queue(ctx, limit, order, after, claimedBy any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockStore)(nil).Queue), ctx, limit, order, after)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockStore)(nil).Queue), ctx, limit, order, after, claimedBy)
+}
+
+// ReleaseClaim mocks base method.
+func (m *MockStore) ReleaseClaim(ctx context.Context, purchaseID int64) (models.ReleaseStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseClaim", ctx, purchaseID)
+	ret0, _ := ret[0].(models.ReleaseStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReleaseClaim indicates an expected call of ReleaseClaim.
+func (mr *MockStoreMockRecorder) ReleaseClaim(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseClaim", reflect.TypeOf((*MockStore)(nil).ReleaseClaim), ctx, purchaseID)
 }
 
 // Resolve mocks base method.
-func (m *MockStore) Resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
+func (m *MockStore) Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Resolve", ctx, purchaseID, decision, analystID, blockDevice)
+	ret := m.ctrl.Call(m, "Resolve", ctx, d)
 	ret0, _ := ret[0].(models.Resolution)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Resolve indicates an expected call of Resolve.
-func (mr *MockStoreMockRecorder) Resolve(ctx, purchaseID, decision, analystID, blockDevice any) *gomock.Call {
+func (mr *MockStoreMockRecorder) Resolve(ctx, d any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resolve", reflect.TypeOf((*MockStore)(nil).Resolve), ctx, purchaseID, decision, analystID, blockDevice)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resolve", reflect.TypeOf((*MockStore)(nil).Resolve), ctx, d)
 }

@@ -40,14 +40,14 @@ func NewSimulationHandler(service SimulationService) *SimulationHandler {
 // RegisterSimulationRoutes registers the simulation routes: starting and
 // stopping a run need an operator key, reading needs the service key. It
 // registers nothing when simulations are disabled.
-func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled bool, key string, operators platform.OperatorKeys) {
+func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled bool, access platform.Access) {
 	if !enabled {
 		return
 	}
-	mux.Handle("POST /simulations", bounded(platform.RequireOperator(operators, h.start)))
-	mux.Handle("POST /simulations/{id}/stop", bounded(platform.RequireOperator(operators, h.stop)))
-	mux.Handle("GET /simulations/{id}", bounded(platform.RequireAPIKey(key, http.HandlerFunc(h.read))))
-	mux.Handle("GET /simulations", bounded(platform.RequireAPIKey(key, http.HandlerFunc(h.list))))
+	mux.Handle("POST /simulations", bounded(access.ConfigWrite(h.start)))
+	mux.Handle("POST /simulations/{id}/stop", bounded(access.ConfigWrite(h.stop)))
+	mux.Handle("GET /simulations/{id}", bounded(access.ConfigRead(http.HandlerFunc(h.read))))
+	mux.Handle("GET /simulations", bounded(access.ConfigRead(http.HandlerFunc(h.list))))
 }
 
 // bounded gives every simulation request five seconds to finish.

@@ -21,11 +21,12 @@ type QualitySource interface {
 
 type qualityHandler struct{ source QualitySource }
 
-// RegisterQualityRoutes protects optional quality reads with the service key.
-func RegisterQualityRoutes(mux *http.ServeMux, source QualitySource, apiKey string) {
+// RegisterQualityRoutes protects optional quality reads with the service key
+// or an admin session.
+func RegisterQualityRoutes(mux *http.ServeMux, source QualitySource, access platform.Access) {
 	h := qualityHandler{source: source}
-	mux.Handle("GET /stats/quality", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.quality)))
-	mux.Handle("GET /stats/quality/runs", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.runs)))
+	mux.Handle("GET /stats/quality", access.ConfigRead(http.HandlerFunc(h.quality)))
+	mux.Handle("GET /stats/quality/runs", access.ConfigRead(http.HandlerFunc(h.runs)))
 }
 
 func (h qualityHandler) quality(w http.ResponseWriter, r *http.Request) {

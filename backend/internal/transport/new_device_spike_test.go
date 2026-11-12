@@ -145,8 +145,8 @@ func newSpikeServer(t *testing.T) spikeServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	RegisterRulesetRoutes(srv.mux, NewRulesetHandler(ruleset.NewService(srv.rules)), testKey, testOperators(t))
-	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), keys)
+	RegisterRulesetRoutes(srv.mux, NewRulesetHandler(ruleset.NewService(srv.rules)), platform.Access{ServiceKey: testKey, Operators: testOperators(t)})
+	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: keys})
 	registerScore(srv.mux, newHandler(srv.rules, storage.NewBlocklistStore(tx), srv.purchases), testKey)
 	return srv
 }

@@ -273,6 +273,41 @@ REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"
 
 Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
+### Console accounts
+
+Reviewers and admins sign in with their own account. Create the first admin from `backend` after the database is migrated, with `DATABASE_URL` from `.env`:
+
+```bash
+go run ./cmd/create-account -username alice
+```
+
+The command asks for the password twice without showing it. A password is 12 to 72 bytes long. In a setup script, pipe the password on standard input instead, so that it never appears in the shell history or process list:
+
+```bash
+printf '%s\n' "$ADMIN_PASSWORD" | go run ./cmd/create-account -username alice
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-username` | none | 3 to 64 letters, digits, dots, hyphens or underscores, starting with a letter or digit. Saved in lowercase |
+| `-role` | `admin` | `admin` or `reviewer` |
+| `-database` | `DATABASE_URL` | Database connection |
+
+The command exits with an error when the username is already taken. After the first admin exists, admins manage accounts through the API: `POST /admin/accounts` creates a reviewer or admin, `GET /admin/accounts` lists them, and `POST /admin/accounts/{username}/disable` disables one and signs it out at once. An admin cannot disable their own account, so the last admin cannot lock everyone out.
+
+Sign in with `POST /auth/login` and send the returned token as `Authorization: Bearer <token>`. A session lasts 12 hours, and `POST /auth/logout` ends it. After 5 sign-in attempts for a username within 15 minutes, further attempts are rejected until the 15 minutes have passed. The attempt count is kept in memory, so a restart clears it and each backend process counts on its own.
+
+| Role | Can use |
+|---|---|
+| `reviewer` | The review endpoints |
+| `admin` | The review endpoints and every statistics, quality, ruleset, blocklist and simulation endpoint, including changes |
+
+A reviewer or admin claims a purchase with `POST /reviews/{purchase_id}/claim` before deciding it, so that two people never work on the same purchase. Only the account holding the claim can decide it. `GET /reviews?claimed=mine` lists your own claims, and every queue item shows who has claimed it. Analyst keys cannot claim and decide without a claim, as before.
+
+Admins see what each reviewer is working on with `GET /admin/assignments`: every active reviewer, and any other account still holding a claim, with its open claims and the number of purchases it decided. An admin returns a stuck purchase to the shared queue with `DELETE /reviews/{purchase_id}/claim`, for example when a reviewer is away. Both endpoints need an admin session; no key works for them.
+
+Other endpoints answer a valid session of the wrong role with 403. Review decisions and configuration changes save the username. `POST /score` accepts only the service key. A request with an `Authorization` header is checked as a session and its `X-API-Key` is ignored; requests without one still use the keys described above, until the console signs in.
+
 ## Security
 
 Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.

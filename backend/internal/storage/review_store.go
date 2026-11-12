@@ -23,35 +23,51 @@ func NewReviewStore(conn Conn) *ReviewStore {
 }
 
 // resolveReview saves a decision for a purchase still awaiting review and
-// reports what happened: saved, not_found, already_resolved, or not_review.
+// reports what happened: saved, not_found, not_review, already_resolved, or
+// not_claimed. When $4 is set, the decision is saved only while that username
+// holds the claim on the purchase.
+//
+// A review purchase that was not saved although its claim is held lost the
+// insert to a decision committed meanwhile, which the statement snapshot
+// cannot see, so it is reported as already_resolved.
 const resolveReview = `
 WITH candidate AS (
     SELECT d.purchase_id, d.outcome
     FROM decisions d
     WHERE d.purchase_id = $1
+), claim AS (
+    SELECT $4::text IS NULL OR EXISTS (
+        SELECT 1
+        FROM review_claims c
+        JOIN accounts a ON a.id = c.account_id
+        WHERE c.purchase_id = $1 AND a.username = $4::text
+    ) AS held
 ), saved AS (
     INSERT INTO review_resolutions (purchase_id, decision, analyst_id)
     SELECT candidate.purchase_id, $2::text, $3::text
-    FROM candidate
-    WHERE candidate.outcome = 'review'
+    FROM candidate, claim
+    WHERE candidate.outcome = 'review' AND claim.held
     ON CONFLICT (purchase_id) DO NOTHING
     RETURNING resolved_at
 )
 SELECT CASE
     WHEN EXISTS (SELECT 1 FROM saved) THEN 'saved'
     WHEN NOT EXISTS (SELECT 1 FROM candidate) THEN 'not_found'
-    WHEN EXISTS (SELECT 1 FROM candidate WHERE outcome = 'review') THEN 'already_resolved'
-    ELSE 'not_review'
+    WHEN NOT EXISTS (SELECT 1 FROM candidate WHERE outcome = 'review') THEN 'not_review'
+    WHEN (SELECT held FROM claim) THEN 'already_resolved'
+    WHEN EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = $1) THEN 'already_resolved'
+    ELSE 'not_claimed'
 END::text AS status,
 (SELECT resolved_at FROM saved)::timestamptz AS resolved_at`
 
 const getPurchaseDeviceID = `SELECT device_id FROM purchases WHERE id = $1`
 
 // Resolve saves the decision. When the decision is a saved rejection and
-// blockDevice is set, it also blocklists the purchase's device in the same
+// BlockDevice is set, it also blocklists the purchase's device in the same
 // transaction. Any other outcome adds no blocklist entry, and a device that is
 // already blocked is left as it is.
-func (s *ReviewStore) Resolve(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
+func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
+	purchaseID, decision, analystID := d.PurchaseID, d.Decision, d.AnalystID
 	tx, err := s.conn.Begin(ctx)
 	if err != nil {
 		return models.Resolution{}, fmt.Errorf("begin review decision: %w", err)
@@ -60,14 +76,14 @@ func (s *ReviewStore) Resolve(ctx context.Context, purchaseID int64, decision, a
 
 	var result models.Resolution
 	var resolvedAt *time.Time
-	if err := tx.QueryRow(ctx, resolveReview, purchaseID, decision, analystID).Scan(&result.Status, &resolvedAt); err != nil {
+	if err := tx.QueryRow(ctx, resolveReview, purchaseID, decision, analystID, d.ClaimedBy).Scan(&result.Status, &resolvedAt); err != nil {
 		return models.Resolution{}, fmt.Errorf("resolve review: %w", err)
 	}
 	if resolvedAt != nil {
 		result.ResolvedAt = *resolvedAt
 	}
 
-	if result.Status == models.ResolutionSaved && decision == "reject" && blockDevice {
+	if result.Status == models.ResolutionSaved && decision == "reject" && d.BlockDevice {
 		var device *string
 		if err := tx.QueryRow(ctx, getPurchaseDeviceID, purchaseID).Scan(&device); err != nil {
 			return models.Resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
@@ -91,19 +107,26 @@ func (s *ReviewStore) Resolve(ctx context.Context, purchaseID int64, decision, a
 	return result, nil
 }
 
-// queueItemColumns are the columns scanQueueItem reads, in order.
+// queueItemColumns are the columns scanQueueItem reads, in order. They need
+// the queueItemTables.
 const queueItemColumns = `d.purchase_id, p.transaction_id, p.event_time, p.amount_minor, p.player_id, p.device_id,
-       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at`
+       d.rule_score, d.model_score, d.model_version, d.fired_rules, d.decided_at, ca.username, rc.claimed_at`
+
+const queueItemTables = `decisions d
+JOIN purchases p ON p.id = d.purchase_id
+LEFT JOIN review_claims rc ON rc.purchase_id = d.purchase_id
+LEFT JOIN accounts ca ON ca.id = rc.account_id`
 
 // listQueueByRuleScore pages through open reviews, highest rule score first.
 // $1 to $3 are the cursor of the last item already returned, or NULL for the
-// first page.
+// first page. $5 limits the page to purchases claimed by that username, or is
+// NULL for all of them.
 const listQueueByRuleScore = `
 SELECT ` + queueItemColumns + `
-FROM decisions d
-JOIN purchases p ON p.id = d.purchase_id
+FROM ` + queueItemTables + `
 WHERE d.outcome = 'review'
   AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND ($5::text IS NULL OR ca.username = $5::text)
   AND (
       $1::integer IS NULL
       OR (-d.rule_score, d.decided_at, d.purchase_id) > (
@@ -114,13 +137,14 @@ ORDER BY -d.rule_score, d.decided_at, d.purchase_id
 LIMIT $4`
 
 // listQueueByModelScore pages through open reviews, highest model score first
-// and purchases without a model score last.
+// and purchases without a model score last. The parameters are those of
+// listQueueByRuleScore.
 const listQueueByModelScore = `
 SELECT ` + queueItemColumns + `
-FROM decisions d
-JOIN purchases p ON p.id = d.purchase_id
+FROM ` + queueItemTables + `
 WHERE d.outcome = 'review'
   AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
+  AND ($5::text IS NULL OR ca.username = $5::text)
   AND (
       $1::double precision IS NULL
       OR (COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id) > (
@@ -131,8 +155,9 @@ ORDER BY COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase
 LIMIT $4`
 
 // Queue returns up to limit open reviews in the given order, after the cursor
-// when it is set.
-func (s *ReviewStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor) ([]models.QueueItem, error) {
+// when it is set. When claimedBy is set, it returns only the purchases claimed
+// by that username.
+func (s *ReviewStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error) {
 	var score any
 	var decidedAt *time.Time
 	var purchaseID *int64
@@ -147,7 +172,7 @@ func (s *ReviewStore) Queue(ctx context.Context, limit int, order models.QueueOr
 	if order == models.QueueByRuleScore {
 		query = listQueueByRuleScore
 	}
-	rows, err := s.conn.Query(ctx, query, score, decidedAt, purchaseID, int32(limit))
+	rows, err := s.conn.Query(ctx, query, score, decidedAt, purchaseID, int32(limit), claimedBy)
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}
@@ -167,7 +192,7 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 	var firedRules []byte
 	dest := append([]any{
 		&item.PurchaseID, &item.TransactionID, &item.EventTime, &item.AmountMinor, &item.PlayerID, &item.DeviceID,
-		&item.RuleScore, &item.ModelScore, &item.ModelVersion, &firedRules, &item.DecidedAt,
+		&item.RuleScore, &item.ModelScore, &item.ModelVersion, &firedRules, &item.DecidedAt, &item.ClaimedBy, &item.ClaimedAt,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return models.QueueItem{}, err
@@ -183,14 +208,17 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 	}
 	item.EventTime = item.EventTime.UTC()
 	item.DecidedAt = item.DecidedAt.UTC()
+	if item.ClaimedAt != nil {
+		claimedAt := item.ClaimedAt.UTC()
+		item.ClaimedAt = &claimedAt
+	}
 	return item, nil
 }
 
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
 SELECT ` + queueItemColumns + `, d.ruleset_version
-FROM decisions d
-JOIN purchases p ON p.id = d.purchase_id
+FROM ` + queueItemTables + `
 WHERE d.purchase_id = $1
   AND d.outcome = 'review'
   AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
@@ -256,4 +284,73 @@ func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseIt
 		c.DeviceActivity = &a
 	}
 	return c, nil
+}
+
+// claimReview gives an open review to the username unless another account
+// holds it, and reports what happened: claimed, not_found, not_review,
+// already_resolved, or held. For a new claim it also returns the claim time.
+//
+// The statement snapshot cannot see a claim committed by another request
+// meanwhile, so the holder of an existing claim is read by a new statement.
+const claimReview = `
+WITH candidate AS (
+    SELECT d.purchase_id, d.outcome,
+           EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id) AS resolved
+    FROM decisions d
+    WHERE d.purchase_id = $1
+), claimant AS (
+    SELECT id FROM accounts WHERE username = $2::text AND disabled_at IS NULL
+), saved AS (
+    INSERT INTO review_claims (purchase_id, account_id)
+    SELECT candidate.purchase_id, claimant.id
+    FROM candidate, claimant
+    WHERE candidate.outcome = 'review' AND NOT candidate.resolved
+    ON CONFLICT (purchase_id) DO NOTHING
+    RETURNING claimed_at
+)
+SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM saved) THEN 'claimed'
+    WHEN NOT EXISTS (SELECT 1 FROM candidate) THEN 'not_found'
+    WHEN NOT EXISTS (SELECT 1 FROM candidate WHERE outcome = 'review') THEN 'not_review'
+    WHEN EXISTS (SELECT 1 FROM candidate WHERE resolved) THEN 'already_resolved'
+    ELSE 'held'
+END::text AS status,
+(SELECT claimed_at FROM saved)::timestamptz AS claimed_at`
+
+const getReviewClaim = `
+SELECT a.username, c.claimed_at
+FROM review_claims c
+JOIN accounts a ON a.id = c.account_id
+WHERE c.purchase_id = $1`
+
+// Claim gives the purchase under review to the username, unless another
+// account already holds it. Claiming a purchase the username already holds
+// reports ClaimAlreadyYours with the original claim time.
+func (s *ReviewStore) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
+	var status string
+	var claimedAt *time.Time
+	if err := s.conn.QueryRow(ctx, claimReview, purchaseID, username).Scan(&status, &claimedAt); err != nil {
+		return models.Claim{}, fmt.Errorf("claim review %d: %w", purchaseID, err)
+	}
+	if claimedAt != nil {
+		return models.Claim{Status: models.ClaimSaved, ClaimedBy: username, ClaimedAt: claimedAt.UTC()}, nil
+	}
+	if status != "held" {
+		return models.Claim{Status: models.ClaimStatus(status)}, nil
+	}
+	return s.heldClaim(ctx, purchaseID, username)
+}
+
+// heldClaim reads the claim that stopped a new one.
+func (s *ReviewStore) heldClaim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
+	claim := models.Claim{Status: models.ClaimHeldByOther}
+	err := s.conn.QueryRow(ctx, getReviewClaim, purchaseID).Scan(&claim.ClaimedBy, &claim.ClaimedAt)
+	if err != nil {
+		return models.Claim{}, fmt.Errorf("get claim of review %d: %w", purchaseID, err)
+	}
+	if claim.ClaimedBy == username {
+		claim.Status = models.ClaimAlreadyYours
+	}
+	claim.ClaimedAt = claim.ClaimedAt.UTC()
+	return claim, nil
 }

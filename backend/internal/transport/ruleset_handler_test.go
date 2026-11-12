@@ -30,7 +30,7 @@ func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptes
 
 func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/rulesets"},
 		{"GET", "/rulesets/active"},
@@ -165,7 +165,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	ctx := context.Background()
 	isolated := isolatedRulesetPool(t)
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolated))), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolated))), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	const requests = 4
 	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
 		t.Fatalf("service key publishing status = %d, want 401", w.Code)
@@ -223,7 +223,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 
 func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	for _, tc := range []struct {
 		name  string
 		rules string
@@ -248,7 +248,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 
 func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	for _, tc := range []struct {
 		name, rule string
 		fields     []string
@@ -278,7 +278,7 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 
 func TestPublishValidatesModelSettings(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), "test-key", testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
 	for _, tc := range []struct {
 		model string
 		field string

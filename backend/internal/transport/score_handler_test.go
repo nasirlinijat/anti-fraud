@@ -766,7 +766,7 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	rulesetStore := storage.NewRulesetStore(tx)
 	purchaseStore := &deviceHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(rulesetStore)), testKey, testOperators(t))
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(rulesetStore)), platform.Access{ServiceKey: testKey, Operators: testOperators(t)})
 	registerScore(mux, newHandler(rulesetStore, storage.NewBlocklistStore(tx), purchaseStore), testKey)
 
 	originalRuleset, err := rulesetStore.Active(ctx)
