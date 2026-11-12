@@ -198,7 +198,7 @@ With `DD_API_KEY` set, `deploy/deploy.sh` uses `deploy/compose.datadog.yml` and 
 bash ~/anti-fraud/app/deploy/datadog/setup.sh
 ```
 
-Running it again updates the dashboard and monitors with the same names instead of creating copies. Add a notification channel, for example `@your-email`, to the monitor messages in Datadog.
+Running it again updates the dashboard and monitors with the same names instead of creating copies. The slow scoring and gateway error monitors resolve when their metric stops reporting, because no traffic and no 5xx responses both send no data. Add a notification channel, for example `@your-email`, to the monitor messages in Datadog.
 
 ### Turn it off
 

@@ -20,7 +20,7 @@
     "tags": ["project:anti-fraud"],
     "options": {
       "thresholds": { "critical": 200, "warning": 100 },
-      "notify_no_data": false
+      "on_missing_data": "resolve"
     }
   },
   {
@@ -31,7 +31,7 @@
     "tags": ["project:anti-fraud"],
     "options": {
       "thresholds": { "critical": 5, "warning": 1 },
-      "notify_no_data": false
+      "on_missing_data": "resolve"
     }
   },
   {
