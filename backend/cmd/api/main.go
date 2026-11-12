@@ -15,6 +15,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/accountevent"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
@@ -57,9 +58,12 @@ func main() {
 	if refresher, ok := blocklistStorage.(storage.BlocklistRefresher); ok {
 		reviewStore.UseBlocklistCache(refresher)
 	}
-	scoreService := scoresvc.NewService(rulesetStore, blocklistStorage, storage.NewPurchaseStore(pool))
+	accountEventStore := storage.NewAccountEventStore(pool)
+	scoreService := scoresvc.NewService(rulesetStore, blocklistStorage, storage.NewPurchaseStore(pool)).UseAccountEvents(accountEventStore)
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
+	transport.RegisterAccountEventRoutes(mux,
+		transport.NewAccountEventHandler(accountevent.NewService(accountEventStore)).UseTimeout(cfg.ScoreLimits.Timeout), cfg.APIKey)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), cfg.ModelPath != ""), access)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStorage)), access)

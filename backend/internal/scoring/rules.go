@@ -20,6 +20,12 @@ const (
 	RuleAVSMismatch     RuleName = "avs_mismatch"
 	RuleThreeDSFailed   RuleName = "three_ds_failed"
 
+	// These rules read the player's account events. They exist only in the
+	// rulesets that an operator publishes with them.
+	RuleRecentPasswordReset RuleName = "recent_password_reset"
+	RuleNewDeviceLogin      RuleName = "new_device_login"
+	RuleNewCountryLogin     RuleName = "new_country_login"
+
 	// RuleBlocklist names the entry of a purchase that matched the blocklist.
 	// It is not a configurable rule, so Known does not report it.
 	RuleBlocklist RuleName = "blocklist"
@@ -41,6 +47,9 @@ var rules = []struct {
 	{RuleCVVMismatch, cvvMismatch, cvvMismatchMessage},
 	{RuleAVSMismatch, avsMismatch, avsMismatchMessage},
 	{RuleThreeDSFailed, threeDSFailed, threeDSFailedMessage},
+	{RuleRecentPasswordReset, recentPasswordReset, recentPasswordResetMessage},
+	{RuleNewDeviceLogin, newDeviceLogin, newDeviceLoginMessage},
+	{RuleNewCountryLogin, newCountryLogin, newCountryLoginMessage},
 }
 
 // Known reports whether the scoring core implements a rule with this name.

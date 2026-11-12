@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formatTimestamp, formatUsdMinor } from '../src/displayFormat.ts'
+import { accountEventLabels, formatTimeBefore, formatTimestamp, formatUsdMinor } from '../src/displayFormat.ts'
 
 test('USD formatting preserves cents for small values and large totals', () => {
   assert.equal(formatUsdMinor('0'), '$0.00')
@@ -36,4 +36,25 @@ test('relative timestamps switch units at whole minute, hour and day boundaries'
   assert.equal(at(-86_400_000), '1 day ago')
   assert.equal(at(59_999), 'just now')
   assert.equal(at(120_000), 'in 2 min.')
+})
+
+test('time before a purchase switches units at an hour and at two days', () => {
+  const purchase = '2026-11-10T12:00:00Z'
+  const before = (offset) => formatTimeBefore(new Date(Date.parse(purchase) - offset).toISOString(), purchase)
+  assert.equal(before(0), '0 minutes')
+  assert.equal(before(60_000), '1 minute')
+  assert.equal(before(3_599_999), '59 minutes')
+  assert.equal(before(3_600_000), '1 hour')
+  assert.equal(before(47 * 3_600_000 + 3_599_999), '47 hours')
+  assert.equal(before(48 * 3_600_000), '2 days')
+})
+
+test('time before a purchase is unavailable for a later or invalid time', () => {
+  assert.equal(formatTimeBefore('2026-11-10T12:01:00Z', '2026-11-10T12:00:00Z'), 'Unavailable')
+  assert.equal(formatTimeBefore('invalid', '2026-11-10T12:00:00Z'), 'Unavailable')
+})
+
+test('account event types have readable labels', () => {
+  assert.equal(accountEventLabels.login, 'Login')
+  assert.equal(accountEventLabels.password_reset, 'Password reset')
 })

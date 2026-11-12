@@ -189,6 +189,17 @@ func (s *Scorer) ScorePurchase(ctx context.Context, p simulator.Purchase) (simul
 	}
 	return result, nil
 }
+
+// SendAccountEvent forwards an account event to the client. Account events
+// carry no labels, so nothing is recorded for them. A client that cannot send
+// account events skips them.
+func (s *Scorer) SendAccountEvent(ctx context.Context, e simulator.AccountEvent) error {
+	accounts, ok := s.Client.(simulator.AccountEventSender)
+	if !ok {
+		return nil
+	}
+	return accounts.SendAccountEvent(ctx, e)
+}
 func FromPurchase(run string, p simulator.Purchase) Label {
 	scenario := string(p.Pattern)
 	return Label{TransactionID: strings.TrimSpace(p.Request.TransactionID), RunID: run, Source: "simulator", Scenario: &scenario, Fraud: p.Pattern.Fraud(), RequestJSON: requestSnapshot(p.Request)}

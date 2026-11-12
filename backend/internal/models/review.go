@@ -43,6 +43,8 @@ type CaseItem struct {
 	CVVResult     *scoring.CVVResult
 	AVSResult     *scoring.AVSResult
 	ThreeDSResult *scoring.ThreeDSResult
+	// AccountEvents lists the player's recent account events before this purchase, newest first.
+	AccountEvents []AccountEvent
 }
 
 // PlayerPurchase is an earlier purchase by the same player.

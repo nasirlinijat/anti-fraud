@@ -213,6 +213,20 @@ export type CvvResult = 'match' | 'mismatch' | 'not_checked'
 export type AvsResult = 'match' | 'partial' | 'mismatch' | 'not_checked'
 export type ThreeDsResult = 'authenticated' | 'attempted' | 'failed' | 'not_enrolled'
 
+export type AccountEventType = 'login' | 'password_reset'
+
+export interface AccountEvent {
+  event_id: string
+  event_type: AccountEventType
+  event_time: string
+  device_id: string | null
+  ip_country: string | null
+  received_at: string
+  // True when the event was recorded after the purchase was decided, so the
+  // rules could not have seen it.
+  recorded_after_decision: boolean
+}
+
 export interface ReviewCase extends Review {
   ruleset_version: number
   player_purchases: PlayerPurchase[]
@@ -220,6 +234,7 @@ export interface ReviewCase extends Review {
   cvv_result: CvvResult | null
   avs_result: AvsResult | null
   three_ds_result: ThreeDsResult | null
+  account_events: AccountEvent[]
 }
 
 export interface QueuePage {

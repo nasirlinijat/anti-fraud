@@ -12,7 +12,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
-//go:generate mockgen -destination=mocks/mock_stores.go -package=mocks . Rulesets,Blocklist,Purchases,Model
+//go:generate mockgen -destination=mocks/mock_stores.go -package=mocks . Rulesets,Blocklist,Purchases,AccountEvents,Model
 
 // Rulesets provides the active ruleset.
 type Rulesets interface {
@@ -35,6 +35,12 @@ type Purchases interface {
 	Save(ctx context.Context, p models.Purchase, d models.Decision) (int64, error)
 }
 
+// AccountEvents reads a player's account history from the account events
+// after since and before the purchase time before.
+type AccountEvents interface {
+	History(ctx context.Context, playerID string, since, before time.Time) (scoring.AccountHistory, error)
+}
+
 // Model scores a feature vector from 0 (legitimate) to 1 (fraud).
 type Model interface {
 	Predict(x []float64) (float64, error)
@@ -53,7 +59,9 @@ type Service struct {
 	rulesets  Rulesets
 	blocklist Blocklist
 	purchases Purchases
-	model     Model
+	// accountEvents is nil until UseAccountEvents is called.
+	accountEvents AccountEvents
+	model         Model
 	// modelFeatures is how many of the first features in features.Names the
 	// model takes.
 	modelFeatures int
@@ -62,6 +70,13 @@ type Service struct {
 
 func NewService(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Service {
 	return &Service{rulesets: rulesets, blocklist: blocklist, purchases: purchases}
+}
+
+// UseAccountEvents gives the rules that read account events their history.
+// Without it those rules never fire.
+func (s *Service) UseAccountEvents(a AccountEvents) *Service {
+	s.accountEvents = a
+	return s
 }
 
 // UseModel makes the service score purchases with the model and apply its
@@ -244,7 +259,25 @@ func (s *Service) ruleInput(ctx context.Context, p models.Purchase, rs scoring.R
 			return scoring.Input{}, err
 		}
 	}
+	if in.AccountHistory, err = s.accountHistory(ctx, p, rs); err != nil {
+		return scoring.Input{}, err
+	}
 	return in, nil
+}
+
+// accountHistory reads the player's account events for the enabled rules
+// that need them. It returns nil when no enabled rule does. Account events
+// feed only the rules, never the model inputs.
+func (s *Service) accountHistory(ctx context.Context, p models.Purchase, rs scoring.Ruleset) (*scoring.AccountHistory, error) {
+	lookback := scoring.AccountEventLookback(rs)
+	if lookback == 0 || s.accountEvents == nil {
+		return nil, nil
+	}
+	h, err := s.accountEvents.History(ctx, p.PlayerID, p.EventTime.Add(-lookback), p.EventTime)
+	if err != nil {
+		return nil, err
+	}
+	return &h, nil
 }
 
 // modelScore returns the score the policy applies to, and the score saved as

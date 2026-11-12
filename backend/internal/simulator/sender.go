@@ -37,6 +37,12 @@ type PurchaseScorer interface {
 	ScorePurchase(context.Context, Purchase) (Result, error)
 }
 
+// AccountEventSender sends one account event. A scorer that also implements
+// it receives each purchase's account events before the purchase.
+type AccountEventSender interface {
+	SendAccountEvent(ctx context.Context, e AccountEvent) error
+}
+
 // FatalError stops dispatch when a persistence prerequisite fails.
 type FatalError struct{ Err error }
 
@@ -61,13 +67,44 @@ type Client struct {
 // Score sends req and returns the decision. A response other than 200 is an
 // error that includes the response body.
 func (c *Client) Score(ctx context.Context, req Request) (Result, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return Result{}, fmt.Errorf("encode request: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+"/score", bytes.NewReader(body))
+	status, data, err := c.post(ctx, "/score", req)
 	if err != nil {
 		return Result{}, err
+	}
+	if status != http.StatusOK {
+		return Result{}, &HTTPError{Status: status, Message: fmt.Sprintf("score %s: status %d: %s", req.TransactionID, status, strings.TrimSpace(string(data)))}
+	}
+	var res Result
+	if err := json.Unmarshal(data, &res); err != nil {
+		return Result{}, fmt.Errorf("decode response: %w", err)
+	}
+	return res, nil
+}
+
+// SendAccountEvent sends e to POST /account-events. A response other than 201
+// for a new event or 200 for a matching retry is an error that includes the
+// response body.
+func (c *Client) SendAccountEvent(ctx context.Context, e AccountEvent) error {
+	status, data, err := c.post(ctx, "/account-events", e)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return &HTTPError{Status: status, Message: fmt.Sprintf("account event %s: status %d: %s", e.EventID, status, strings.TrimSpace(string(data)))}
+	}
+	return nil
+}
+
+// post sends payload as JSON with the API key and returns the response status
+// and body.
+func (c *Client) post(ctx context.Context, path string, payload any) (int, []byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, nil, fmt.Errorf("encode request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-API-Key", c.APIKey)
@@ -78,22 +115,15 @@ func (c *Client) Score(ctx context.Context, req Request) (Result, error) {
 	}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return Result{}, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Result{}, fmt.Errorf("read response: %w", err)
+		return 0, nil, fmt.Errorf("read response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return Result{}, &HTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("score %s: status %d: %s", req.TransactionID, resp.StatusCode, strings.TrimSpace(string(data)))}
-	}
-	var res Result
-	if err := json.Unmarshal(data, &res); err != nil {
-		return Result{}, fmt.Errorf("decode response: %w", err)
-	}
-	return res, nil
+	return resp.StatusCode, data, nil
 }
 
 // Summary counts the outcomes of a run by pattern.
@@ -158,8 +188,9 @@ func (s sender) send(ctx context.Context, purchases iter.Seq[Purchase]) (Summary
 		}
 
 		if s.live {
-			p.Request.EventTime = time.Now().UTC()
+			p = p.movedTo(time.Now().UTC())
 		}
+		s.sendAccountEvents(ctx, p.AccountEvents)
 		res, err := s.score(ctx, p)
 		if err != nil {
 			if errors.As(err, new(FatalError)) {
@@ -185,6 +216,22 @@ func (s sender) send(ctx context.Context, purchases iter.Seq[Purchase]) (Summary
 		return sum, ctx.Err()
 	}
 	return sum, nil
+}
+
+// sendAccountEvents sends a purchase's account events when the scorer can
+// send them. A failed event is reported to onError and the purchase is still
+// scored: the account events only add signals for the rules, and the
+// purchases a run sends must not depend on them.
+func (s sender) sendAccountEvents(ctx context.Context, events []AccountEvent) {
+	accounts, ok := s.scorer.(AccountEventSender)
+	if !ok {
+		return
+	}
+	for _, e := range events {
+		if err := accounts.SendAccountEvent(ctx, e); err != nil && s.onError != nil {
+			s.onError(fmt.Errorf("send account event %s: %w", e.EventID, err))
+		}
+	}
 }
 
 // score sends one purchase. A scorer that also implements PurchaseScorer

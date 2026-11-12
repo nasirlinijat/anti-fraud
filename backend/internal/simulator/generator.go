@@ -103,6 +103,10 @@ type Request struct {
 type Purchase struct {
 	Pattern Pattern
 	Request Request
+	// AccountEvents are the player's logins and password resets that the
+	// game's account system reports before the purchase, oldest first. They
+	// are sent before the purchase and are not part of the dump.
+	AccountEvents []AccountEvent
 }
 
 // Config controls the generated traffic. The same Config always gives the same
@@ -221,6 +225,9 @@ type generator struct {
 	clock   time.Time
 	pending []Purchase
 	live    bool
+	// accountRng draws the account events only, so they never change the
+	// purchases that rng draws.
+	accountRng *rand.Rand
 }
 
 func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error) {
@@ -228,11 +235,12 @@ func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error
 		return nil, err
 	}
 	g := &generator{
-		cfg:    cfg,
-		rng:    rand.New(rand.NewPCG(cfg.Seed, 0x5eed)),
-		recent: map[string][]time.Time{},
-		clock:  cfg.Start,
-		live:   live,
+		cfg:        cfg,
+		rng:        rand.New(rand.NewPCG(cfg.Seed, 0x5eed)),
+		accountRng: rand.New(rand.NewPCG(cfg.Seed, accountEventStream)),
+		recent:     map[string][]time.Time{},
+		clock:      cfg.Start,
+		live:       live,
 	}
 	for range cfg.Players {
 		if err := ctx.Err(); err != nil {
@@ -436,7 +444,8 @@ func (g *generator) add(pattern Pattern, req Request) {
 		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
 	}
 	req = g.withVerification(pattern, req)
-	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: g.withoutMissingFields(req)})
+	req = g.withoutMissingFields(req)
+	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: req, AccountEvents: g.accountEvents(pattern, req)})
 }
 
 // fieldGroups lists the optional request fields a client leaves out together.

@@ -131,6 +131,7 @@ func TestCaseReturnsEvidenceOfReviewPurchase(t *testing.T) {
 		},
 		RulesetVersion:  1,
 		PlayerPurchases: []models.PlayerPurchase{},
+		AccountEvents:   []models.AccountEvent{},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Case() =\n%+v\nwant\n%+v", got, want)

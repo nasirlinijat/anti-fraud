@@ -8,6 +8,7 @@ import { Button } from '../ui/Button'
 import { usePolling } from '../usePolling'
 import type { TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { AccountEvents } from './AccountEvents'
 import { CaseNetwork } from './CaseNetwork'
 import { ClaimBadge, ReviewActions, type ReviewHandlers } from './ReviewActions'
 
@@ -98,6 +99,10 @@ function CaseDetails({ review, time, handlers }: { review: ReviewCase; time: Tim
       <section className="panel" aria-labelledby="case-device">
         <h3 id="case-device">Recent device activity</h3>
         <DeviceActivity review={review} time={time} />
+      </section>
+      <section className="panel" aria-labelledby="case-account">
+        <h3 id="case-account">Recent account events</h3>
+        <AccountEvents review={review} time={time} />
       </section>
       <CaseNetwork purchaseId={review.purchase_id} />
     </>

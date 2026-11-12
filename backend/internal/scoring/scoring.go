@@ -25,6 +25,8 @@ type Input struct {
 	DeviceCardsLastHour   int64 // distinct cards including the current card, or zero without device history
 	TrustedHistory        *TrustedPurchaseHistory
 	Verification          PaymentVerification
+	// AccountHistory is nil when no enabled rule reads account events.
+	AccountHistory *AccountHistory
 }
 
 // TrustedPurchaseHistory summarizes earlier allowed or approved purchases.

@@ -1,0 +1,3 @@
+DROP INDEX purchases_player_country_event_time;
+DROP INDEX purchases_player_device_event_time;
+DROP TABLE account_events;

@@ -24,6 +24,7 @@ type scoreDeps struct {
 	rulesets  *mocks.MockRulesets
 	blocklist *mocks.MockBlocklist
 	purchases *mocks.MockPurchases
+	accounts  *mocks.MockAccountEvents
 	model     *mocks.MockModel
 	service   *score.Service
 }
@@ -34,9 +35,10 @@ func newScoreDeps(t *testing.T) scoreDeps {
 		rulesets:  mocks.NewMockRulesets(ctrl),
 		blocklist: mocks.NewMockBlocklist(ctrl),
 		purchases: mocks.NewMockPurchases(ctrl),
+		accounts:  mocks.NewMockAccountEvents(ctrl),
 		model:     mocks.NewMockModel(ctrl),
 	}
-	d.service = score.NewService(d.rulesets, d.blocklist, d.purchases)
+	d.service = score.NewService(d.rulesets, d.blocklist, d.purchases).UseAccountEvents(d.accounts)
 	return d
 }
 

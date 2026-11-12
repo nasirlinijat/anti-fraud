@@ -13,6 +13,13 @@ import (
 
 const casePlayerPurchaseLimit = 5
 
+// A review case shows the player's account events from this many days before
+// the purchase, at most caseAccountEventLimit of them.
+const (
+	caseAccountEventDays  = 30
+	caseAccountEventLimit = 20
+)
+
 // BlocklistRefresher refreshes a blocklist value after its change commits.
 type BlocklistRefresher interface {
 	Refresh(ctx context.Context, t models.BlocklistType, value string)
@@ -261,6 +268,17 @@ WHERE device_id IS NOT NULL
   AND device_id = $1::text
   AND (event_time, transaction_id) <= ($2::timestamptz, $3::text)`
 
+// listCaseAccountEvents lists the player's account events in the 30 days
+// before the purchase, newest first.
+const listCaseAccountEvents = `
+SELECT event_id, player_id, event_type, event_time, device_id, ip_country, received_at
+FROM account_events
+WHERE player_id = $1
+  AND event_time > $2::timestamptz - make_interval(days => $3)
+  AND event_time < $2::timestamptz
+ORDER BY event_time DESC, event_id DESC
+LIMIT $4`
+
 // Case returns the purchase with the given ID if it is under review. It
 // returns models.ErrReviewNotFound if there is none.
 func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
@@ -274,32 +292,59 @@ func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseIt
 		return models.CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
 	}
 	c.QueueItem = item
-
-	rows, err := s.conn.Query(ctx, listCasePlayerPurchases, item.PlayerID, item.EventTime, item.TransactionID, int32(casePlayerPurchaseLimit))
-	if err != nil {
+	if c.PlayerPurchases, err = s.casePlayerPurchases(ctx, item); err != nil {
 		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
 	}
-	c.PlayerPurchases, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.PlayerPurchase, error) {
+	if c.DeviceActivity, err = s.caseDeviceActivity(ctx, item); err != nil {
+		return models.CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
+	}
+	if c.AccountEvents, err = s.caseAccountEvents(ctx, item); err != nil {
+		return models.CaseItem{}, fmt.Errorf("list account events for case %d: %w", purchaseID, err)
+	}
+	return c, nil
+}
+
+func (s *ReviewStore) casePlayerPurchases(ctx context.Context, item models.QueueItem) ([]models.PlayerPurchase, error) {
+	rows, err := s.conn.Query(ctx, listCasePlayerPurchases, item.PlayerID, item.EventTime, item.TransactionID, int32(casePlayerPurchaseLimit))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.PlayerPurchase, error) {
 		var p models.PlayerPurchase
 		err := row.Scan(&p.TransactionID, &p.EventTime, &p.AmountMinor, &p.Outcome)
 		p.EventTime = p.EventTime.UTC()
 		return p, err
 	})
-	if err != nil {
-		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
-	}
+}
 
-	if item.DeviceID != nil {
-		var a models.DeviceActivity
-		err := s.conn.QueryRow(ctx, getCaseDeviceActivity, *item.DeviceID, item.EventTime, item.TransactionID).
-			Scan(&a.Purchases, &a.DistinctCards, &a.LastSeenAt)
-		if err != nil {
-			return models.CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
-		}
-		a.LastSeenAt = a.LastSeenAt.UTC()
-		c.DeviceActivity = &a
+// caseDeviceActivity returns nil for a purchase without a device ID.
+func (s *ReviewStore) caseDeviceActivity(ctx context.Context, item models.QueueItem) (*models.DeviceActivity, error) {
+	if item.DeviceID == nil {
+		return nil, nil
 	}
-	return c, nil
+	var a models.DeviceActivity
+	err := s.conn.QueryRow(ctx, getCaseDeviceActivity, *item.DeviceID, item.EventTime, item.TransactionID).
+		Scan(&a.Purchases, &a.DistinctCards, &a.LastSeenAt)
+	if err != nil {
+		return nil, err
+	}
+	a.LastSeenAt = a.LastSeenAt.UTC()
+	return &a, nil
+}
+
+func (s *ReviewStore) caseAccountEvents(ctx context.Context, item models.QueueItem) ([]models.AccountEvent, error) {
+	rows, err := s.conn.Query(ctx, listCaseAccountEvents,
+		item.PlayerID, item.EventTime, int32(caseAccountEventDays), int32(caseAccountEventLimit))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.AccountEvent, error) {
+		var e models.AccountEvent
+		err := row.Scan(&e.EventID, &e.PlayerID, &e.EventType, &e.EventTime, &e.DeviceID, &e.IPCountry, &e.ReceivedAt)
+		e.EventTime = e.EventTime.UTC()
+		e.ReceivedAt = e.ReceivedAt.UTC()
+		return e, err
+	})
 }
 
 // claimReview gives an open review to the username unless another account
