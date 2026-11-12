@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -59,8 +59,8 @@ func bounded(next http.Handler) http.Handler {
 	})
 }
 
-func simulationFailure(w http.ResponseWriter, err error) {
-	log.Printf("simulation operation: %v", err)
+func simulationFailure(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "simulation operation", "error", err)
 	platform.WriteError(w, http.StatusServiceUnavailable, "simulation service unavailable")
 }
 
@@ -87,7 +87,7 @@ func (h *SimulationHandler) start(w http.ResponseWriter, r *http.Request, operat
 			ActiveRunID string `json:"active_run_id"`
 		}{active.Error(), active.RunID})
 	case err != nil:
-		simulationFailure(w, err)
+		simulationFailure(w, r, err)
 	case created:
 		w.Header().Set("Location", "/simulations/"+run.ID)
 		platform.WriteJSON(w, http.StatusAccepted, run)
@@ -121,7 +121,7 @@ func (h *SimulationHandler) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		simulationFailure(w, err)
+		simulationFailure(w, r, err)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, run)
@@ -143,7 +143,7 @@ func (h *SimulationHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		simulationFailure(w, err)
+		simulationFailure(w, r, err)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, struct {
@@ -160,7 +160,7 @@ func (h *SimulationHandler) stop(w http.ResponseWriter, r *http.Request, operato
 		return
 	}
 	if err != nil {
-		simulationFailure(w, err)
+		simulationFailure(w, r, err)
 		return
 	}
 	status := http.StatusOK

@@ -2,7 +2,7 @@ package platform
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -26,7 +26,7 @@ func RegisterHealthRoutes(mux *http.ServeMux, db Pinger) {
 		defer cancel()
 
 		if err := db.Ping(ctx); err != nil {
-			log.Printf("readiness check failed: %v", err)
+			slog.ErrorContext(r.Context(), "readiness check failed", "error", err)
 			writeStatus(w, http.StatusServiceUnavailable, "unavailable")
 			return
 		}
@@ -36,7 +36,6 @@ func RegisterHealthRoutes(mux *http.ServeMux, db Pinger) {
 
 func writeStatus(w http.ResponseWriter, code int, status string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	w.Write([]byte(`{"status":"` + status + `"}`))
 }

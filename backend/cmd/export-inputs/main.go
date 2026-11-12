@@ -6,7 +6,8 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,26 +20,35 @@ func main() {
 	out := flag.String("out", "model_inputs.csv", "CSV file to write")
 	flag.Parse()
 	if *databaseURL == "" {
-		log.Fatal("database URL is missing: set DATABASE_URL or pass -database")
+		fatalf("database URL is missing: set DATABASE_URL or pass -database")
 	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, *databaseURL)
 	if err != nil {
-		log.Fatalf("connect: %v", err)
+		fatalf("connect: %v", err)
 	}
 	defer pool.Close()
 
 	file, err := os.Create(*out)
 	if err != nil {
-		log.Fatalf("create %s: %v", *out, err)
+		fatalf("create %s: %v", *out, err)
 	}
 	sum, err := trainingdata.Export(ctx, pool, features.Names, file)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		log.Fatalf("export: %v", err)
+		fatalf("export: %v", err)
 	}
-	log.Printf("wrote %d decisions to %s; skipped %d with inputs for another feature list", sum.Rows, *out, sum.Skipped)
+	infof("wrote %d decisions to %s; skipped %d with inputs for another feature list", sum.Rows, *out, sum.Skipped)
+}
+
+func fatalf(format string, args ...any) {
+	slog.Error(fmt.Sprintf(format, args...))
+	os.Exit(1)
+}
+
+func infof(format string, args ...any) {
+	slog.Info(fmt.Sprintf(format, args...))
 }

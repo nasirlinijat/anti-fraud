@@ -82,7 +82,7 @@ jobs:
       - name: Integration and concurrency tests
         env:
           TEST_DATABASE_URL: ""
-        run: go test -race -tags=integration ./test/...
+        run: go test -race -p 1 -tags=integration ./test/...
 
       - name: Verify modules
         run: go mod verify

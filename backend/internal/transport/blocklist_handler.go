@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -52,7 +52,7 @@ type blocklistAddRequest struct {
 func (h *BlocklistHandler) list(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.service.List(r.Context())
 	if err != nil {
-		blocklistError(w, err)
+		blocklistError(w, r, err)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, blocklistListResponse{Entries: entries})
@@ -86,7 +86,7 @@ func (h *BlocklistHandler) add(w http.ResponseWriter, r *http.Request, operatorI
 		return
 	}
 	if err != nil {
-		blocklistError(w, err)
+		blocklistError(w, r, err)
 		return
 	}
 	platform.WriteJSON(w, http.StatusCreated, saved)
@@ -113,13 +113,13 @@ func (h *BlocklistHandler) remove(w http.ResponseWriter, r *http.Request, operat
 		return
 	}
 	if err != nil {
-		blocklistError(w, err)
+		blocklistError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func blocklistError(w http.ResponseWriter, err error) {
-	log.Printf("blocklist: %v", err)
+func blocklistError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "blocklist", "error", err)
 	platform.WriteError(w, http.StatusInternalServerError, "internal error")
 }

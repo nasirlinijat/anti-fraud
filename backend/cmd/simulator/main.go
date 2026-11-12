@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,10 +38,10 @@ func (o options) live() bool { return o.count == 0 }
 func main() {
 	o := parseFlags()
 	if o.apiKey == "" && o.dump == "" {
-		log.Fatal("API key is missing: set API_KEY or pass -api-key")
+		fatalf("API key is missing: set API_KEY or pass -api-key")
 	}
 	if o.dump == "" && o.database == "" {
-		log.Fatal("LABELS_DATABASE_URL is required for scored runs")
+		fatalf("LABELS_DATABASE_URL is required for scored runs")
 	}
 	o.cfg.Start = o.startTime()
 	o.cfg.Run = o.runName()
@@ -51,14 +51,14 @@ func main() {
 		var err error
 		purchases, err = simulator.Generate(o.cfg, o.count)
 		if err != nil {
-			log.Fatalf("generate purchases: %v", err)
+			fatalf("generate purchases: %v", err)
 		}
 	}
 	if o.dump != "" {
 		if err := writeDump(o.dump, purchases); err != nil {
-			log.Fatalf("write %s: %v", o.dump, err)
+			fatalf("write %s: %v", o.dump, err)
 		}
-		log.Printf("wrote %d purchases to %s (seed %d, run %s)", len(purchases), o.dump, o.cfg.Seed, o.cfg.Run)
+		infof("wrote %d purchases to %s (seed %d, run %s)", len(purchases), o.dump, o.cfg.Seed, o.cfg.Run)
 		return
 	}
 	if !o.send(purchases) {
@@ -95,18 +95,18 @@ func parseFlags() options {
 func (o options) startTime() time.Time {
 	switch {
 	case o.count < 0:
-		log.Fatalf("count must not be negative, got %d", o.count)
+		fatalf("count must not be negative, got %d", o.count)
 	case o.live() && o.dump != "":
-		log.Fatal("-dump needs a positive -count")
+		fatalf("-dump needs a positive -count")
 	case o.live():
 		if o.start != "" {
-			log.Fatal("-start can only be used with a positive -count")
+			fatalf("-start can only be used with a positive -count")
 		}
 		return time.Now().UTC()
 	case o.start != "":
 		t, err := time.Parse(time.RFC3339, o.start)
 		if err != nil {
-			log.Fatalf("start must be RFC 3339, for example 2026-11-09T10:00:00Z: %v", err)
+			fatalf("start must be RFC 3339, for example 2026-11-09T10:00:00Z: %v", err)
 		}
 		return t.UTC()
 	}
@@ -114,7 +114,7 @@ func (o options) startTime() time.Time {
 	// the generated traffic ends now instead of starting now.
 	start, err := simulator.StartEndingAt(o.cfg, o.count, time.Now().UTC().Truncate(time.Second))
 	if err != nil {
-		log.Fatalf("generate purchases: %v", err)
+		fatalf("generate purchases: %v", err)
 	}
 	return start
 }
@@ -143,22 +143,22 @@ func (o options) send(purchases []simulator.Purchase) bool {
 	defer pool.Close()
 	observed := &labels.Scorer{Pool: pool, Client: client, RunID: o.cfg.Run}
 	started := time.Now()
-	onError := func(err error) { log.Print(err) }
+	onError := func(err error) { slog.Warn("score request failed", "error", err) }
 	var sum simulator.Summary
 	var err error
 	if o.live() {
-		log.Printf("sending live purchases to %s (seed %d, run %s), press Ctrl+C to stop", o.url, o.cfg.Seed, o.cfg.Run)
+		infof("sending live purchases to %s (seed %d, run %s), press Ctrl+C to stop", o.url, o.cfg.Seed, o.cfg.Run)
 		sum, err = simulator.RunLive(ctx, observed, o.cfg, o.rate, onError)
 	} else {
-		log.Printf("sending %d purchases to %s (seed %d, run %s)", len(purchases), o.url, o.cfg.Seed, o.cfg.Run)
+		infof("sending %d purchases to %s (seed %d, run %s)", len(purchases), o.url, o.cfg.Seed, o.cfg.Run)
 		sum, err = simulator.Run(ctx, observed, purchases, o.rate, onError)
 	}
 	runFailed := err != nil && err != ctx.Err()
 	if runFailed {
-		log.Printf("stopped early: %v", err)
-		log.Printf("evaluation may be pending for run %q; use import-labels -run <run-id> -recover after fixing the error", o.cfg.Run)
+		infof("stopped early: %v", err)
+		infof("evaluation may be pending for run %q; use import-labels -run <run-id> -recover after fixing the error", o.cfg.Run)
 	}
-	log.Printf("sent %d, failed %d in %s", sum.Sent, sum.Failed, time.Since(started).Round(time.Millisecond))
+	infof("sent %d, failed %d in %s", sum.Sent, sum.Failed, time.Since(started).Round(time.Millisecond))
 	printSummary(sum)
 	return !runFailed && sum.Failed == 0
 }
@@ -169,18 +169,18 @@ func (o options) send(purchases []simulator.Purchase) bool {
 func (o options) openLabels(ctx context.Context) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, o.database)
 	if err != nil {
-		log.Fatal("invalid labels database configuration")
+		fatalf("invalid labels database configuration")
 	}
 	preflight, cancel := context.WithTimeout(ctx, 5*time.Second)
 	err = labels.Preflight(preflight, pool)
 	cancel()
 	if err != nil {
 		pool.Close()
-		log.Fatal(err)
+		fatalf("%v", err)
 	}
 	if _, err := labels.Recover(ctx, pool, o.cfg.Run); err != nil {
 		pool.Close()
-		log.Fatal(err)
+		fatalf("%v", err)
 	}
 	return pool
 }
@@ -205,4 +205,13 @@ func printSummary(sum simulator.Summary) {
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t\n", p, o["allow"], o["review"], o["block"])
 	}
 	w.Flush()
+}
+
+func fatalf(format string, args ...any) {
+	slog.Error(fmt.Sprintf(format, args...))
+	os.Exit(1)
+}
+
+func infof(format string, args ...any) {
+	slog.Info(fmt.Sprintf(format, args...))
 }

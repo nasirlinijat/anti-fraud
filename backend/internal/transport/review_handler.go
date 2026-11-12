@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -142,7 +142,7 @@ func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := h.service.Queue(r.Context(), order, after)
 	if err != nil {
-		log.Printf("read review queue: %v", err)
+		slog.ErrorContext(r.Context(), "read review queue", "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -171,7 +171,7 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("read review case: %v", err)
+		slog.ErrorContext(r.Context(), "read review case", "purchase_id", purchaseID, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -221,7 +221,7 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, an
 	case errors.Is(err, review.ErrNotUnderReview), errors.Is(err, review.ErrAlreadyDecided):
 		platform.WriteError(w, http.StatusConflict, err.Error())
 	case err != nil:
-		log.Printf("save review decision: %v", err)
+		slog.ErrorContext(r.Context(), "save review decision", "purchase_id", purchaseID, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 	default:
 		platform.WriteJSON(w, http.StatusCreated, decisionResponse{

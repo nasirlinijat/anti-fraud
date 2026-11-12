@@ -47,9 +47,6 @@ func TestRequireAPIKey(t *testing.T) {
 			if tt.want == http.StatusUnauthorized && rec.Header().Get("Content-Type") != "application/json" {
 				t.Errorf("Content-Type = %q, want application/json", rec.Header().Get("Content-Type"))
 			}
-			if tt.want == http.StatusUnauthorized && rec.Header().Get("X-Content-Type-Options") != "nosniff" {
-				t.Errorf("X-Content-Type-Options = %q, want nosniff", rec.Header().Get("X-Content-Type-Options"))
-			}
 		})
 	}
 }

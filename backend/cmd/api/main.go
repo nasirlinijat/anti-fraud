@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,14 +27,16 @@ import (
 )
 
 func main() {
+	logger := platform.NewLogger(os.Stdout)
+	slog.SetDefault(logger)
 	cfg, err := platform.LoadConfig()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		fatal("load config", err)
 	}
 
 	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("create database pool: %v", err)
+		fatal("create database pool", err)
 	}
 	defer pool.Close()
 
@@ -51,7 +53,7 @@ func main() {
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)
 	evaluation, err := openEvaluationPool(cfg)
 	if err != nil {
-		log.Fatal(err)
+		fatal("open the evaluation database", err)
 	}
 	if evaluation != nil {
 		defer evaluation.Close()
@@ -60,18 +62,19 @@ func main() {
 	manager := newSimulationManager(cfg, pool, evaluation)
 	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
 
-	server := platform.NewServer(":"+cfg.Port, mux)
+	server := platform.NewServer(":"+cfg.Port, transport.Middleware(mux))
+	server.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelWarn)
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := shutDownOnSignal(signalCtx, server, manager)
-	log.Printf("anti-fraud backend listening on :%s", cfg.Port)
+	slog.Info("anti-fraud backend listening", "port", cfg.Port)
 	err = server.ListenAndServe()
 	if !errors.Is(err, http.ErrServerClosed) {
 		stop()
 	}
 	<-done
 	if !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("serve: %v", err)
+		fatal("serve", err)
 	}
 }
 
@@ -80,23 +83,24 @@ func main() {
 // It exits when the model cannot be loaded or used.
 func useModel(modelPath string, service *scoresvc.Service, rulesets *ruleset.Service) {
 	if modelPath == "" {
-		log.Printf("MODEL_PATH is not set, so scoring uses rules only")
+		slog.Info("MODEL_PATH is not set, so scoring uses rules only")
 		return
 	}
 	model, err := lgbm.LoadScorer(modelPath)
 	if err != nil {
-		log.Fatalf("load fraud model: %v", err)
+		fatal("load fraud model", err)
 	}
 	policy, err := lgbm.LoadPolicy(lgbm.ReportPath(modelPath))
 	if err != nil {
-		log.Fatalf("load fraud model policy: %v", err)
+		fatal("load fraud model policy", err)
 	}
 	if err := service.UseModel(model, policy); err != nil {
-		log.Fatalf("use fraud model %s: %v", model.Version(), err)
+		fatal("use fraud model "+model.Version(), err)
 	}
 	rulesets.UseModelThresholds(policy)
-	log.Printf("fraud model %s loaded: %d trees, %d features, flag at %v, clear below %v",
-		model.Version(), model.Trees(), len(model.Features()), policy.FlagAt, policy.ClearBelow)
+	slog.Info("fraud model loaded",
+		"model_version", model.Version(), "trees", model.Trees(), "features", len(model.Features()),
+		"flag_at", policy.FlagAt, "clear_below", policy.ClearBelow)
 }
 
 // openEvaluationPool keeps reporting optional while requiring healthy private
@@ -115,7 +119,7 @@ func openEvaluationPool(cfg platform.Config) (*pgxpool.Pool, error) {
 		if cfg.SimulationEnabled {
 			return nil, errors.New("invalid labels database configuration")
 		}
-		log.Print("quality reporting is unavailable: invalid evaluation configuration")
+		slog.Warn("quality reporting is unavailable: invalid evaluation configuration")
 		return nil, nil
 	}
 	if cfg.SimulationEnabled {
@@ -137,7 +141,7 @@ func newSimulationManager(cfg platform.Config, pool, evaluation *pgxpool.Pool) *
 	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
 	manager, err := simulation.NewService(setupCtx, labels.NewSimulationStore(storage.NewSimulationStore(pool, cfg.DatabaseURL), evaluation), client)
 	if err != nil {
-		log.Fatalf("initialize simulations: %v", err)
+		fatal("initialize simulations", err)
 	}
 	return manager
 }
@@ -153,16 +157,25 @@ func shutDownOnSignal(signalCtx context.Context, server *http.Server, manager *s
 		if manager != nil {
 			drain, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			if err := manager.Close(drain); err != nil {
-				log.Printf("drain simulation: %v", err)
+				slog.Error("drain simulation", "error", err)
 			}
 			cancel()
 		}
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
-			log.Printf("shutdown: %v", err)
+			slog.Error("shutdown", "error", err)
 			_ = server.Close()
 		}
 	}()
 	return done
+}
+
+func fatal(msg string, err error) {
+	if err != nil {
+		slog.Error(msg, "error", err)
+	} else {
+		slog.Error(msg)
+	}
+	os.Exit(1)
 }

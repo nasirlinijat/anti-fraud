@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"reflect"
 	"slices"
@@ -375,6 +375,6 @@ func (s *Service) work(ctx context.Context, c models.SimulationController, run m
 	finalCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
 	if err := c.Finish(finalCtx, run.ID, status, message); err != nil {
-		log.Printf("simulation checkpoint unavailable: %v", err)
+		slog.Error("simulation checkpoint unavailable", "run_id", run.ID, "error", err)
 	}
 }
