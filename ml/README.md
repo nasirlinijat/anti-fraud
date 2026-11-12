@@ -262,6 +262,45 @@ The model catches less than one point more on its training days than on later da
 | The traffic is easy: the logistic regression baseline reaches ROC-AUC 0.989 on the test days (LightGBM 0.997) | Accepted: the results show that the pipeline learns labelled patterns, not real-world accuracy |
 | The model can clear a correct rule review | Open: it cleared none in the replay, but `clear_below` is still chosen on all purchases, not on rule-reviewed ones (AF-90) |
 
+### Traffic from other generators
+
+`lgbm-game-v5` learns the simulator, so it was also tested on traffic nobody on the project designed. Five more worlds were written by separate generators that only saw the request fields: no rules, model, code or simulator. Each was briefed as a different expert (game store analyst, card fraud investigator, game trust and safety lead, publisher disputes analyst, payment risk lead for games in Asia and Latin America), with its own fraud schemes, legitimate edge cases, field values and amounts. The data and the generators are kept under `ml/data/game/blind/` and are never committed.
+
+| World | Purchases | Days | Fraud | Role |
+|---|---|---|---|---|
+| A | 19,873 | 14, from an empty history | 6.6% | trained `lgbm-game-v7` |
+| B | 100,000 | 60 | 5.2% | trained `lgbm-game-v6` and `v7` |
+| C | 99,377 | 60 | 5.6% | trained `lgbm-game-v6` and `v7` |
+| D | 40,066 | 28 | 5.7% | exam for `v6`, then trained `v7` |
+| E | 38,713 | 35 | 5.5% | exam for `v7` and `v7-combined`, scored once |
+
+On world A, `lgbm-game-v5` had ROC-AUC 0.59. A model trained on A itself reached 0.95, so the inputs carry the signal: v5 had learned the simulator's history lengths and amounts (`secs_since_first`, the most important input, has a median of 63 days in the simulator and 4 days in A).
+
+`train_game.py` with several dumps trains on all of them, every world weighted equally, and adds history variants: the same world with the purchases before day 14, 20, 40, ... dropped, so that a short history stops meaning fraud. It chooses the inputs to mask and the regularisation by leaving one world out, and the thresholds from scores of models that did not see the world. `combine_game.py` combines a multi-world model with `lgbm-game-v5` by highest percentile.
+
+```bash
+.venv/bin/python train_game.py data/game/world1.jsonl data/game/worldB.jsonl data/game/worldC.jsonl data/game/worldA.jsonl data/game/worldD.jsonl --history-starts 0,14,20,40,60,80,100 --history-window 14 --version lgbm-game-v7
+.venv/bin/python combine_game.py data/game/world1.jsonl data/game/worldB.jsonl data/game/worldC.jsonl data/game/worldA.jsonl data/game/worldD.jsonl --history-starts 0,14,20,40,60,80,100 --history-window 14 --multi lgbm-game-v7 --single lgbm-game-v5 --review-rate 0.01 --version lgbm-game-v7-combined
+```
+
+Exam world E, each model with its own thresholds (the combined model was replayed through the score API: live scores equal Python exactly, p95 6.5 ms):
+
+| Model | ROC-AUC | PR-AUC | Fraud caught | Precision | Legitimate flagged |
+|---|---|---|---|---|---|
+| `lgbm-game-v5` | 0.66 | 0.13 | 14.7% | 13.0% | 5.7% |
+| `lgbm-game-v6` (simulator, B, C) | 0.87 | 0.52 | 30.6% | 82.9% | 0.4% |
+| `lgbm-game-v7` (simulator, A-D) | 0.88 | 0.52 | 40.2% | 57.1% | 1.8% |
+| `lgbm-game-v7-combined` | 0.83 | 0.46 | 40.8% | 46.3% | 2.7% |
+
+Simulator, second world, later days: v5 catches 80.3% at 97.0% precision, `v7-combined` 72.2% at 92.9%, `v7` 68.0% at 92.3%.
+
+- The multi-world models rank unfamiliar traffic far better than v5. They catch rings sharing devices, top-up agents, resold subscription time and card testing (74-79% in E), and about a third of account takeovers and stocked accounts.
+- Combining with v5 adds card testing but lowers the ranking on unfamiliar traffic (ROC-AUC 0.83 against 0.88 for v7 alone).
+- Disputes by the real cardholder (a child using a parent's card, serial refunders) are not separated at all (ROC-AUC 0.35-0.53). They look like normal customers when they buy; only chargebacks and review outcomes can label them.
+- Thresholds do not carry over: the combined model was set to flag 1% of legitimate purchases on the training worlds and flagged 0.5% in A, 0.6% in D and 2.7% in E. A deployment has to set `flag_at` on its own traffic, for example to a review budget after the first days.
+- The rule written before scoring E required at least 95% precision on the simulator's second world, the demo traffic. `v7-combined` reached 92.9%, so the service keeps `lgbm-game-v5` by default. Set `MODEL_PATH=models/lgbm-game-v7-combined.json` (or `lgbm-game-v7.json`) to run a multi-world model.
+- All worlds are synthetic, and several were written by generators of the same model family, which share some vocabulary (card tiers such as `STD`, `GLD`, `PLT`). Real traffic is likely to be harder.
+
 ### Earlier game models
 
 `lgbm-game-v1` was trained on days 14-84 only and was replaced (check 2). `lgbm-game-v2` is kept in `backend/models/`. It has the first 50 features and was trained on earlier traffic with 5 fraud scenarios, 6 legitimate edge cases and every field present. On that traffic its precision was 97.9% and it caught 91.9% of the fraud in the second world's later days. On the current traffic it reaches 81.8% precision and catches 65.5%, which is why it was replaced.
