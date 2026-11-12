@@ -86,6 +86,21 @@ func (mr *MockStoreMockRecorder) Claim(ctx, purchaseID, username any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockStore)(nil).Claim), ctx, purchaseID, username)
 }
 
+// Network mocks base method.
+func (m *MockStore) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Network", ctx, purchaseID)
+	ret0, _ := ret[0].(models.CaseNetwork)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Network indicates an expected call of Network.
+func (mr *MockStoreMockRecorder) Network(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Network", reflect.TypeOf((*MockStore)(nil).Network), ctx, purchaseID)
+}
+
 // Queue mocks base method.
 func (m *MockStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error) {
 	m.ctrl.T.Helper()

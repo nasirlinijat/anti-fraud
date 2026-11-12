@@ -55,6 +55,46 @@ type DeviceActivity struct {
 	LastSeenAt    time.Time
 }
 
+// CaseNetwork lists the players and cards linked to a purchase under review
+// through its device, card, and player within WindowDays of the purchase.
+type CaseNetwork struct {
+	WindowDays int
+	// Anchors lists the purchase's device, when it has one, then its card and player.
+	Anchors []NetworkAnchor
+}
+
+// NetworkAnchor is a value of the purchase under review and the entities that share it.
+type NetworkAnchor struct {
+	Type        BlocklistType
+	Value       string
+	Blocklisted bool
+	// LinkedTotal counts every linked entity, including those left out of Linked.
+	LinkedTotal int64
+	// Linked lists the linked entities, worst status first.
+	Linked []LinkedEntity
+}
+
+// LinkedEntity is a player or card that shares an anchor with the purchase under review.
+type LinkedEntity struct {
+	Type  BlocklistType
+	Value string
+	// Purchases counts its purchases that share the anchor within the window.
+	Purchases int64
+	Status    NetworkStatus
+}
+
+// NetworkStatus is the worst thing known about a linked entity.
+type NetworkStatus string
+
+// Network statuses, worst first.
+const (
+	NetworkBlocklisted NetworkStatus = "blocklisted"
+	NetworkRejected    NetworkStatus = "rejected"
+	NetworkBlocked     NetworkStatus = "blocked"
+	NetworkInReview    NetworkStatus = "in_review"
+	NetworkClear       NetworkStatus = "clear"
+)
+
 // ErrReviewNotFound means no purchase under review has the given ID.
 var ErrReviewNotFound = errors.New("review case not found")
 

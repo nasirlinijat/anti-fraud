@@ -26,6 +26,7 @@ var (
 type Store interface {
 	Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
@@ -75,6 +76,10 @@ func CursorFor(order models.QueueOrder, item models.QueueItem) models.QueueCurso
 
 func (s *Service) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	return s.store.Case(ctx, purchaseID)
+}
+
+func (s *Service) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {
+	return s.store.Network(ctx, purchaseID)
 }
 
 // Decide saves the decision of an analyst with a key on a purchase awaiting

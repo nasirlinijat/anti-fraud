@@ -1308,6 +1308,71 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}/network:
+    get:
+      tags: [Reviews]
+      operationId: getReviewNetwork
+      summary: Get the players and cards linked to a purchase awaiting review
+      description: >-
+        Returns the purchase's device (when it has one), card, and player, and
+        for each the other players or cards that share it in purchases within
+        30 days before or after the purchase. Each linked entity shows its
+        purchases that share the value and its worst status. At most 30 are
+        listed per value, worst status first, then by most purchases. Fraud
+        labels are never read.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The purchase ID from the review queue.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+      responses:
+        "200":
+          description: The linked players and cards.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseNetwork"
+        "400":
+          description: The purchase ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No purchase under review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The linked players and cards could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /rulesets:
     get:
       tags: [Rulesets]
@@ -1561,7 +1626,7 @@ components:
           description: Omit for all patterns. With normal selected, 10 percent of events start a selected special scenario. Without normal all events use selected special scenarios.
           items:
             type: string
-            enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow, expat, new_big_spender, family_card, session_shopper, slow_card_testing, quiet_takeover]
+            enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow, expat, new_big_spender, family_card, session_shopper, slow_card_testing, quiet_takeover, device_farm]
     SimulationRun:
       type: object
       required: [id, settings, status, created_at, finished_at, sent, failed, allowed, reviewed, blocked, pending]
@@ -1827,6 +1892,73 @@ components:
           type: string
           format: date-time
           description: Latest purchase time on this device up to this purchase, in UTC.
+
+    CaseNetwork:
+      type: object
+      required: [window_days, anchors]
+      properties:
+        window_days:
+          type: integer
+          format: int32
+          description: Linked purchases are at most this many days before or after the purchase under review.
+          example: 30
+        anchors:
+          type: array
+          minItems: 2
+          maxItems: 3
+          description: The purchase's device, when it has one, then its card and player.
+          items:
+            $ref: "#/components/schemas/NetworkAnchor"
+
+    NetworkAnchor:
+      type: object
+      required: [type, value, blocklisted, linked_total, linked]
+      properties:
+        type:
+          type: string
+          enum: [device, card, player]
+          description: >-
+            A device or card links to other players who used it, and the player links to other cards it used.
+        value:
+          type: string
+          description: The device ID, card token, or player ID of the purchase under review.
+        blocklisted:
+          type: boolean
+          description: Whether this value is on the blocklist.
+        linked_total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of linked entities, including any left out of linked.
+        linked:
+          type: array
+          maxItems: 30
+          description: Linked entities, worst status first, then most purchases, then by value.
+          items:
+            $ref: "#/components/schemas/LinkedEntity"
+
+    LinkedEntity:
+      type: object
+      required: [type, value, purchases, status]
+      properties:
+        type:
+          type: string
+          enum: [player, card]
+        value:
+          type: string
+          description: The player ID or card token.
+        purchases:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Its purchases that share the anchor value within the window.
+        status:
+          type: string
+          enum: [blocklisted, rejected, blocked, in_review, clear]
+          description: >-
+            The worst of: the value is on the blocklist, an analyst rejected one of the purchases, one was blocked, one
+            awaits review, or none of these. Only the blocklist check covers every purchase; the other statuses come
+            from the purchases that share the anchor value within the window.
 
     RulesetSummary:
       type: object
