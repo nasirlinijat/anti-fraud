@@ -320,6 +320,8 @@
 
 @media (max-width: 63.999rem) {
   .console-shell { display: block; }
+  /* The menu replaces the sidebar after the resize event; until then the sidebar must not widen the page. */
+  .console-sidebar { display: none; }
   .mobile-brand { display: block; flex: 1 0 141px; min-inline-size: 0; }
   .menu-trigger { display: inline-flex; order: -1; }
   .workspace-label { display: none; }

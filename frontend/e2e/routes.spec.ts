@@ -10,6 +10,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme })
     for (const width of [390, 768, 1280, 195, 384, 640]) {
       await page.setViewportSize({ width, height: 960 })
+      // The console swaps the sidebar and the menu after the resize event, so wait for the swap.
+      await expect(page.locator('.console-sidebar')).toHaveCount(width < 1024 ? 0 : 1)
       for (const route of ['dashboard', 'reviews', 'assignments', 'blocklist', 'rulesets', 'tester', 'simulator', 'accounts']) {
         await page.goto(`/#/${route}`)
         await expect(page.locator('main h1')).toBeVisible()
