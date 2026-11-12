@@ -13,13 +13,25 @@ import (
 
 const casePlayerPurchaseLimit = 5
 
+// BlocklistRefresher refreshes a blocklist value after its change commits.
+type BlocklistRefresher interface {
+	Refresh(ctx context.Context, t models.BlocklistType, value string)
+}
+
 // ReviewStore reads the review queue and saves review decisions.
 type ReviewStore struct {
-	conn Conn
+	conn      Conn
+	refresher BlocklistRefresher
 }
 
 func NewReviewStore(conn Conn) *ReviewStore {
 	return &ReviewStore{conn: conn}
+}
+
+// UseBlocklistCache registers a cache to refresh when a review decision blocklists a device.
+func (s *ReviewStore) UseBlocklistCache(r BlocklistRefresher) *ReviewStore {
+	s.refresher = r
+	return s
 }
 
 // resolveReview saves a decision for a purchase still awaiting review and
@@ -83,15 +95,15 @@ func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (mod
 		result.ResolvedAt = *resolvedAt
 	}
 
+	var blockedDevice *string
 	if result.Status == models.ResolutionSaved && decision == "reject" && d.BlockDevice {
-		var device *string
-		if err := tx.QueryRow(ctx, getPurchaseDeviceID, purchaseID).Scan(&device); err != nil {
+		if err := tx.QueryRow(ctx, getPurchaseDeviceID, purchaseID).Scan(&blockedDevice); err != nil {
 			return models.Resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
 		}
-		if device != nil {
+		if blockedDevice != nil {
 			_, added, err := NewBlocklistStore(tx).AddIfAbsent(ctx, models.BlocklistEntry{
 				Type:   models.BlocklistDevice,
-				Value:  *device,
+				Value:  *blockedDevice,
 				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
 			}, analystID)
 			if err != nil {
@@ -103,6 +115,9 @@ func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (mod
 
 	if err := tx.Commit(ctx); err != nil {
 		return models.Resolution{}, fmt.Errorf("commit review decision: %w", err)
+	}
+	if result.DeviceBlocked && s.refresher != nil && blockedDevice != nil {
+		s.refresher.Refresh(ctx, models.BlocklistDevice, *blockedDevice)
 	}
 	return result, nil
 }

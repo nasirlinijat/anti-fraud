@@ -24,6 +24,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 	"github.com/nasirlinijat/anti-fraud/backend/test/testdb"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -35,9 +36,11 @@ const (
 )
 
 var (
-	ownerPool   *pgxpool.Pool
-	runtimePool *pgxpool.Pool
-	runtimeRole bool
+	ownerPool         *pgxpool.Pool
+	runtimePool       *pgxpool.Pool
+	runtimeRole       bool
+	testRedisInstance *testdb.Redis
+	testRedisClient   *redis.Client
 )
 
 func TestMain(m *testing.M) {
@@ -81,6 +84,30 @@ func run(m *testing.M) int {
 		slog.Error("ping the database", "error", err)
 		return 1
 	}
+
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" {
+		r, err := testdb.StartRedis(ctx)
+		if err != nil {
+			slog.Error("start redis", "error", err)
+			return 1
+		}
+		defer func() {
+			if err := r.Stop(); err != nil {
+				slog.Error("stop redis", "error", err)
+			}
+		}()
+		testRedisInstance = r
+		redisURL = r.URL
+	}
+	rClient, err := platform.NewRedis(redisURL)
+	if err != nil {
+		slog.Error("connect to redis", "error", err)
+		return 1
+	}
+	defer rClient.Close()
+	testRedisClient = rClient
+
 	return m.Run()
 }
 
@@ -108,12 +135,29 @@ func newApp(t *testing.T) app {
 	}
 
 	rulesets := storage.NewRulesetStore(tx)
-	blocklistStore := storage.NewBlocklistStore(tx)
+	rawBlocklist := storage.NewBlocklistStore(tx)
+	var blocklistSvc score.Blocklist = rawBlocklist
+	var blocklistStore blocklist.Store = rawBlocklist
+	reviewStore := storage.NewReviewStore(tx)
+
+	if testRedisClient != nil {
+		cachedBlocklist := storage.NewCachedBlocklistStore(rawBlocklist, testRedisClient)
+		if err := cachedBlocklist.Reload(ctx); err != nil {
+			t.Fatalf("reload blocklist cache: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = testRedisClient.FlushDB(context.Background()).Err()
+		})
+		reviewStore.UseBlocklistCache(cachedBlocklist)
+		blocklistSvc = cachedBlocklist
+		blocklistStore = cachedBlocklist
+	}
+
 	mux := http.NewServeMux()
 	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
-	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, blocklistStore, storage.NewPurchaseStore(tx))), serviceKey)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, blocklistSvc, storage.NewPurchaseStore(tx))), serviceKey)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), access)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStore)), access)
 	return app{mux: mux, tx: tx}
 }

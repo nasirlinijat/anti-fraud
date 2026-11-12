@@ -51,12 +51,18 @@ func main() {
 	rulesetStore := storage.NewRulesetStore(pool)
 	rulesetService := ruleset.NewService(rulesetStore)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), access)
-	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
+	blocklistStorage, closeBlocklist := newBlocklistStore(cfg, pool)
+	defer closeBlocklist()
+	reviewStore := storage.NewReviewStore(pool)
+	if refresher, ok := blocklistStorage.(storage.BlocklistRefresher); ok {
+		reviewStore.UseBlocklistCache(refresher)
+	}
+	scoreService := scoresvc.NewService(rulesetStore, blocklistStorage, storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), access)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), cfg.ModelPath != ""), access)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
-	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), access)
+	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStorage)), access)
 	evaluation, err := openEvaluationPool(cfg)
 	if err != nil {
 		fatal("open the evaluation database", err)
@@ -82,6 +88,40 @@ func main() {
 	if !errors.Is(err, http.ErrServerClosed) {
 		fatal("serve", err)
 	}
+}
+
+type blocklistStore interface {
+	scoresvc.Blocklist
+	blocklist.Store
+}
+
+func newBlocklistStore(cfg platform.Config, pool *pgxpool.Pool) (blocklistStore, func()) {
+	rawStore := storage.NewBlocklistStore(pool)
+	if cfg.RedisURL == "" {
+		slog.Info("blocklist cache disabled")
+		return rawStore, func() {}
+	}
+
+	client, err := platform.NewRedis(cfg.RedisURL)
+	if err != nil {
+		slog.Warn("blocklist cache initialization failed, falling back to database", "error", err)
+		return rawStore, func() {}
+	}
+
+	cached := storage.NewCachedBlocklistStore(rawStore, client)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := cached.Reload(ctx); err != nil {
+		slog.Warn("blocklist cache initial reload failed", "error", err)
+	} else {
+		entries, err := rawStore.List(ctx)
+		count := len(entries)
+		if err != nil {
+			count = -1
+		}
+		slog.Info("blocklist cache loaded", "entries", count)
+	}
+	return cached, func() { _ = client.Close() }
 }
 
 // useModel loads the fraud model and its policy and gives them to the score
