@@ -7,18 +7,22 @@ import RulesetPage from './pages/RulesetPage'
 import TesterPage from './pages/TesterPage'
 import SimulatorPage from './pages/SimulatorPage'
 import { usePolling } from './usePolling'
+import { Status as BackendStatus } from '@xsolla/xui-status'
+import { Brand, ConsoleNavigation } from './ConsoleNavigation'
+import './console.css'
 
 type Status = 'checking' | 'ready' | 'unavailable'
+const readinessPalettes = { checking: 'neutral', ready: 'success', unavailable: 'alert' } as const
 
 // Pages are chosen by the URL hash, for example #/tester. Add a page here to
 // show it in the navigation.
 const pages = [
   { path: '/dashboard', title: 'Dashboard', element: <DashboardPage /> },
+  { path: '/reviews', title: 'Review queue', element: <ReviewQueue /> },
   { path: '/blocklist', title: 'Blocklist', element: <BlocklistPage /> },
+  { path: '/rulesets', title: 'Rulesets', element: <RulesetPage /> },
   { path: '/tester', title: 'Tester', element: <TesterPage /> },
   { path: '/simulator', title: 'Simulator', element: <SimulatorPage /> },
-  { path: '/reviews', title: 'Review queue', element: <ReviewQueue /> },
-  { path: '/rulesets', title: 'Rulesets', element: <RulesetPage /> },
 ]
 
 function currentPath(): string {
@@ -44,21 +48,27 @@ function App() {
 
   const page = pages.find((p) => p.path === path) ?? pages[0]
 
+  useEffect(() => { document.title = `${page.title} · Anti-Fraud` }, [page.title])
+
   return (
-    <>
-      <header className="topbar">
-        <strong className="brand">Anti-Fraud</strong>
-        <nav aria-label="Pages">
-          {pages.map((p) => (
-            <a key={p.path} href={`#${p.path}`} aria-current={p === page ? 'page' : undefined}>
-              {p.title}
-            </a>
-          ))}
-        </nav>
-        <span className={`status status-${status}`}>Backend: {status}</span>
-      </header>
-      <main>{page.element}</main>
-    </>
+    <div className="console-shell">
+      <a className="skip-link" href="#main-content" onClick={event => {
+        event.preventDefault()
+        document.getElementById('main-content')?.focus()
+      }}>Skip to content</a>
+      <ConsoleNavigation pages={pages} path={page.path} />
+      <div className="console-workspace">
+        <header className="console-topbar">
+          <div className="mobile-brand"><Brand /></div>
+          <span className="workspace-label">Review console <span>/ {page.title}</span></span>
+          <BackendStatus palette={readinessPalettes[status]}
+            aria-label={`Backend: ${status}`} aria-live="polite">Backend: {status}</BackendStatus>
+        </header>
+        <main id="main-content" tabIndex={-1} className={`console-content ${page.path === '/dashboard' ? '' : 'legacy-page'}`}>
+          {page.element}
+        </main>
+      </div>
+    </div>
   )
 }
 

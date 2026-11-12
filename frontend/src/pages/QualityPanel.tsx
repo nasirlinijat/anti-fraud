@@ -1,3 +1,5 @@
+import { Button } from '@xsolla/xui-button'
+import { Typography } from '@xsolla/xui-typography'
 import { useCallback, useId, useState } from 'react'
 import { getQuality, listQualityRuns, type QualityReport, type QualitySource } from '../api'
 import { formatQualityRate, qualityCoverage } from '../quality'
@@ -16,7 +18,7 @@ export function QualityPanel() {
   const id = useId()
   return (
     <section className="panel quality-panel">
-      <h3>Decision quality</h3>
+      <p className="eyebrow">Evaluation</p><Typography as="h2" variant="h5" marginBottom={16}>Decision quality</Typography>
       <p className="muted small">{source === 'simulator' ? 'Simulated traffic only' : 'IEEE-CIS replay only'}.
         {' '}Review and block count as flagged. Results evaluate saved scoring decisions, before analyst decisions.</p>
       <fieldset className="quality-sources">
@@ -81,10 +83,11 @@ function SourceQuality({ source }: { source: QualitySource }) {
             {runs.ids.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </div>
-        <button type="button" className="secondary" onClick={runs.refresh} disabled={runs.polling.pending}>Refresh runs</button>
-        {runs.next && <button type="button" className="secondary" onClick={runs.more}
-          disabled={runs.polling.pending}>Load more runs</button>}
+        <Button type="button" tone="mono" variant="secondary" onPress={runs.refresh} disabled={runs.polling.pending}>Refresh runs</Button>
+        {runs.next && <Button type="button" tone="mono" variant="secondary" onPress={runs.more}
+          disabled={runs.polling.pending}>Load more runs</Button>}
       </div>}
+      {run && <p className="selected-run"><span className="muted">Selected run</span> <code>{run}</code></p>}
       {run && <QualityResult key={run} source={source} run={run} />}
     </>
   )
@@ -144,7 +147,7 @@ function QualityMetrics({ report }: { report: QualityReport }) {
 
 function ConfusionCounts({ report }: { report: QualityReport }) {
   return (
-    <table className="quality-counts">
+    <div className="table-scroll" tabIndex={0} role="region" aria-label="Saved decisions compared with known answers"><table className="quality-counts">
       <caption>Saved decisions compared with known answers</caption>
       <thead><tr><th scope="col">Known answer</th><th scope="col">Review or block</th><th scope="col">Allow</th></tr></thead>
       <tbody>
@@ -153,6 +156,6 @@ function ConfusionCounts({ report }: { report: QualityReport }) {
         <tr><th scope="row">Legitimate</th><td>False positives: {number.format(report.false_positives)}</td>
           <td>True negatives: {number.format(report.true_negatives)}</td></tr>
       </tbody>
-    </table>
+    </table></div>
   )
 }

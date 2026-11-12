@@ -201,6 +201,8 @@ The development server forwards same-origin API requests to the backend. It read
 | `npm run check` | Runs the linter (oxlint), TypeScript type check, and proxy tests |
 | `npm run build` | Type checks and builds the production files into `frontend/dist/` |
 
+Browser checks and the XUI design decisions are documented in [frontend/docs/af-121-design.md](frontend/docs/af-121-design.md).
+
 ## Console pages
 
 | Page | What it does |

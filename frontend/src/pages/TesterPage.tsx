@@ -201,7 +201,7 @@ function TesterPage() {
   return (
     <div className="tester">
       <section>
-        <h2>Score a purchase</h2>
+        <h1>Score a purchase</h1>
         <p className="muted">
           Fill in a purchase and send it to <code>POST /score</code>. Optional fields can stay empty.
         </p>
@@ -317,7 +317,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
       {result.fired_rules.length === 0 ? (
         <EmptyState>No rule fired.</EmptyState>
       ) : (
-        <table>
+        <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Tester data"><table>
           <thead>
             <tr>
               <th scope="col">Rule</th>
@@ -338,7 +338,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   )
