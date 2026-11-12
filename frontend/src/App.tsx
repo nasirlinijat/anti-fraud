@@ -9,6 +9,7 @@ import SimulatorPage from './pages/SimulatorPage'
 import { usePolling } from './usePolling'
 import { Status as BackendStatus } from '@xsolla/xui-status'
 import { Brand, ConsoleNavigation } from './ConsoleNavigation'
+import { ThemeSaveStatus, ThemeToggle } from './ThemeToggle'
 import './console.css'
 
 type Status = 'checking' | 'ready' | 'unavailable'
@@ -30,6 +31,7 @@ function currentPath(): string {
 }
 
 function App() {
+  const [menuOpen, setMenuOpen] = useState(false)
   const [status, setStatus] = useState<Status>('checking')
   const [path, setPath] = useState(currentPath)
 
@@ -56,13 +58,18 @@ function App() {
         event.preventDefault()
         document.getElementById('main-content')?.focus()
       }}>Skip to content</a>
-      <ConsoleNavigation pages={pages} path={page.path} />
+      <ConsoleNavigation pages={pages} path={page.path} open={menuOpen} onOpenChange={setMenuOpen} />
       <div className="console-workspace">
         <header className="console-topbar">
           <div className="mobile-brand"><Brand /></div>
           <span className="workspace-label">Review console <span>/ {page.title}</span></span>
-          <BackendStatus palette={readinessPalettes[status]}
-            aria-label={`Backend: ${status}`} aria-live="polite">Backend: {status}</BackendStatus>
+          <div className="header-readiness"><BackendStatus palette={readinessPalettes[status]}
+            aria-label={`Backend: ${status}`} aria-live="polite">Backend: {status}</BackendStatus></div>
+          <div className="console-actions"><ThemeToggle />
+            <button id="console-menu-trigger" type="button" className="menu-trigger secondary" aria-haspopup="dialog"
+              aria-controls="console-menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><span aria-hidden="true">☰</span> Menu</button>
+          </div>
+          <ThemeSaveStatus />
         </header>
         <main id="main-content" tabIndex={-1} className={`console-content ${page.path === '/dashboard' ? '' : 'legacy-page'}`}>
           {page.element}

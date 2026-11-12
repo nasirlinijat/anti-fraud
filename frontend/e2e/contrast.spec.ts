@@ -14,7 +14,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await period.focus()
     const samples = ['.tile-label', '.tile-note', '.outcome-allow', '.outcome-review', '.outcome-block',
       '.console-navigation a[aria-current]', '.console-navigation a:not([aria-current])', '.periods button[aria-pressed=true]',
-      '.periods button[aria-pressed=false]', '.quality-run-picker select', '.quality-sources label', '.decision-legend-label']
+      '.periods button[aria-pressed=false]', '.theme-toggle', '.theme-track', '.theme-thumb', '.quality-run-picker select', '.quality-sources label', '.decision-legend-label']
     const measurements = await page.evaluate(selectors => {
       const parse = (color: string) => color.match(/[\d.]+/g)!.map(Number)
       const blend = (front: number[], back: number[]) => front.slice(0, 3).map((channel, index) => channel * (front[3] ?? 1) + back[index] * (1 - (front[3] ?? 1)))
@@ -33,7 +33,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
         const style = getComputedStyle(element)
         const bg = background(element)
         const pairs = [{ selector, foreground: style.color, background: bg, contrast: ratio(blend(parse(style.color), bg), bg), minimum: 4.5 }]
-        if (element.tagName === 'SELECT') pairs.push({ selector: `${selector} boundary`, foreground: style.borderTopColor, background: bg, contrast: ratio(blend(parse(style.borderTopColor), bg), bg), minimum: 3 })
+        if (element.tagName === 'SELECT' || element.matches('.theme-track, .theme-thumb')) pairs.push({ selector: `${selector} boundary`, foreground: style.borderTopColor, background: bg, contrast: ratio(blend(parse(style.borderTopColor), bg), bg), minimum: 3 })
         if (root.matches(':focus-visible')) {
           const outside = background(root.parentElement)
           const outline = getComputedStyle(root).outlineColor
