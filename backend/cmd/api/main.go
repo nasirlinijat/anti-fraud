@@ -14,6 +14,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
@@ -46,6 +47,8 @@ func main() {
 	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
+	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
+	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)

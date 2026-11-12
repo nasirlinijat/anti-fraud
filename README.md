@@ -271,6 +271,8 @@ printf '%s\n' "$ADMIN_PASSWORD" | go run ./cmd/create-account -username alice
 
 The command exits with an error when the username is already taken.
 
+Sign in with `POST /auth/login` and send the returned token as `Authorization: Bearer <token>`. A session lasts 12 hours, and `POST /auth/logout` ends it. After 5 sign-in attempts for a username within 15 minutes, further attempts are rejected until the 15 minutes have passed. The attempt count is kept in memory, so a restart clears it and each backend process counts on its own.
+
 ## Security
 
 Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.

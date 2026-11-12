@@ -37,3 +37,27 @@ func TestCreateAccountRejectsTakenUsername(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUsernameTaken", err)
 	}
 }
+
+func TestCredentialsReturnsTheAccountAndHash(t *testing.T) {
+	tx := testTx(t)
+	created := createTestAccount(t, tx, "credentials-test")
+
+	account, hash, err := NewAccountStore(tx).Credentials(context.Background(), "credentials-test")
+
+	if err != nil {
+		t.Fatalf("Credentials: %v", err)
+	}
+	if account.ID != created.ID || hash != "$2a$12$hash" {
+		t.Fatalf("got %+v with hash %q", account, hash)
+	}
+}
+
+func TestCredentialsOfUnknownUsername(t *testing.T) {
+	tx := testTx(t)
+
+	_, _, err := NewAccountStore(tx).Credentials(context.Background(), "credentials-test-missing")
+
+	if !errors.Is(err, models.ErrAccountNotFound) {
+		t.Fatalf("err = %v, want ErrAccountNotFound", err)
+	}
+}

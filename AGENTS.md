@@ -67,6 +67,7 @@ backend/
     │   ├── score/      Score flow: saved decision, blocklist, model inputs, model, rules, save
     │   ├── review/     Review rules: queue pages, one decision per purchase, reject can blocklist the device
     │   ├── account/    Accounts: username and password checks, bcrypt hashing
+    │   ├── auth/       Sign-in: password check, attempt limit, sessions stored by token hash
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
@@ -141,6 +142,9 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 | `POST /score` | Scores a purchase and returns its saved decision. Requires the `X-API-Key` header. A matching retry returns the saved decision with 200. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a saved transaction ID with different purchase fields |
+| `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
+| `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
+| `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
 | `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page. Requires an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong key and 503 when no analyst keys are configured |
 | `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, and device activity. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
 | `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |

@@ -24,6 +24,8 @@ servers:
     description: Local development server.
 
 tags:
+  - name: Auth
+    description: Sign reviewers and admins in and out.
   - name: Simulations
     description: Control simulation runs when explicitly enabled.
   - name: Score
@@ -39,6 +41,121 @@ tags:
     description: Read and publish scoring configuration.
 
 paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in with a username and password
+      description: >-
+        Starts a session that lasts 12 hours. Send the returned token as
+        `Authorization: Bearer <token>`. The username is not case-sensitive.
+        After 5 sign-in attempts for a username within 15 minutes, further
+        attempts are rejected until the 15 minutes have passed. A successful
+        sign-in resets the count.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: The body is not a single sign-in object, or the username or password is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The username or password is wrong, or the account is disabled. All
+            three return the same message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The body is larger than 1024 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: The username has no sign-in attempts left.
+          headers:
+            Retry-After:
+              description: Seconds until the username may sign in again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The sign-in could not be checked or saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getSignedInAccount
+      summary: Get the signed-in account
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The account of the session.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "500":
+          description: The session could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: End the session
+      description: The token stops working immediately. Other sessions of the account stay signed in.
+      security:
+        - SessionAuth: []
+      responses:
+        "204":
+          description: Signed out.
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "500":
+          description: The session could not be ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /simulations:
     post:
       tags: [Simulations]
@@ -994,7 +1111,26 @@ components:
       name: X-API-Key
       description: The individual key assigned to the operator in OPERATOR_API_KEYS.
 
+    SessionAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        The token returned by POST /auth/login. Only its SHA-256 hash is
+        stored, and it expires 12 hours after sign-in.
+
   responses:
+    SessionRequired:
+      description: The Authorization header is missing, or the session is unknown, expired, ended, or belongs to a disabled account.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            enum: [Bearer]
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
     OperatorAccessUnavailable:
       description: No operator keys are configured.
       content:
@@ -1010,6 +1146,26 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: {type: string, minLength: 1, example: alice}
+        password: {type: string, minLength: 1, format: password}
+    Account:
+      type: object
+      required: [username, role]
+      properties:
+        username: {type: string, description: Lowercase username., example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+    Session:
+      type: object
+      required: [token, expires_at, account]
+      properties:
+        token: {type: string, description: Session token. It is returned only once.}
+        expires_at: {type: string, format: date-time}
+        account: {$ref: '#/components/schemas/Account'}
     SimulationSettings:
       type: object
       additionalProperties: false

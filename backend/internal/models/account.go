@@ -31,5 +31,20 @@ type NewAccount struct {
 	Role         Role
 }
 
-// ErrUsernameTaken means another account already has the username.
-var ErrUsernameTaken = errors.New("username is already taken")
+var (
+	// ErrUsernameTaken means another account already has the username.
+	ErrUsernameTaken = errors.New("username is already taken")
+	// ErrAccountNotFound means no account has the username.
+	ErrAccountNotFound = errors.New("account not found")
+	// ErrSessionNotFound means the session token is unknown, expired, or belongs
+	// to a disabled account.
+	ErrSessionNotFound = errors.New("session not found")
+)
+
+// Session is a signed-in account. Token is returned once, at sign-in; only
+// its hash is saved.
+type Session struct {
+	Token     string
+	ExpiresAt time.Time
+	Account   Account
+}

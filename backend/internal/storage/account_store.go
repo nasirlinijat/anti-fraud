@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
@@ -39,4 +40,26 @@ func (s *AccountStore) Create(ctx context.Context, account models.NewAccount) (m
 	}
 	saved.CreatedAt = saved.CreatedAt.UTC()
 	return saved, nil
+}
+
+const getCredentials = `
+SELECT id, username, role, disabled_at, created_at, password_hash
+FROM accounts
+WHERE username = $1`
+
+// Credentials returns the account with the username and its password hash. It
+// returns models.ErrAccountNotFound when no account has the username.
+func (s *AccountStore) Credentials(ctx context.Context, username string) (models.Account, string, error) {
+	var account models.Account
+	var hash string
+	err := s.conn.QueryRow(ctx, getCredentials, username).
+		Scan(&account.ID, &account.Username, &account.Role, &account.DisabledAt, &account.CreatedAt, &hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Account{}, "", models.ErrAccountNotFound
+	}
+	if err != nil {
+		return models.Account{}, "", fmt.Errorf("get credentials of %s: %w", username, err)
+	}
+	account.CreatedAt = account.CreatedAt.UTC()
+	return account, hash, nil
 }
