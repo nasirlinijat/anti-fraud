@@ -69,11 +69,12 @@ backend/
     │   ├── review/     Review rules: queue pages, claims, one decision per purchase, reject can blocklist the device
     │   ├── account/    Accounts: username and password checks, bcrypt hashing
     │   ├── auth/       Sign-in: password check, attempt limit, sessions stored by token hash
+    │   ├── accountevent/ Login and password-reset events, recorded once per event ID
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
     │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
-    ├── storage/        All SQL (purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts) and the Redis blocklist mirror
+    ├── storage/        All SQL (purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts, account events) and the Redis blocklist mirror
     ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── labels/         Private fraud labels, kept apart from everything scoring uses
@@ -148,11 +149,12 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 | `POST /score` | Scores a purchase and returns its saved decision. Requires the `X-API-Key` header. The optional `cvv_result`, `avs_result`, and `three_ds_result` fields carry the payment gateway's verification results; they are rule inputs only, never model inputs. A matching retry returns the saved decision with 200. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a saved transaction ID with different purchase fields |
+| `POST /account-events` | Records a login or password reset of a player, with the event time and optional device ID and two-letter IP country. IDs are at most 256 bytes without control characters. The account takeover rules read only events before the purchase. Requires the `X-API-Key` header and has the `/score` time limit. Returns 201 for a new event, 200 for a matching retry, 400 naming the invalid field, 401 for a missing or wrong key, 409 for a saved event ID with different fields, and 503 when it times out or the database is unavailable |
 | `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
 | `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
 | `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
 | `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page and who has claimed each purchase. `claimed=mine` lists only the purchases claimed by the signed-in account. Requires a reviewer or admin session in the `Authorization: Bearer` header, or an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong session or key, and 503 for a key when no analyst keys are configured |
-| `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, device activity, and the CVV, AVS, and 3-D Secure results the score request sent. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
+| `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, device activity, the CVV, AVS, and 3-D Secure results the score request sent, and the player's account events in the 30 days before the purchase, at most 20, each with its recorded time and whether it was recorded after the decision. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
 | `GET /reviews/{purchase_id}/network` | Returns the players and cards linked to a purchase awaiting review through its player, card, and device within 30 days of the purchase, each with its worst status, at most 30 per link. Same authentication. Returns 404 like the case endpoint |
 | `POST /reviews/{purchase_id}/claim` | Claims a purchase awaiting review for the signed-in reviewer or admin, so that only that account can decide it. Requires a session; an analyst key gets 403. Returns 201 for a new claim, 200 for one you already hold, and 409 when another account holds it or the purchase was already decided |
 | `DELETE /reviews/{purchase_id}/claim` | Releases an open claim, returning the purchase to the shared queue. Requires an admin session; reviewers get 403. Returns 204, 404 for a purchase without an open claim, and 409 for one already decided |

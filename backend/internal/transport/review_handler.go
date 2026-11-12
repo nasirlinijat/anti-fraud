@@ -88,14 +88,29 @@ type deviceActivityResponse struct {
 	LastSeenAt    time.Time `json:"last_seen_at"`
 }
 
+// caseAccountEventResponse is a login or password reset of the player before
+// the purchase under review. RecordedAfterDecision is true for an event the
+// service recorded after the purchase was decided, which the rules could not
+// have seen.
+type caseAccountEventResponse struct {
+	EventID               string                  `json:"event_id"`
+	EventType             models.AccountEventType `json:"event_type"`
+	EventTime             time.Time               `json:"event_time"`
+	DeviceID              *string                 `json:"device_id"`
+	IPCountry             *string                 `json:"ip_country"`
+	ReceivedAt            time.Time               `json:"received_at"`
+	RecordedAfterDecision bool                    `json:"recorded_after_decision"`
+}
+
 type caseResponse struct {
 	reviewResponse
-	RulesetVersion  int                      `json:"ruleset_version"`
-	PlayerPurchases []playerPurchaseResponse `json:"player_purchases"`
-	DeviceActivity  *deviceActivityResponse  `json:"device_activity"`
-	CVVResult       *scoring.CVVResult       `json:"cvv_result"`
-	AVSResult       *scoring.AVSResult       `json:"avs_result"`
-	ThreeDSResult   *scoring.ThreeDSResult   `json:"three_ds_result"`
+	RulesetVersion  int                        `json:"ruleset_version"`
+	PlayerPurchases []playerPurchaseResponse   `json:"player_purchases"`
+	DeviceActivity  *deviceActivityResponse    `json:"device_activity"`
+	CVVResult       *scoring.CVVResult         `json:"cvv_result"`
+	AVSResult       *scoring.AVSResult         `json:"avs_result"`
+	ThreeDSResult   *scoring.ThreeDSResult     `json:"three_ds_result"`
+	AccountEvents   []caseAccountEventResponse `json:"account_events"`
 }
 
 type networkResponse struct {
@@ -253,7 +268,24 @@ func newCaseResponse(item models.CaseItem) caseResponse {
 		CVVResult:       item.CVVResult,
 		AVSResult:       item.AVSResult,
 		ThreeDSResult:   item.ThreeDSResult,
+		AccountEvents:   newCaseAccountEvents(item.AccountEvents, item.DecidedAt),
 	}
+}
+
+func newCaseAccountEvents(events []models.AccountEvent, decidedAt time.Time) []caseAccountEventResponse {
+	resp := make([]caseAccountEventResponse, 0, len(events))
+	for _, e := range events {
+		resp = append(resp, caseAccountEventResponse{
+			EventID:               e.EventID,
+			EventType:             e.EventType,
+			EventTime:             e.EventTime.UTC(),
+			DeviceID:              e.DeviceID,
+			IPCountry:             e.IPCountry,
+			ReceivedAt:            e.ReceivedAt.UTC(),
+			RecordedAfterDecision: e.ReceivedAt.After(decidedAt),
+		})
+	}
+	return resp
 }
 
 func (h *ReviewHandler) serveNetwork(w http.ResponseWriter, r *http.Request) {

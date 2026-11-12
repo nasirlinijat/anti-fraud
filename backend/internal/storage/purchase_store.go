@@ -81,7 +81,12 @@ JOIN decisions d ON d.purchase_id = p.id
 WHERE p.player_id = $2::text
   AND p.event_time > $3::timestamptz
   AND (p.event_time, p.transaction_id) < ($4::timestamptz, $5::text)
-  AND CASE d.outcome
+  AND ` + trustedDecision
+
+// trustedDecision is true when the decision d of purchase p allowed it, or a
+// review approved it. Blocked, rejected, and undecided purchases are not
+// trusted.
+const trustedDecision = `CASE d.outcome
       WHEN 'allow' THEN true
       WHEN 'review' THEN (
           SELECT r.decision = 'approve'

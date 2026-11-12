@@ -50,6 +50,15 @@ func TestPublishRejectsAnInvalidDraftBeforeSaving(t *testing.T) {
 			d.Model = &ruleset.DraftModel{Mode: scoring.ModelAssist, ClearBelow: ptr(0.5), FlagAt: ptr(0.2)}
 		}, []string{"model.clear_below"}},
 		{"unknown model mode", func(d *ruleset.Draft) { d.Model = &ruleset.DraftModel{Mode: "always"} }, []string{"model.mode"}},
+		{"account event rule without a window", func(d *ruleset.Draft) {
+			d.Rules[scoring.RuleRecentPasswordReset] = &ruleset.DraftRule{Enabled: ptr(true), Weight: ptr(int32(30))}
+		}, []string{"rules.recent_password_reset.limit"}},
+		{"account event rule with a zero window", func(d *ruleset.Draft) {
+			d.Rules[scoring.RuleNewDeviceLogin] = &ruleset.DraftRule{Enabled: ptr(true), Weight: ptr(int32(25)), Limit: ptr(int64(0))}
+		}, []string{"rules.new_device_login.limit"}},
+		{"account event rule with a window over 30 days", func(d *ruleset.Draft) {
+			d.Rules[scoring.RuleNewCountryLogin] = &ruleset.DraftRule{Enabled: ptr(true), Weight: ptr(int32(20)), Limit: ptr(int64(721))}
+		}, []string{"rules.new_country_login.limit"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,6 +98,34 @@ func TestPublishSavesTheConvertedRuleset(t *testing.T) {
 	got, err := svc.Publish(context.Background(), validDraft(), "operator-1")
 	if err != nil || got.Version != 8 {
 		t.Fatalf("Publish = version %d, %v; want version 8", got.Version, err)
+	}
+}
+
+func TestPublishAcceptsTheAccountEventRules(t *testing.T) {
+	svc, store := newService(t)
+	d := validDraft()
+	d.Rules[scoring.RuleRecentPasswordReset] = &ruleset.DraftRule{Enabled: ptr(true), Weight: ptr(int32(30)), Limit: ptr(int64(1))}
+	d.Rules[scoring.RuleNewDeviceLogin] = &ruleset.DraftRule{Enabled: ptr(true), Weight: ptr(int32(25)), Limit: ptr(int64(24))}
+	d.Rules[scoring.RuleNewCountryLogin] = &ruleset.DraftRule{Enabled: ptr(false), Weight: ptr(int32(20)), Limit: ptr(int64(720))}
+	store.EXPECT().Publish(gomock.Any(), gomock.Any(), "operator-1", gomock.Any()).DoAndReturn(
+		func(_ context.Context, rs scoring.Ruleset, _ string, _ *scoring.ModelSettings) (scoring.Ruleset, error) {
+			return rs, nil
+		})
+
+	got, err := svc.Publish(context.Background(), d, "operator-1")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[scoring.RuleName]scoring.RuleConfig{
+		scoring.RuleRecentPasswordReset: {Enabled: true, Weight: 30, Limit: 1},
+		scoring.RuleNewDeviceLogin:      {Enabled: true, Weight: 25, Limit: 24},
+		scoring.RuleNewCountryLogin:     {Enabled: false, Weight: 20, Limit: 720},
+	}
+	for name, rule := range want {
+		if got.Rules[name] != rule {
+			t.Errorf("%s = %+v, want %+v", name, got.Rules[name], rule)
+		}
 	}
 }
 

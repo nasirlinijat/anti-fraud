@@ -46,8 +46,10 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
     amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model', fired_rules: [],
     claimed_by: claimed ? 'demo-user' : null, claimed_at: claimed ? now : null })
   await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item()], next_cursor: null, model_enabled: true } }))
+  const lateLogin = { event_id: 'demo-login', event_type: 'login', event_time: now, device_id: 'demo-device', ip_country: 'TR',
+    received_at: now, recorded_after_decision: true }
   await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null,
-    cvv_result: 'mismatch', avs_result: null, three_ds_result: 'authenticated' } }))
+    cvv_result: 'mismatch', avs_result: null, three_ds_result: 'authenticated', account_events: [lateLogin] } }))
   await page.route('**/reviews/demo-purchase/network', route => route.fulfill({ json: { window_days: 30, anchors: [
     { type: 'card', value: 'demo-card', blocklisted: false, linked_total: 0, linked: [] },
     { type: 'player', value: 'demo-player', blocklisted: false, linked_total: 0, linked: [] },
@@ -66,6 +68,7 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   await expect(verification).toContainText('Mismatch')
   await expect(verification).toContainText('Not sent')
   await expect(verification).toContainText('Authenticated')
+  await expect(page.getByRole('region', { name: 'Recent account events' }).getByText('After the decision')).toBeVisible()
   await page.getByRole('button', { name: 'Back to the queue' }).click()
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()

@@ -8,29 +8,90 @@ import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
 
 const ruleDetails = [
-  { name: 'high_amount', label: 'High amount', limit: 'Minimum amount (minor units)' },
-  { name: 'card_velocity', label: 'Card velocity', limit: 'Earlier purchases in one hour' },
-  { name: 'new_account', label: 'New account', limit: 'Maximum account age (hours)' },
-  { name: 'country_mismatch', label: 'Country mismatch' },
+  {
+    name: 'high_amount',
+    label: 'High amount',
+    description: 'Adds points when the purchase amount is at or above the limit.',
+    limit: 'Minimum amount (minor units)',
+  },
+  {
+    name: 'card_velocity',
+    label: 'Card velocity',
+    description: 'Adds points when the card already has at least the limit of purchases in the hour before.',
+    limit: 'Earlier purchases in one hour',
+  },
+  {
+    name: 'new_account',
+    label: 'New account',
+    description: 'Adds points when the account is younger than the limit.',
+    limit: 'Maximum account age (hours)',
+  },
+  {
+    name: 'country_mismatch',
+    label: 'Country mismatch',
+    description: 'Adds points when the IP country differs from the card country.',
+  },
   {
     name: 'device_card_count',
     label: 'Device card count',
+    description: 'Adds points when the device has used at least the limit of distinct cards in 60 minutes.',
     limit: 'Distinct cards in 60 minutes (including the current card)',
     preset: { enabled: false, weight: '20', limit: '5' },
   },
   {
     name: 'new_device_spike',
     label: 'New device spike',
+    description: "Adds points when a large purchase comes from a device missing from the player's trusted purchase history.",
     limit: 'Minimum trusted purchases',
     preset: {
       enabled: false, weight: '50', limit: '3',
       window_days: '90', min_amount_minor: '1000', amount_multiplier: '3',
     },
   },
-  { name: 'cvv_mismatch', label: 'CVV mismatch', preset: { enabled: false, weight: '35' } },
-  { name: 'avs_mismatch', label: 'AVS mismatch', hint: 'Partial matches do not count.', preset: { enabled: false, weight: '15' } },
-  { name: 'three_ds_failed', label: '3-D Secure failed', preset: { enabled: false, weight: '50' } },
+  {
+    name: 'cvv_mismatch',
+    label: 'CVV mismatch',
+    description: "Adds points when the payment gateway reports that the security code did not match.",
+    preset: { enabled: false, weight: '35' },
+  },
+  {
+    name: 'avs_mismatch',
+    label: 'AVS mismatch',
+    description: 'Adds points when the payment gateway reports that the billing address did not match.',
+    hint: 'Partial matches do not count.',
+    preset: { enabled: false, weight: '15' },
+  },
+  {
+    name: 'three_ds_failed',
+    label: '3-D Secure failed',
+    description: 'Adds points when the card issuer could not authenticate the cardholder.',
+    preset: { enabled: false, weight: '50' },
+  },
+  {
+    name: 'recent_password_reset',
+    label: 'Recent password reset',
+    description: 'Adds points when the player reset their password within the window before the purchase. Uses the account events the game reports.',
+    limit: 'Window before the purchase (hours, 1 to 720)',
+    preset: { enabled: false, weight: '30', limit: '24' },
+  },
+  {
+    name: 'new_device_login',
+    label: 'New device login',
+    description: 'Adds points when a login within the window before the purchase was the player\'s first from a device that no earlier login or allowed or approved purchase used.',
+    limit: 'Window before the purchase (hours, 1 to 720)',
+    preset: { enabled: false, weight: '25', limit: '24' },
+  },
+  {
+    name: 'new_country_login',
+    label: 'New country login',
+    description: 'Adds points when a login within the window before the purchase was the player\'s first from a country that no earlier login or allowed or approved purchase used.',
+    limit: 'Window before the purchase (hours, 1 to 720)',
+    preset: { enabled: false, weight: '20', limit: '24' },
+  },
 ] as const
+
+// Rules that read the player's account events take a window of 1 to 720 hours.
+const accountEventRules: readonly string[] = ['recent_password_reset', 'new_device_login', 'new_country_login']
 
 const maxInt32 = 2_147_483_647n
 const maxInt64 = 9_223_372_036_854_775_807n
@@ -79,6 +140,12 @@ function integer(value: string, field: string, { min, max }: IntegerRange, error
   return 0n
 }
 
+function limitRange(name: string): IntegerRange {
+  if (accountEventRules.includes(name)) return { min: 1n, max: 720n }
+  if (name === 'device_card_count' || name === 'new_device_spike') return { min: 1n, max: maxInt64 }
+  return { min: 0n, max: maxInt64 }
+}
+
 function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
   const note = draft.note.trim()
   if ([...note].length > 500) {
@@ -93,11 +160,10 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
   }
   for (const [name, rule] of Object.entries(draft.rules)) {
     const field = `rules.${name}`
-    const minLimit = name === 'device_card_count' || name === 'new_device_spike' ? 1n : 0n
     const settings: RuleSettings = {
       enabled: rule.enabled,
       weight: Number(integer(rule.weight, `${field}.weight`, { min: 0n, max: maxInt32 }, errors)),
-      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, { min: minLimit, max: maxInt64 }, errors),
+      limit: rule.limit === undefined ? undefined : integer(rule.limit, `${field}.limit`, limitRange(name), errors),
     }
     if (name === 'new_device_spike') {
       settings.window_days = Number(integer(rule.window_days ?? '', `${field}.window_days`, { min: 1n, max: 3650n }, errors))
@@ -328,7 +394,7 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
   disabled: boolean
   onChange: (rule: RuleDraft) => void
 }) {
-  const { name, label } = detail
+  const { name, label, description } = detail
   const limitLabel = 'limit' in detail ? detail.limit : undefined
   const hint = 'hint' in detail ? detail.hint : undefined
   const preset = 'preset' in detail ? detail.preset : undefined
@@ -338,6 +404,7 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
   return (
     <fieldset disabled={disabled}>
       <legend>{label}</legend>
+      <p className="muted small">{description}</p>
       <label className="switch ruleset-enabled">
         <input
           type="checkbox"

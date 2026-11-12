@@ -245,6 +245,9 @@ type trackedScorer struct {
 	id     string
 	cancel context.CancelFunc
 	fatal  error
+	// failedAccountEvents counts the account events the client could not
+	// send. The run sends purchases one at a time, so it needs no lock.
+	failedAccountEvents int
 }
 
 // ScorePurchase saves the purchase's private label as pending, then scores
@@ -260,6 +263,35 @@ func (t *trackedScorer) ScorePurchase(ctx context.Context, p simulator.Purchase)
 		return simulator.Result{}, simulator.FatalError{Err: err}
 	}
 	return t.Score(ctx, p.Request)
+}
+
+// SendAccountEvent forwards an account event to the client. Account events are
+// not checkpointed: a run counts purchases only, and its purchase is scored
+// even when the event fails. A failure is logged with the run ID and counted,
+// so a run that finishes with failed events is visible. A client that cannot
+// send account events skips them.
+func (t *trackedScorer) SendAccountEvent(ctx context.Context, e simulator.AccountEvent) error {
+	accounts, ok := t.client.(simulator.AccountEventSender)
+	if !ok {
+		return nil
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := accounts.SendAccountEvent(callCtx, e)
+	if err != nil {
+		t.failedAccountEvents++
+		slog.Warn("simulation account event failed", "run_id", t.id, "event_id", e.EventID, "error", err)
+	}
+	return err
+}
+
+// reportAccountEventFailures logs how many account events the finished run
+// could not send, if any.
+func (t *trackedScorer) reportAccountEventFailures(status string) {
+	if t.failedAccountEvents > 0 {
+		slog.Warn("simulation run finished with failed account events",
+			"run_id", t.id, "status", status, "failed_account_events", t.failedAccountEvents)
+	}
 }
 
 // Score sends one purchase. It saves the transaction ID as pending before the
@@ -336,9 +368,9 @@ func sendRun(ctx context.Context, scorer simulator.Scorer, run models.Simulation
 	return err
 }
 
-// endAt shifts the purchases in time so that the last one happens at end. The
-// score API rejects event times in the future, so a backfill ends when the run
-// was created.
+// endAt shifts the purchases and their account events in time so that the
+// last purchase happens at end. The score API rejects event times in the
+// future, so a backfill ends when the run was created.
 func endAt(purchases []simulator.Purchase, end time.Time) {
 	shift := end.Sub(purchases[len(purchases)-1].Request.EventTime)
 	for i := range purchases {
@@ -347,6 +379,10 @@ func endAt(purchases []simulator.Purchase, end time.Time) {
 		if p.AccountCreatedAt != nil {
 			v := p.AccountCreatedAt.Add(shift)
 			p.AccountCreatedAt = &v
+		}
+		for j := range purchases[i].AccountEvents {
+			e := &purchases[i].AccountEvents[j]
+			e.EventTime = e.EventTime.Add(shift)
 		}
 	}
 }
@@ -377,4 +413,5 @@ func (s *Service) work(ctx context.Context, c models.SimulationController, run m
 	if err := c.Finish(finalCtx, run.ID, status, message); err != nil {
 		slog.Error("simulation checkpoint unavailable", "run_id", run.ID, "error", err)
 	}
+	tracker.reportAccountEventFailures(status)
 }

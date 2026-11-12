@@ -19,7 +19,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
-//go:generate mockgen -destination=mocks/mock_services.go -package=mocks . ScoreService,ReviewService,RulesetService,BlocklistService,StatsService,SimulationService
+//go:generate mockgen -destination=mocks/mock_services.go -package=mocks . ScoreService,AccountEventService,ReviewService,RulesetService,BlocklistService,StatsService,SimulationService
 
 const maxBodyBytes = 64 << 10
 
@@ -158,9 +158,9 @@ func writeScoreResponse(w http.ResponseWriter, transactionID string, d models.De
 	})
 }
 
-// decode reads exactly one JSON object into req. On failure it returns the
-// status code and error response to send.
-func decode(w http.ResponseWriter, r *http.Request, req *scoreRequest) (int, *platform.ErrorResponse) {
+// decode reads exactly one JSON object into req, a pointer to a request
+// struct. On failure it returns the status code and error response to send.
+func decode(w http.ResponseWriter, r *http.Request, req any) (int, *platform.ErrorResponse) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 

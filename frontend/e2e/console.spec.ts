@@ -170,7 +170,7 @@ const network = { window_days: 30, anchors: [
 
 async function openNetworkCase(page: Page) {
   await page.route('**/reviews?*', route => route.fulfill({ json: { items: [networkCase], next_cursor: null, model_enabled: true } }))
-  await page.route('**/reviews/41', route => route.fulfill({ json: { ...networkCase, ruleset_version: 3, player_purchases: [], device_activity: null } }))
+  await page.route('**/reviews/41', route => route.fulfill({ json: { ...networkCase, ruleset_version: 3, player_purchases: [], device_activity: null, account_events: [] } }))
   await page.goto('/#/reviews')
   await page.getByRole('button', { name: 'demo-transaction', exact: true }).click()
 }

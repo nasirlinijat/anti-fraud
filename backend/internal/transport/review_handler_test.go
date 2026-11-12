@@ -324,10 +324,33 @@ func TestCaseWithoutModelScoreOrRules(t *testing.T) {
 	}
 	rules, isList := body["fired_rules"].([]any)
 	purchases, isPurchasesList := body["player_purchases"].([]any)
+	events, isEventsList := body["account_events"].([]any)
 	if body["model_score"] != nil || body["model_version"] != nil || !isList || len(rules) != 0 ||
-		!isPurchasesList || len(purchases) != 0 || body["device_activity"] != nil {
+		!isPurchasesList || len(purchases) != 0 || body["device_activity"] != nil || !isEventsList || len(events) != 0 {
 		t.Fatalf("expected null model fields and empty history: %s", w.Body)
 	}
+}
+
+func TestCaseListsThePlayersAccountEvents(t *testing.T) {
+	device, country := "device-9", "TR"
+	decidedAt := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	store := caseFunc(func(_ context.Context, id int64) (models.CaseItem, error) {
+		return models.CaseItem{QueueItem: models.QueueItem{PurchaseID: id, DecidedAt: decidedAt}, RulesetVersion: 1, AccountEvents: []models.AccountEvent{
+			{EventID: "evt-2", PlayerID: "player", EventType: models.AccountEventLogin,
+				EventTime: time.Date(2026, 11, 9, 13, 30, 0, 0, time.FixedZone("AZT", 4*3600)), DeviceID: &device, IPCountry: &country,
+				ReceivedAt: decidedAt.Add(time.Hour)},
+			{EventID: "evt-1", PlayerID: "player", EventType: models.AccountEventPasswordReset, EventTime: time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC),
+				ReceivedAt: decidedAt.Add(-time.Minute)},
+		}}, nil
+	})
+
+	w := requestCase(t, store, "/reviews/7", queueTestKey)
+
+	wantResponse(t, w, http.StatusOK,
+		`"account_events":[{"event_id":"evt-2","event_type":"login","event_time":"2026-11-09T09:30:00Z","device_id":"device-9","ip_country":"TR",`+
+			`"received_at":"2026-11-09T11:00:00Z","recorded_after_decision":true},`+
+			`{"event_id":"evt-1","event_type":"password_reset","event_time":"2026-11-09T09:00:00Z","device_id":null,"ip_country":null,`+
+			`"received_at":"2026-11-09T09:59:00Z","recorded_after_decision":false}]`)
 }
 
 func TestCaseNotFoundAndStoreErrors(t *testing.T) {

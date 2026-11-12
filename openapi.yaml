@@ -30,6 +30,8 @@ tags:
     description: Control simulation runs when explicitly enabled.
   - name: Score
     description: Score a purchase.
+  - name: Account events
+    description: Record the logins and password resets that the game's account system reports.
   - name: Stats
     description: Decision statistics for the dashboard.
   - name: Blocklist
@@ -467,6 +469,130 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+
+  /account-events:
+    post:
+      tags: [Account events]
+      operationId: recordAccountEvent
+      summary: Record a login or password reset
+      description: |
+        Saves a login or password reset that the game's account system
+        reports for a player. The account takeover rules
+        `recent_password_reset`, `new_device_login`, and `new_country_login`
+        read these events, and the review case lists them. They are never
+        model inputs.
+
+        A rule reads only events with an event time before the purchase's
+        event time, so send each event as soon as it happens. After
+        authentication and validation, a retry with the same event ID and
+        matching fields returns the saved event with 200 without saving it
+        again. Fields are compared after normal request normalization, with
+        timestamps compared at PostgreSQL's microsecond precision. A valid
+        request that reuses the ID with different fields returns 409.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountEventRequest"
+            examples:
+              login:
+                summary: A login with every field.
+                value:
+                  event_id: evt-20001
+                  player_id: player-381
+                  event_type: login
+                  event_time: "2026-11-08T09:50:00Z"
+                  device_id: device-77aa
+                  ip_country: TR
+              passwordReset:
+                summary: A password reset with only the required fields.
+                value:
+                  event_id: evt-20000
+                  player_id: player-381
+                  event_type: password_reset
+                  event_time: "2026-11-08T09:30:00Z"
+      responses:
+        "201":
+          description: The event was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEvent"
+        "200":
+          description: A matching earlier request already saved this event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEvent"
+        "400":
+          description: >-
+            The request is not valid. When the problem is about specific
+            fields, `fields` names each one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidType:
+                  summary: The event type is not known.
+                  value:
+                    error: invalid request
+                    fields:
+                      event_type: must be login or password_reset
+                missingField:
+                  summary: A required field is missing.
+                  value:
+                    error: invalid request
+                    fields:
+                      player_id: is required
+                invalidCountry:
+                  summary: The IP country is not a two-letter code.
+                  value:
+                    error: invalid request
+                    fields:
+                      ip_country: must be a two-letter country code
+        "401":
+          description: The `X-API-Key` header is missing or wrong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "409":
+          description: This event ID belongs to a saved event with different fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: an account event with this event ID was already recorded
+                fields:
+                  event_id: is already recorded
+        "413":
+          description: The request body is larger than 65536 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The event could not be saved. The response never contains the internal error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >-
+            The database is unavailable and nothing was saved, or recording
+            took longer than the score time limit. Retry with the same event
+            ID after the `Retry-After` header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /stats/quality:
     get:
@@ -1257,8 +1383,10 @@ paths:
         Returns one purchase marked for review with its rule score, fired rules
         and points, the version of the ruleset that scored it, the model
         score when one was recorded, the player's recent purchases before this
-        one, activity on the same device, and the payment gateway's CVV, AVS,
-        and 3-D Secure results when the score request sent them.
+        one, activity on the same device, the payment gateway's CVV, AVS,
+        and 3-D Secure results when the score request sent them, and the
+        player's logins and password resets in the 30 days before the
+        purchase.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -1845,7 +1973,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result]
+          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events]
           properties:
             ruleset_version:
               type: integer
@@ -1875,6 +2003,16 @@ components:
               nullable: true
               enum: [authenticated, attempted, failed, not_enrolled, null]
               description: The 3-D Secure result sent with the purchase, or null when the score request did not send it.
+            account_events:
+              type: array
+              maxItems: 20
+              description: >-
+                Up to 20 logins and password resets of the player in the 30
+                days before this purchase, newest first. Events recorded after
+                the purchase was decided are marked, because the rules could
+                not have seen them.
+              items:
+                $ref: "#/components/schemas/CaseAccountEvent"
 
     CasePlayerPurchase:
       type: object
@@ -1892,6 +2030,35 @@ components:
         outcome:
           type: string
           enum: [allow, review, block]
+
+    CaseAccountEvent:
+      type: object
+      required: [event_id, event_type, event_time, device_id, ip_country, received_at, recorded_after_decision]
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [login, password_reset]
+        event_time:
+          type: string
+          format: date-time
+          description: The event time in UTC.
+        device_id:
+          type: string
+          nullable: true
+        ip_country:
+          type: string
+          nullable: true
+        received_at:
+          type: string
+          format: date-time
+          description: When the service recorded the event, in UTC.
+        recorded_after_decision:
+          type: boolean
+          description: >-
+            True when the service recorded the event after the purchase was
+            decided, so the rules could not have seen it.
 
     CaseDeviceActivity:
       type: object
@@ -2039,8 +2206,10 @@ components:
           description: |
             Settings keyed by `high_amount`, `card_velocity`, `new_account`,
             `country_mismatch`, `device_card_count`, `new_device_spike`,
-            `cvv_mismatch`, `avs_mismatch`, or `three_ds_failed`.
-            An omitted rule is disabled. An empty object disables all weighted rules.
+            `cvv_mismatch`, `avs_mismatch`, `three_ds_failed`,
+            `recent_password_reset`, `new_device_login`, or
+            `new_country_login`. An omitted rule is disabled. An empty
+            object disables all weighted rules.
             Enabled rule weights must add up to at most 2147483647.
           additionalProperties:
             type: object
@@ -2062,9 +2231,11 @@ components:
                   `new_account`, or distinct cards on one device in 60 minutes
                   for `device_card_count`, or minimum trusted purchase count
                   for `new_device_spike`. Both count limits must be at least 1.
-                  Required except for `country_mismatch`, `cvv_mismatch`,
-                  `avs_mismatch`, and `three_ds_failed`, which have no
-                  threshold; a limit sent for them is saved but not used.
+                  For `recent_password_reset`, `new_device_login`, and
+                  `new_country_login` it is the window before the purchase in
+                  hours, from 1 to 720. Required except for `country_mismatch`,
+                  `cvv_mismatch`, `avs_mismatch`, and `three_ds_failed`, which
+                  have no threshold; a limit sent for them is saved but not used.
               window_days:
                 type: integer
                 format: int32
@@ -2384,7 +2555,9 @@ components:
       properties:
         name:
           type: string
-          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike, cvv_mismatch, avs_mismatch, three_ds_failed, blocklist]
+          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike,
+            cvv_mismatch, avs_mismatch, three_ds_failed, recent_password_reset, new_device_login,
+            new_country_login, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
@@ -2397,7 +2570,14 @@ components:
             configured purchase count and both amount thresholds.
             cvv_mismatch, avs_mismatch, and three_ds_failed fire when the
             request reports a CVV `mismatch`, an AVS `mismatch`, or a `failed`
-            3-D Secure authentication. blocklist is the entry of a purchase
+            3-D Secure authentication.
+            recent_password_reset fires when the player reset their password
+            within the window before the purchase. new_device_login fires when
+            any login within the window was the player's first from a device
+            that no earlier login and no earlier allowed or approved purchase
+            used. new_country_login does the same for the IP country. The two
+            login rules need an earlier login or trusted purchase with a device
+            or country to compare with. blocklist is the entry of a purchase
             blocked because its card, device, player or IP address is on the
             blocklist. It adds no points.
           example: card_velocity
@@ -2566,6 +2746,77 @@ components:
         created_at:
           type: string
           format: date-time
+
+    AccountEventRequest:
+      type: object
+      description: >-
+        A login or password reset of a player. Fields that are not listed are
+        rejected. Empty optional strings count as omitted.
+      additionalProperties: false
+      required: [event_id, player_id, event_type, event_time]
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+          description: >-
+            Unique ID of the event, chosen by the caller, at most 256 bytes
+            without control characters. Reuse this ID with the same fields to
+            retry after a timeout.
+          example: evt-20001
+        player_id:
+          type: string
+          minLength: 1
+          description: >-
+            The player ID, as in the score request, at most 256 bytes without
+            control characters.
+          example: player-381
+        event_type:
+          type: string
+          enum: [login, password_reset]
+        event_time:
+          type: string
+          format: date-time
+          description: >-
+            When the event happened, in RFC 3339 with a time zone. It is
+            converted to UTC. It must not be more than 5 minutes after the
+            server's current time; past times are allowed, so recorded
+            traffic can be replayed.
+          example: "2026-11-08T09:50:00Z"
+        device_id:
+          type: string
+          description: >-
+            Device ID of the login or reset, as in the score request, at most
+            256 bytes without control characters.
+          example: device-77aa
+        ip_country:
+          type: string
+          description: >-
+            Two-letter country code of the IP address. It is saved in upper
+            case and compared with the score request's IP country in upper
+            case.
+          example: TR
+
+    AccountEvent:
+      type: object
+      description: A saved account event, normalized and in UTC.
+      required: [event_id, player_id, event_type, event_time, device_id, ip_country]
+      properties:
+        event_id:
+          type: string
+        player_id:
+          type: string
+        event_type:
+          type: string
+          enum: [login, password_reset]
+        event_time:
+          type: string
+          format: date-time
+        device_id:
+          type: string
+          nullable: true
+        ip_country:
+          type: string
+          nullable: true
 
     ErrorResponse:
       type: object

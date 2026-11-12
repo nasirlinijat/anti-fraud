@@ -16,7 +16,9 @@ import (
 
 const (
 	maxDeviceSpikeWindowDays = 3650
-	maxNoteRunes             = 500
+	// maxAccountEventHours keeps the account history a purchase reads to 30 days.
+	maxAccountEventHours = 720
+	maxNoteRunes         = 500
 )
 
 type Store interface {
@@ -182,7 +184,8 @@ var rulesWithoutLimit = map[scoring.RuleName]bool{
 }
 
 // limit returns the rule's limit, or zero with a problem added to fields.
-// Only the rulesWithoutLimit may leave the limit out.
+// Only the rulesWithoutLimit may leave the limit out. The rules that read
+// account events take a window in hours.
 func (rule *DraftRule) limit(name scoring.RuleName, field string, fields map[string]string) int64 {
 	switch {
 	case rule.Limit == nil:
@@ -191,6 +194,8 @@ func (rule *DraftRule) limit(name scoring.RuleName, field string, fields map[str
 		}
 	case (name == scoring.RuleDeviceCardCount || name == scoring.RuleNewDeviceSpike) && *rule.Limit <= 0:
 		fields[field+".limit"] = "must be a positive integer"
+	case name.UsesAccountEvents() && (*rule.Limit < 1 || *rule.Limit > maxAccountEventHours):
+		fields[field+".limit"] = fmt.Sprintf("must be an integer from 1 to %d hours", maxAccountEventHours)
 	case *rule.Limit < 0:
 		fields[field+".limit"] = "must be a non-negative integer"
 	case name == scoring.RuleNewAccount && *rule.Limit > math.MaxInt64/int64(time.Hour):

@@ -111,12 +111,22 @@ func (s *purchases) Save(_ context.Context, p models.Purchase, d models.Decision
 
 func newServer(t *testing.T) (*httptest.Server, *purchases) {
 	t.Helper()
+	srv, store, _ := newServerWithAccountEvents(t)
+	return srv, store
+}
+
+// newServerWithAccountEvents serves POST /score and POST /account-events
+// from memory.
+func newServerWithAccountEvents(t *testing.T) (*httptest.Server, *purchases, *accountEvents) {
+	t.Helper()
 	store := &purchases{ids: map[string]int{}}
+	events := &accountEvents{saved: map[string]models.AccountEvent{}}
 	mux := http.NewServeMux()
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets{}, noBlocklist{}, store)), testKey)
+	transport.RegisterAccountEventRoutes(mux, transport.NewAccountEventHandler(events), testKey)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv, store
+	return srv, store, events
 }
 
 func generate(t *testing.T, cfg simulator.Config, count int) []simulator.Purchase {

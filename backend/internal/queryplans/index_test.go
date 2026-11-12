@@ -15,8 +15,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
 )
 
-// TestFeatureQueriesUseIndexes checks that every feature history and dashboard
-// statistics query can be served by an index. Sequential scans are disabled, so a query without a
+// TestFeatureQueriesUseIndexes checks that every feature history, account
+// history, and dashboard statistics query can be served by an index. Sequential scans are disabled, so a query without a
 // usable index still shows a sequential scan in its plan.
 func TestFeatureQueriesUseIndexes(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -68,6 +68,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"NetworkDevicePlayers", storage.NetworkDevicePlayersSQL, []any{"device-1", monthBefore, monthAfter, "player-1", "player", int32(30)}},
 		{"NetworkCardPlayers", storage.NetworkCardPlayersSQL, []any{"card-1", monthBefore, monthAfter, "player-1", "player", int32(30)}},
 		{"NetworkPlayerCards", storage.NetworkPlayerCardsSQL, []any{"player-1", monthBefore, monthAfter, "card-1", "card", int32(30)}},
+		{"AccountHistory", storage.AccountHistorySQL, []any{"player-1", pgtype.Timestamptz{Time: at.Time.Add(-24 * time.Hour), Valid: true}, at, int32(50)}},
 		{"GetTrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
 		}},

@@ -167,6 +167,8 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 | `quiet_takeover` | Fraud uses an established account from a new phone in the player's own country for a mid-sized amount, and can pass the rules |
 | `device_farm` | Fraud uses one emulator and one connection for four to six accounts created between ten minutes and ten hours earlier, each with its own card, one to three purchases each, minutes apart, ending in a larger purchase |
 
+Before a purchase, the simulator also sends the player's recent logins and password resets to `POST /account-events`: a login before some normal purchases, a rare password reset between 2 hours and 2 days earlier, a login from the new phone or from abroad, and for `account_takeover` and `quiet_takeover` a login from the new device minutes earlier, usually after a password reset. These events come from their own random stream, so a seed produces the same purchases as before, and `-dump` leaves them out. A failed account event is reported and the purchase is still scored. Console simulation runs log each failed account event with the run ID, and log the number of failures when the run finishes.
+
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 
 ## Scoring load test
@@ -242,9 +244,13 @@ The rules start off, so existing rulesets keep their behaviour. To enable them w
 
 With these weights, a failed 3-D Secure check or a CVV mismatch from a foreign IP address sends the purchase to review, and a CVV mismatch together with a failed 3-D Secure check blocks it.
 
+### Account takeover rules
+
+The account takeover rules start off. They read the logins and password resets that the game's account system sends to `POST /account-events` with the service key, and only events before the purchase count. `recent_password_reset` fires when the player reset their password within the limit before the purchase. `new_device_login` and `new_country_login` fire when any login within the limit was the player's first from a device or IP country that no earlier login and no earlier allowed or approved purchase used. Blocked, rejected, and undecided purchases do not make a device or country known. A player with no earlier device or country on record does not trigger them, and a missing field never fires a rule. Later logins from the same device or country do not hide the first one, and a purchase checks at most the 50 devices and 50 countries whose first login in the window is most recent, whether or not they turn out to be new. Event, player, and device IDs are at most 256 bytes without control characters, and the IP country is a two-letter code saved in upper case. The Rulesets page suggests 24 hours for each limit and weights of 30, 25, and 20 points, so none of them reaches the review threshold alone. Limits are whole hours from 1 to 720. Before rolling back to a service version that predates these rules, publish a new ruleset that omits them and keep the migration that adds the `account_events` table.
+
 ## API Documentation
 
-The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.
+The scoring, account event, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.
 
 To read it in Swagger UI, run:
 
@@ -296,8 +302,8 @@ The console opens on a sign-in screen. Reviewers see only the review queue; admi
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field, including the payment verification results. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
 | Simulator (`#/simulator`) | Starts live or backfill simulation runs, follows decisions every three seconds and shows recent runs. Runs continue across navigation, and history survives backend restarts. |
-| Review queue (`#/reviews`) | Claim a purchase awaiting review, then approve or reject it, or open a case to inspect its evidence. **My claims** lists only the purchases you hold. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
-| Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version with an optional note and shows its version number. Selecting an earlier version in the history shows its settings read-only. |
+| Review queue (`#/reviews`) | Claim a purchase awaiting review, then approve or reject it, or open a case to inspect its evidence, including the player's logins and password resets in the 30 days before the purchase. Events recorded after the decision are marked, because the rules could not have seen them. **My claims** lists only the purchases you hold. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
+| Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Each rule has a short description of what it checks. Publishing saves a new version with an optional note and shows its version number. Selecting an earlier version in the history shows its settings read-only. |
 | Assignments (`#/assignments`) | Admins see each reviewer's open claims and decided count, and release a claim to return a purchase to the shared queue. |
 | Accounts (`#/accounts`) | Admins list accounts, create reviewer or admin accounts, and disable an account, which ends its sessions. |
 

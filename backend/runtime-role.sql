@@ -29,6 +29,8 @@ GRANT UPDATE (disabled_at) ON accounts TO antifraud_api;
 GRANT DELETE ON sessions TO antifraud_api;
 -- Admins release open claims; a claim is never moved to another account.
 GRANT SELECT, INSERT, DELETE ON review_claims TO antifraud_api;
+-- Account events are evidence, so the service can add them but never change them.
+GRANT SELECT, INSERT ON account_events TO antifraud_api;
 
 COMMIT;
 
