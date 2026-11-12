@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -20,4 +21,9 @@ type DBTX interface {
 // start while the database is unreachable and report that through GET /ready.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	return pgxpool.New(ctx, databaseURL)
+}
+
+func DatabaseUnavailable(err error) bool {
+	var connectErr *pgconn.ConnectError
+	return errors.As(err, &connectErr) || pgconn.SafeToRetry(err)
 }
