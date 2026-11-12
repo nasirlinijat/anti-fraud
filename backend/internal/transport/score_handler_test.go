@@ -17,12 +17,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
@@ -124,13 +123,13 @@ func (f *fakePurchases) Save(_ context.Context, p models.Purchase, d models.Deci
 // fakeBlocklist matches every purchase when matched is set, and records the
 // subject it was asked about.
 type fakeBlocklist struct {
-	entry   blocklist.Entry
+	entry   models.BlocklistEntry
 	matched bool
 	err     error
-	subject blocklist.Subject
+	subject models.BlocklistSubject
 }
 
-func (f *fakeBlocklist) Match(_ context.Context, s blocklist.Subject) (blocklist.Entry, bool, error) {
+func (f *fakeBlocklist) Match(_ context.Context, s models.BlocklistSubject) (models.BlocklistEntry, bool, error) {
 	f.subject = s
 	return f.entry, f.matched, f.err
 }
@@ -522,14 +521,14 @@ const blocklistBody = `{
 	"ip_address": "203.0.113.9"
 }`
 
-func wantBlocklistSubject() blocklist.Subject {
+func wantBlocklistSubject() models.BlocklistSubject {
 	addr := netip.MustParseAddr("203.0.113.9")
-	return blocklist.Subject{CardToken: "card-9", PlayerID: "player-9", DeviceID: ptr("device-9"), IPAddress: &addr}
+	return models.BlocklistSubject{CardToken: "card-9", PlayerID: "player-9", DeviceID: ptr("device-9"), IPAddress: &addr}
 }
 
 func TestScoreBlocksBlocklistMatch(t *testing.T) {
 	purchases := &fakePurchases{}
-	bl := &fakeBlocklist{entry: blocklist.Entry{Type: blocklist.TypeCard, Value: "card-9", Reason: "chargebacks"}, matched: true}
+	bl := &fakeBlocklist{entry: models.BlocklistEntry{Type: models.BlocklistCard, Value: "card-9", Reason: "chargebacks"}, matched: true}
 	rec := serveWith(t, fakeRulesets{rs: testRuleset}, bl, purchases, testKey, blocklistBody)
 
 	if rec.Code != http.StatusOK {
@@ -601,7 +600,7 @@ func TestScoreDeviceHistoryLookup(t *testing.T) {
 				rs.Rules = map[scoring.RuleName]scoring.RuleConfig{scoring.RuleDeviceCardCount: *tc.rule}
 			}
 			store := &fakePurchases{deviceCardsErr: errors.New("device history unavailable")}
-			bl := &fakeBlocklist{matched: tc.blocked, entry: blocklist.Entry{Type: blocklist.TypeCard}}
+			bl := &fakeBlocklist{matched: tc.blocked, entry: models.BlocklistEntry{Type: models.BlocklistCard}}
 			rec := serveWith(t, fakeRulesets{rs: rs}, bl, store, testKey, tc.body)
 			if rec.Code != tc.wantStatus || store.deviceCardsCalls != tc.wantCalls {
 				t.Errorf("status = %d, device history calls = %d, want %d and %d: %s",
@@ -640,7 +639,7 @@ func TestScoreBlocklistWithPostgres(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerScore(mux, newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx)), testKey)
+	registerScore(mux, newHandler(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx)), testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(`{"transaction_id": "bl-1",
 		"event_time": "2026-11-08T10:00:00Z", "amount_minor": 1000, "player_id": "bl-player", "card_token": "bl-card"}`))
 	req.Header.Set(platform.APIKeyHeader, testKey)
@@ -664,7 +663,7 @@ func TestScoreBlocklistWithPostgres(t *testing.T) {
 // purchase on a card within an hour fires card_velocity under the default ruleset.
 func TestScoreWithPostgres(t *testing.T) {
 	tx := testTx(t)
-	h := newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))
+	h := newHandler(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 
@@ -742,7 +741,7 @@ func publishDeviceCardRuleset(t *testing.T, tx pgx.Tx, mux *http.ServeMux, previ
 	if published.Code != http.StatusCreated {
 		t.Fatalf("publish: %d %s", published.Code, published.Body)
 	}
-	active, err := rulesets.NewStore(tx).Active(ctx)
+	active, err := storage.NewRulesetStore(tx).Active(ctx)
 	wantConfig := scoring.RuleConfig{Enabled: true, Weight: 20, Limit: 5}
 	if err != nil || active.Version <= previous.Version || active.Rules[scoring.RuleDeviceCardCount] != wantConfig {
 		t.Fatalf("active ruleset = %+v, %v, want new version with %+v", active, err, wantConfig)
@@ -764,11 +763,11 @@ func publishDeviceCardRuleset(t *testing.T, tx pgx.Tx, mux *http.ServeMux, previ
 func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	tx := testTx(t)
 	ctx := t.Context()
-	rulesetStore := rulesets.NewStore(tx)
+	rulesetStore := storage.NewRulesetStore(tx)
 	purchaseStore := &deviceHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}
 	mux := http.NewServeMux()
-	rulesets.RegisterRoutes(mux, rulesetStore, testKey, testOperators(t))
-	registerScore(mux, newHandler(rulesetStore, blocklist.NewStore(tx), purchaseStore), testKey)
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(rulesetStore)), testKey, testOperators(t))
+	registerScore(mux, newHandler(rulesetStore, storage.NewBlocklistStore(tx), purchaseStore), testKey)
 
 	originalRuleset, err := rulesetStore.Active(ctx)
 	if err != nil {
@@ -847,7 +846,7 @@ func encodeScoreFields(t *testing.T, fields map[string]any) string {
 
 func TestScoreRetryComparesStoredPurchase(t *testing.T) {
 	tx := testTx(t)
-	handler := newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))
+	handler := newHandler(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))
 	model := &fakeModel{score: 0.75}
 	if err := handler.UseModel(model, testPolicy); err != nil {
 		t.Fatal(err)
@@ -971,7 +970,7 @@ func synchronizedScoreMuxes(t *testing.T, pool *pgxpool.Pool, arrived chan<- str
 		t.Cleanup(conn.Release)
 		store := synchronizedScoreStore{PurchaseStore: storage.NewPurchaseStore(conn), arrived: arrived, start: start}
 		muxes[i] = http.NewServeMux()
-		registerScore(muxes[i], newHandler(rulesets.NewStore(conn), blocklist.NewStore(conn), store), testKey)
+		registerScore(muxes[i], newHandler(storage.NewRulesetStore(conn), storage.NewBlocklistStore(conn), store), testKey)
 	}
 	return muxes
 }

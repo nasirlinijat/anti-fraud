@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 func TestRuntimeRolePermissions(t *testing.T) {
@@ -50,7 +50,7 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	rules := rulesets.NewStore(tx)
+	rules := storage.NewRulesetStore(tx)
 	active, err := rules.Active(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -59,12 +59,12 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		ReviewThreshold: active.ReviewThreshold,
 		BlockThreshold:  active.BlockThreshold,
 		Rules:           active.Rules,
-	}, "test-operator"); err != nil {
+	}, "test-operator", nil); err != nil {
 		t.Fatalf("publish with restricted role: %v", err)
 	}
-	blocks := blocklist.NewStore(tx)
-	entry, err := blocks.Add(ctx, blocklist.Entry{
-		Type: blocklist.TypeDevice, Value: "runtime-role-test", Reason: "permission check",
+	blocks := storage.NewBlocklistStore(tx)
+	entry, err := blocks.Add(ctx, models.BlocklistEntry{
+		Type: models.BlocklistDevice, Value: "runtime-role-test", Reason: "permission check",
 	}, "test-operator")
 	if err != nil {
 		t.Fatalf("add with restricted role: %v", err)

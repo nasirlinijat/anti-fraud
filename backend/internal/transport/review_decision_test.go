@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
@@ -240,7 +238,7 @@ func insertDeviceReview(t *testing.T, tx pgx.Tx, txnID, device string) int64 {
 
 func deviceBlocked(t *testing.T, tx pgx.Tx, device string) bool {
 	t.Helper()
-	_, found, err := blocklist.NewStore(tx).Match(context.Background(), blocklist.Subject{CardToken: "none", PlayerID: "none", DeviceID: &device})
+	_, found, err := storage.NewBlocklistStore(tx).Match(context.Background(), models.BlocklistSubject{CardToken: "none", PlayerID: "none", DeviceID: &device})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +313,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	ctx := context.Background()
 	mux := http.NewServeMux()
 	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), testAnalystKeys(t))
-	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
+	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {
 		t.Helper()

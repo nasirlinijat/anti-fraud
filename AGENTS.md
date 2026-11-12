@@ -43,8 +43,8 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Area | Decision |
 |---|---|
 | Backend shape | Modular monolith in Go |
-| Code layout | Layers: transport (HTTP) → services (business logic) → storage (SQL), with domain types in models and a pure scoring core that has no SQL or HTTP. Features not moved yet stay package by feature |
-| Database access | Raw SQL run with the pgx driver, kept as constants in each feature package |
+| Code layout | Layers: transport (HTTP) → services (business logic) → storage (SQL), with domain types in models and a pure scoring core that has no SQL or HTTP |
+| Database access | Raw SQL run with the pgx driver, kept as constants in the storage layer |
 | Schema changes | Versioned SQL migration files applied with golang-migrate |
 | Rule configuration | Versioned rulesets in the database. A stored version never changes: a change adds a new version and makes it the only active one, in one transaction |
 | Frontend | React with TypeScript |
@@ -63,14 +63,17 @@ backend/
 ├── cmd/api/main.go     Wiring only: stores → services → handlers
 └── internal/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
-    ├── services/score/ Score flow: saved decision, blocklist, model inputs, model, rules, save
-    ├── services/review/ Review rules: queue pages, one decision per purchase, reject can blocklist the device
-    ├── storage/        SQL for purchases, decisions and reviews
-    ├── models/         Domain types shared by the layers (Purchase, Decision, review queue and case)
+    ├── services/
+    │   ├── score/      Score flow: saved decision, blocklist, model inputs, model, rules, save
+    │   ├── review/     Review rules: queue pages, one decision per purchase, reject can blocklist the device
+    │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
+    │   ├── blocklist/  Blocklist entry validation
+    │   ├── stats/      Dashboard periods
+    │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
+    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs
+    ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
-    ├── rulesets/       Rule configuration
-    ├── blocklist/      Blocklist entries
-    ├── stats/          Dashboard queries
+    ├── labels/         Private fraud labels, kept apart from everything scoring uses
     ├── simulator/      Demo traffic generator
     ├── lgbm/           Model loader and prediction
     ├── features/       Model inputs from the request and purchase history
@@ -80,7 +83,7 @@ backend/
 
 Each feature registers its own routes, so `main.go` contains only wiring.
 
-Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Scoring and reviews follow this layout; the other features move to it one at a time.
+Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured.
 
 ### 3.3 Model Data Pipeline
 

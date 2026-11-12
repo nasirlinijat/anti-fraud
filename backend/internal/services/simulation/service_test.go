@@ -1,13 +1,10 @@
-package simulations
+package simulation
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 type scoreFunc func(context.Context, simulator.Request) (simulator.Result, error)
@@ -25,22 +24,21 @@ type scoreFunc func(context.Context, simulator.Request) (simulator.Result, error
 func (f scoreFunc) Score(c context.Context, r simulator.Request) (simulator.Result, error) {
 	return f(c, r)
 }
+
 func TestValidation(t *testing.T) {
-	for _, s := range []Settings{{}, {RequestID: "a", Mode: "live", Rate: 51}, {RequestID: "a", Mode: "live", Rate: 1, Scenarios: []simulator.Pattern{"bad"}}, {RequestID: "a", Mode: "backfill", Rate: 1, Count: 10001, Scenarios: []simulator.Pattern{"normal"}}} {
-		if len(s.validate()) == 0 {
+	for _, s := range []models.SimulationSettings{{}, {RequestID: "a", Mode: "live", Rate: 51}, {RequestID: "a", Mode: "live", Rate: 1, Scenarios: []simulator.Pattern{"bad"}}, {RequestID: "a", Mode: "backfill", Rate: 1, Count: 10001, Scenarios: []simulator.Pattern{"normal"}}} {
+		if len(validate(&s)) == 0 {
 			t.Fatal("accepted invalid settings")
 		}
 	}
 }
-func TestDisabled(t *testing.T) {
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, false, "key", platform.OperatorKeys{})
-	for _, path := range []string{"/simulations", "/simulations/x", "/simulations/x/stop"} {
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-		if w.Code != 404 {
-			t.Fatal(w.Code)
-		}
+
+func TestStartRejectsInvalidSettingsBeforeLocking(t *testing.T) {
+	s := &Service{store: nil, cancels: map[string]context.CancelFunc{}}
+	_, _, err := s.Start(t.Context(), "op", models.SimulationSettings{RequestID: "a", Mode: "live", Rate: 51})
+	var invalid *ValidationError
+	if !errors.As(err, &invalid) || invalid.Fields["rate"] == "" || invalid.Fields["scenarios"] == "" {
+		t.Fatalf("err = %v, want rate and scenarios problems", err)
 	}
 }
 
@@ -84,9 +82,12 @@ func isolatedSchema(t *testing.T, dsn string) (*pgxpool.Pool, string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	files, e := filepath.Glob("../../migrations/*.up.sql")
+	files, e := filepath.Glob("../../../migrations/*.up.sql")
 	if e != nil {
 		t.Fatal(e)
+	}
+	if len(files) == 0 {
+		t.Fatal("no migrations found")
 	}
 	for _, f := range files {
 		body, e := os.ReadFile(f)
@@ -141,19 +142,20 @@ func runtimePool(t *testing.T, pool *pgxpool.Pool, ownerDSN, schema string) (*pg
 	return runtime, withSearchPath(t, runtimeDSN, schema)
 }
 
-func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pgxpool.Pool) {
+func setup(t *testing.T, scorer simulator.Scorer) (*Service, *storage.SimulationStore, *pgxpool.Pool) {
 	t.Helper()
 	ownerDSN := testDSN(t)
 	pool, schema := isolatedSchema(t, ownerDSN)
 	runtime, dsn := runtimePool(t, pool, ownerDSN, schema)
-	m, e := New(t.Context(), runtime, dsn, scorer)
+	store := storage.NewSimulationStore(runtime, dsn)
+	s, e := NewService(t.Context(), store, scorer)
 	if e != nil {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if e := m.Close(ctx); e != nil {
+		if e := s.Close(ctx); e != nil {
 			t.Error(e)
 		}
 		if runtime != pool {
@@ -161,36 +163,24 @@ func setup(t *testing.T, scorer simulator.Scorer) (*Manager, *http.ServeMux, *pg
 		}
 		pool.Close()
 	})
-	ops, e := platform.ParseOperatorKeys(`[{"operator_id":"op","key":"operator"}]`, "service", platform.AnalystKeys{})
-	if e != nil {
-		t.Fatal(e)
-	}
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, m, true, "service", ops)
-	return m, mux, pool
+	return s, store, pool
 }
 
-func call(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	if key != "" {
-		r.Header.Set("X-API-Key", key)
-	}
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, r)
-	return w
-}
-func decode(t *testing.T, w *httptest.ResponseRecorder) Run {
+// settings decodes a start request body over the defaults, the way the
+// handler does.
+func settings(t *testing.T, body string) models.SimulationSettings {
 	t.Helper()
-	var r Run
-	if e := json.Unmarshal(w.Body.Bytes(), &r); e != nil {
-		t.Fatal(e, w.Body.String())
+	s := DefaultSettings()
+	if err := json.Unmarshal([]byte(body), &s); err != nil {
+		t.Fatal(err)
 	}
-	return r
+	return s
 }
-func wait(t *testing.T, m *Manager, id string) Run {
+
+func wait(t *testing.T, s *Service, id string) models.SimulationRun {
 	t.Helper()
 	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); {
-		r, e := m.get(t.Context(), id)
+		r, e := s.Get(t.Context(), id)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -200,7 +190,7 @@ func wait(t *testing.T, m *Manager, id string) Run {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("worker did not finish")
-	return Run{}
+	return models.SimulationRun{}
 }
 
 // heldScorer returns a scorer that closes entered on its first call and
@@ -221,95 +211,97 @@ func heldScorer(entered chan<- struct{}, release <-chan struct{}) simulator.Scor
 func TestDurableLifecycle(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	m, mux, _ := setup(t, heldScorer(entered, release))
-	body := `{"request_id":"one","mode":"live","rate":50}`
-	for _, key := range []string{"", "service", "bad"} {
-		if w := call(mux, "POST", "/simulations", key, body); w.Code != 401 {
-			t.Fatal(w.Code)
-		}
+	s, store, _ := setup(t, heldScorer(entered, release))
+	one := settings(t, `{"request_id":"one","mode":"live","rate":50}`)
+	run, created, err := s.Start(t.Context(), "op", one)
+	if err != nil || !created {
+		t.Fatal(created, err)
 	}
-	w := call(mux, "POST", "/simulations", "operator", body)
-	if w.Code != 202 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	run := decode(t, w)
 	<-entered
-	for _, key := range []string{"operator", "bad", ""} {
-		if w := call(mux, "GET", "/simulations/"+run.ID, key, ""); w.Code != 401 {
-			t.Fatal(w.Code)
-		}
+	again, created, err := s.Start(t.Context(), "op", settings(t, `{"request_id":"one","mode":"live","rate":50}`))
+	if err != nil || created || again.ID != run.ID {
+		t.Fatal("retry did not return the same run", created, err)
 	}
-	if w := call(mux, "POST", "/simulations", "operator", body); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
+	var active *ActiveError
+	if _, _, err := s.Start(t.Context(), "op", settings(t, `{"request_id":"two","mode":"live","rate":5}`)); !errors.As(err, &active) || active.RunID != run.ID {
+		t.Fatalf("err = %v, want the active run %s", err, run.ID)
 	}
-	if w := call(mux, "POST", "/simulations", "operator", `{"request_id":"two","mode":"live","rate":5}`); w.Code != 409 {
-		t.Fatal(w.Code, w.Body.String())
+	if _, _, err := s.Start(t.Context(), "op", settings(t, `{"request_id":"one","mode":"live","rate":6}`)); !errors.Is(err, ErrRequestReused) {
+		t.Fatalf("err = %v, want ErrRequestReused", err)
 	}
-	if w := call(mux, "POST", "/simulations", "operator", `{"request_id":"one","mode":"live","rate":6}`); w.Code != 409 {
-		t.Fatal(w.Code)
-	}
-	other, e := New(t.Context(), m.pool, m.dsn, m.client)
+	other, e := NewService(t.Context(), store, s.client)
 	if e != nil {
 		t.Fatal(e)
 	}
-	current, e := other.get(t.Context(), run.ID)
+	current, e := other.Get(t.Context(), run.ID)
 	if e != nil || current.Status == "interrupted" {
 		t.Fatal("stole active worker", e)
 	}
-	if w := call(mux, "POST", "/simulations/"+run.ID+"/stop", "operator", ""); w.Code != 202 {
-		t.Fatal(w.Code, w.Body.String())
+	stopping, err := s.Stop(t.Context(), run.ID, "op")
+	if err != nil || stopping.Status != "stopping" {
+		t.Fatal(stopping.Status, err)
 	}
 	close(release)
-	r := wait(t, m, run.ID)
+	r := wait(t, s, run.ID)
 	if r.Status != "stopped" || r.Sent != 1 || r.Reviewed != 1 || r.Pending {
 		t.Fatalf("bad final snapshot %+v", r)
 	}
-	if w := call(mux, "POST", "/simulations/"+run.ID+"/stop", "operator", ""); w.Code != 200 {
-		t.Fatal(w.Code)
+	if stopped, err := s.Stop(t.Context(), run.ID, "op"); err != nil || stopped.Status != "stopped" {
+		t.Fatal(stopped.Status, err)
 	}
-	if w := call(mux, "GET", "/simulations", "service", ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
+	if _, _, err := s.List(t.Context(), "", 20); err != nil {
+		t.Fatal(err)
 	}
-	if w := call(mux, "POST", "/simulations", "operator", body); w.Code != 200 || decode(t, w).ID != run.ID {
-		t.Fatal(w.Code, w.Body.String())
+	if done, created, err := s.Start(t.Context(), "op", one); err != nil || created || done.ID != run.ID {
+		t.Fatal(created, err)
 	}
 }
+
 func TestBackfillAndConcurrentStarts(t *testing.T) {
-	m, mux, _ := setup(t, scoreFunc(func(_ context.Context, r simulator.Request) (simulator.Result, error) {
+	s, _, _ := setup(t, scoreFunc(func(_ context.Context, r simulator.Request) (simulator.Result, error) {
 		if r.EventTime.After(time.Now()) {
 			return simulator.Result{}, fmt.Errorf("future backfill")
 		}
 		return simulator.Result{Outcome: "allow"}, nil
 	}))
+	type started struct {
+		run     models.SimulationRun
+		created bool
+		err     error
+	}
 	var wg sync.WaitGroup
-	responses := make(chan *httptest.ResponseRecorder, 8)
+	results := make(chan started, 8)
 	for i := range 8 {
 		wg.Go(func() {
-			responses <- call(mux, "POST", "/simulations", "operator", fmt.Sprintf(`{"request_id":"c%d","mode":"backfill","count":20,"rate":50,"scenarios":["card_testing"]}`, i))
+			run, created, err := s.Start(t.Context(), "op", settings(t, fmt.Sprintf(`{"request_id":"c%d","mode":"backfill","count":20,"rate":50,"scenarios":["card_testing"]}`, i)))
+			results <- started{run, created, err}
 		})
 	}
 	wg.Wait()
-	close(responses)
+	close(results)
 	accepted := 0
 	var id string
-	for w := range responses {
-		if w.Code == 202 {
+	for res := range results {
+		var active *ActiveError
+		switch {
+		case res.err == nil && res.created:
 			accepted++
-			id = decode(t, w).ID
-		} else if w.Code != 409 {
-			t.Fatal(w.Code, w.Body.String())
+			id = res.run.ID
+		case !errors.As(res.err, &active):
+			t.Fatal(res.created, res.err)
 		}
 	}
 	if accepted != 1 {
 		t.Fatal("accepted", accepted)
 	}
-	r := wait(t, m, id)
+	r := wait(t, s, id)
 	if r.Status != "completed" || r.Sent != 20 || r.Allowed != 20 {
 		t.Fatalf("%+v", r)
 	}
 }
+
 func TestRecoveryCommitGap(t *testing.T) {
-	m, _, pool := setup(t, scoreFunc(func(context.Context, simulator.Request) (simulator.Result, error) { return simulator.Result{}, nil }))
+	s, store, pool := setup(t, scoreFunc(func(context.Context, simulator.Request) (simulator.Result, error) { return simulator.Result{}, nil }))
 	_, e := pool.Exec(t.Context(), `INSERT INTO simulation_runs(id,operator_id,request_id,settings,status,pending_transaction_id) VALUES('orphan','op','recover','{"request_id":"recover","mode":"live","rate":5,"seed":1,"count":0,"scenarios":["normal"]}','running','af77-recover-txn')`)
 	if e != nil {
 		t.Fatal(e)
@@ -323,56 +315,49 @@ func TestRecoveryCommitGap(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	c, ok, e := m.lock(t.Context())
+	c, ok, e := store.Lock(t.Context())
 	if e != nil || !ok {
 		t.Fatal(ok, e)
 	}
-	defer c.Close(context.Background())
+	defer c.Close()
 	for range 2 {
-		if e = m.recover(t.Context(), c); e != nil {
+		if e = c.Recover(t.Context()); e != nil {
 			t.Fatal(e)
 		}
 	}
-	r, e := m.get(t.Context(), "orphan")
+	r, e := s.Get(t.Context(), "orphan")
 	if e != nil || r.Status != "interrupted" || r.Sent != 1 || r.Blocked != 1 || r.Pending {
 		t.Fatalf("%+v %v", r, e)
 	}
 }
 
 func TestFailureAndHistory(t *testing.T) {
-	m, mux, _ := setup(t, scoreFunc(func(context.Context, simulator.Request) (simulator.Result, error) {
+	s, _, _ := setup(t, scoreFunc(func(context.Context, simulator.Request) (simulator.Result, error) {
 		return simulator.Result{}, fmt.Errorf("transport unavailable")
 	}))
-	for _, body := range []string{`{`, `null`, `{"mode":"live","request_id":"bad","unknown":1}`, `{"mode":"live","request_id":"bad"} {}`} {
-		if w := call(mux, "POST", "/simulations", "operator", body); w.Code != 400 {
-			t.Fatal(w.Code, w.Body.String())
-		}
+	run, created, err := s.Start(t.Context(), "op", settings(t, `{"request_id":"failure","mode":"live"}`))
+	if err != nil || !created {
+		t.Fatal(created, err)
 	}
-	w := call(mux, "POST", "/simulations", "operator", `{"request_id":"failure","mode":"live"}`)
-	if w.Code != 202 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	r := wait(t, m, decode(t, w).ID)
+	r := wait(t, s, run.ID)
 	if r.Status != "failed" || r.Failed != 1 || !r.Pending || r.Sent != 0 {
 		t.Fatalf("%+v", r)
 	}
-	if w := call(mux, "GET", "/simulations?limit=1", "service", ""); w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
+	if items, next, err := s.List(t.Context(), "", 1); err != nil || len(items) != 1 || next != "" {
+		t.Fatal(len(items), next, err)
 	}
-	for _, path := range []string{"/simulations?limit=0", "/simulations?before=unknown"} {
-		if w := call(mux, "GET", path, "service", ""); w.Code != 400 {
-			t.Fatal(w.Code)
-		}
+	if _, _, err := s.List(t.Context(), "unknown", 20); !errors.Is(err, models.ErrInvalidSimulationCursor) {
+		t.Fatalf("err = %v, want ErrInvalidSimulationCursor", err)
 	}
-	if w := call(mux, "GET", "/simulations/unknown", "service", ""); w.Code != 404 {
-		t.Fatal(w.Code)
+	if _, err := s.Get(t.Context(), "unknown"); !errors.Is(err, models.ErrSimulationNotFound) {
+		t.Fatalf("err = %v, want ErrSimulationNotFound", err)
 	}
 }
 
 func TestControllerLossStopsDispatch(t *testing.T) {
 	var pool *pgxpool.Pool
 	calls := 0
-	m, _, p := setup(t, scoreFunc(func(ctx context.Context, req simulator.Request) (simulator.Result, error) {
+	s, store, p := setup(t, scoreFunc(func(ctx context.Context, req simulator.Request) (simulator.Result, error) {
 		calls++
 		_, e := pool.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype='advisory' AND classid=27149 AND objid=77 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`)
 		if e != nil {
@@ -381,16 +366,12 @@ func TestControllerLossStopsDispatch(t *testing.T) {
 		return simulator.Result{Outcome: "allow"}, nil
 	}))
 	pool = p
-	ops, _ := platform.ParseOperatorKeys(`[{"operator_id":"op","key":"operator"}]`, "service", platform.AnalystKeys{})
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, m, true, "service", ops)
-	w := call(mux, "POST", "/simulations", "operator", `{"request_id":"connection-loss","mode":"live","rate":50}`)
-	if w.Code != 202 {
-		t.Fatal(w.Code, w.Body.String())
+	run, created, err := s.Start(t.Context(), "op", settings(t, `{"request_id":"connection-loss","mode":"live","rate":50}`))
+	if err != nil || !created {
+		t.Fatal(created, err)
 	}
-	id := decode(t, w).ID
 	done := make(chan struct{})
-	go func() { m.wg.Wait(); close(done) }()
+	go func() { s.wg.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -399,11 +380,11 @@ func TestControllerLossStopsDispatch(t *testing.T) {
 	if calls != 1 {
 		t.Fatal("dispatched after losing ownership", calls)
 	}
-	recovered, e := New(t.Context(), m.pool, m.dsn, m.client)
+	recovered, e := NewService(t.Context(), store, s.client)
 	if e != nil {
 		t.Fatal(e)
 	}
-	r, e := recovered.get(t.Context(), id)
+	r, e := recovered.Get(t.Context(), run.ID)
 	if e != nil || r.Status != "interrupted" || !r.Pending {
 		t.Fatalf("%+v %v", r, e)
 	}

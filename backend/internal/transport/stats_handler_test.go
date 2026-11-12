@@ -1,4 +1,4 @@
-package stats
+package transport
 
 import (
 	"context"
@@ -9,30 +9,31 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/stats"
 )
 
-const testKey = "test-key"
-
 type fakeSource struct {
-	sum      Summary
+	sum      models.StatsSummary
 	err      error
-	window   Window
+	window   models.StatsWindow
 	maxRules int
 }
 
-func (f *fakeSource) Summary(_ context.Context, window Window, maxRules int) (Summary, error) {
+func (f *fakeSource) Summary(_ context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error) {
 	f.window, f.maxRules = window, maxRules
 	return f.sum, f.err
 }
 
-var now = time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+var statsNow = time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 
-func get(t *testing.T, src Source, key, query string) *httptest.ResponseRecorder {
+func getStats(t *testing.T, src stats.Store, key, query string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := NewHandler(src)
-	h.now = func() time.Time { return now }
+	h := NewStatsHandler(stats.NewService(src))
+	h.now = func() time.Time { return statsNow }
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	RegisterStatsRoutes(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodGet, "/stats"+query, nil)
 	if key != "" {
 		req.Header.Set("X-API-Key", key)
@@ -49,28 +50,28 @@ func TestStatsPeriods(t *testing.T) {
 		wantSince time.Time
 		wantWidth time.Duration
 	}{
-		{"", "24h", now.Add(-24 * time.Hour), time.Hour},
-		{"?period=15m", "15m", now.Add(-15 * time.Minute), time.Minute},
-		{"?period=1h", "1h", now.Add(-time.Hour), 5 * time.Minute},
-		{"?period=7d", "7d", now.Add(-7 * 24 * time.Hour), 6 * time.Hour},
+		{"", "24h", statsNow.Add(-24 * time.Hour), time.Hour},
+		{"?period=15m", "15m", statsNow.Add(-15 * time.Minute), time.Minute},
+		{"?period=1h", "1h", statsNow.Add(-time.Hour), 5 * time.Minute},
+		{"?period=7d", "7d", statsNow.Add(-7 * 24 * time.Hour), 6 * time.Hour},
 		{"?period=all", "all", time.Unix(0, 0).UTC(), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.period, func(t *testing.T) {
-			src := &fakeSource{sum: Summary{TopRules: []RuleCount{}}}
-			rec := get(t, src, testKey, tt.query)
+			src := &fakeSource{sum: models.StatsSummary{TopRules: []models.RuleCount{}}}
+			rec := getStats(t, src, testKey, tt.query)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 			}
-			wantWindow := Window{Since: tt.wantSince, Until: now, BucketWidth: tt.wantWidth}
-			if src.window != wantWindow || src.maxRules != maxRules {
-				t.Errorf("asked for window %+v and %d rules, want %+v and %d rules", src.window, src.maxRules, wantWindow, maxRules)
+			wantWindow := models.StatsWindow{Since: tt.wantSince, Until: statsNow, BucketWidth: tt.wantWidth}
+			if src.window != wantWindow || src.maxRules != 10 {
+				t.Errorf("asked for window %+v and %d rules, want %+v and %d rules", src.window, src.maxRules, wantWindow, 10)
 			}
-			var got response
+			var got statsResponse
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if got.Period != tt.period || !got.Since.Equal(tt.wantSince) || !got.GeneratedAt.Equal(now) {
+			if got.Period != tt.period || !got.Since.Equal(tt.wantSince) || !got.GeneratedAt.Equal(statsNow) {
 				t.Errorf("response period %s since %v at %v", got.Period, got.Since, got.GeneratedAt)
 			}
 		})
@@ -79,18 +80,18 @@ func TestStatsPeriods(t *testing.T) {
 
 func TestStatsResponseBody(t *testing.T) {
 	p95 := int64(1234)
-	src := &fakeSource{sum: Summary{
-		Outcomes:            Outcomes{Allow: 8, Review: 1, Block: 1, Total: 10},
-		TopRules:            []RuleCount{{Name: "high_amount", Fired: 2, Points: 60}},
+	src := &fakeSource{sum: models.StatsSummary{
+		Outcomes:            models.OutcomeCounts{Allow: 8, Review: 1, Block: 1, Total: 10},
+		TopRules:            []models.RuleCount{{Name: "high_amount", Fired: 2, Points: 60}},
 		ReviewQueue:         3,
-		Model:               ModelEffects{Scored: 10, Flagged: 1, Cleared: 2},
+		Model:               models.ModelEffects{Scored: 10, Flagged: 1, Cleared: 2},
 		P95ScoringLatencyUs: &p95,
 		BlockedValueMinor:   "18446744073709551614",
-		DecisionSeries: DecisionSeries{BucketSeconds: 300, Buckets: []DecisionBucket{
-			{Start: now.Add(-time.Hour), Allow: 8, Review: 1, Block: 1},
+		DecisionSeries: models.DecisionSeries{BucketSeconds: 300, Buckets: []models.DecisionBucket{
+			{Start: statsNow.Add(-time.Hour), Allow: 8, Review: 1, Block: 1},
 		}},
 	}}
-	rec := get(t, src, testKey, "?period=1h")
+	rec := getStats(t, src, testKey, "?period=1h")
 	body := rec.Body.String()
 	for _, want := range []string{
 		`"outcomes":{"allow":8,"review":1,"block":1,"total":10}`,
@@ -108,20 +109,20 @@ func TestStatsResponseBody(t *testing.T) {
 }
 
 func TestStatsRejectsUnknownPeriod(t *testing.T) {
-	rec := get(t, &fakeSource{}, testKey, "?period=2h")
+	rec := getStats(t, &fakeSource{}, testKey, "?period=2h")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"period"`) {
 		t.Fatalf("status %d body %s, want 400 naming period", rec.Code, rec.Body.String())
 	}
 }
 
 func TestStatsRequiresAPIKey(t *testing.T) {
-	if rec := get(t, &fakeSource{}, "", ""); rec.Code != http.StatusUnauthorized {
+	if rec := getStats(t, &fakeSource{}, "", ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 
 func TestStatsInternalError(t *testing.T) {
-	rec := get(t, &fakeSource{err: errors.New("database is down")}, testKey, "")
+	rec := getStats(t, &fakeSource{err: errors.New("database is down")}, testKey, "")
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "database is down") {
 		t.Fatalf("status %d body %s, want 500 without the internal error", rec.Code, rec.Body.String())
 	}
