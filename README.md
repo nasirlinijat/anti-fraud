@@ -277,6 +277,18 @@ When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASS
 
 The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 
+## Score limits
+
+`POST /score` protects itself from overload in two ways:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SCORE_RATE_LIMIT` | `100` | Requests per second allowed for each API key, refilled continuously (a token bucket). `0` turns the limit off, for example for a load test |
+| `SCORE_RATE_BURST` | `200` | How many requests a key can send at once before the per-second rate applies |
+| `SCORE_TIMEOUT` | `2s` | Deadline for one score request, passed to every database query. Any Go duration, such as `500ms` |
+
+Over the limit the API answers `429 Too Many Requests` with a `Retry-After` header in seconds. Only requests with a valid key count, so wrong keys cannot use up the limit. When the deadline passes, the API answers `503 Service Unavailable` with `Retry-After: 1`, and nothing is saved: the purchase, its decision and its feature counts are written in one transaction that is rolled back. A retry with the same transaction ID then scores normally.
+
 ## Logs
 
 The backend writes one JSON object per line to standard output with `log/slog`, so Datadog reads every field as an attribute. Every line has `time`, `level`, `msg` and `service` (`anti-fraud-backend`). Each HTTP request is logged once:

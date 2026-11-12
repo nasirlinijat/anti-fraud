@@ -46,7 +46,7 @@ func main() {
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), cfg.APIKey, cfg.OperatorKeys)
 	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetService)
-	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)

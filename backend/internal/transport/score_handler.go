@@ -36,15 +36,28 @@ type ScoreService interface {
 type ScoreHandler struct {
 	service ScoreService
 	now     func() time.Time
+	limits  platform.ScoreLimits
 }
 
 func NewScoreHandler(service ScoreService) *ScoreHandler {
 	return &ScoreHandler{service: service, now: time.Now}
 }
 
+func (h *ScoreHandler) UseLimits(limits platform.ScoreLimits) *ScoreHandler {
+	h.limits = limits
+	return h
+}
+
 // RegisterScoreRoutes registers POST /score behind API key authentication.
 func RegisterScoreRoutes(mux *http.ServeMux, h *ScoreHandler, apiKey string) {
-	mux.Handle("POST /score", platform.RequireAPIKey(apiKey, h))
+	var handler http.Handler = h
+	if h.limits.Timeout > 0 {
+		handler = WithTimeout(h.limits.Timeout, handler)
+	}
+	if h.limits.RatePerSecond > 0 {
+		handler = RateLimit(newRateLimiter(h.limits.RatePerSecond, h.limits.Burst), handler)
+	}
+	mux.Handle("POST /score", platform.RequireAPIKey(apiKey, handler))
 }
 
 // scoreRequest is the score request body. Amounts are integer minor units and
@@ -109,6 +122,10 @@ func (h *ScoreHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Error:  "a purchase with this transaction ID was already scored",
 			Fields: map[string]string{"transaction_id": "is already scored"},
 		})
+	case err != nil && (r.Context().Err() != nil || errors.Is(err, context.DeadlineExceeded)):
+		slog.WarnContext(r.Context(), "score purchase stopped", "transaction_id", p.TransactionID, "error", err)
+		w.Header().Set("Retry-After", "1")
+		platform.WriteError(w, http.StatusServiceUnavailable, "scoring took too long, nothing was saved; retry later")
 	case err != nil:
 		slog.ErrorContext(r.Context(), "score purchase", "transaction_id", p.TransactionID, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")

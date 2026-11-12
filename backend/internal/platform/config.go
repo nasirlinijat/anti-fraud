@@ -2,13 +2,26 @@ package platform
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
-const defaultPort = "8080"
+const (
+	defaultPort           = "8080"
+	defaultScoreRateLimit = 100
+	defaultScoreRateBurst = 200
+	defaultScoreTimeout   = 2 * time.Second
+)
+
+type ScoreLimits struct {
+	RatePerSecond float64
+	Burst         int
+	Timeout       time.Duration
+}
 
 // Config holds the settings read from environment variables.
 type Config struct {
@@ -22,6 +35,7 @@ type Config struct {
 	APIKey       string
 	AnalystKeys  AnalystKeys
 	OperatorKeys OperatorKeys
+	ScoreLimits  ScoreLimits
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -65,7 +79,37 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.ScoreLimits, err = loadScoreLimits()
+	if err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+func loadScoreLimits() (ScoreLimits, error) {
+	limits := ScoreLimits{RatePerSecond: defaultScoreRateLimit, Burst: defaultScoreRateBurst, Timeout: defaultScoreTimeout}
+	if raw := os.Getenv("SCORE_RATE_LIMIT"); raw != "" {
+		rate, err := strconv.ParseFloat(raw, 64)
+		if err != nil || rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			return ScoreLimits{}, fmt.Errorf("SCORE_RATE_LIMIT must be a number of requests per second, 0 or more")
+		}
+		limits.RatePerSecond = rate
+	}
+	if raw := os.Getenv("SCORE_RATE_BURST"); raw != "" {
+		burst, err := strconv.Atoi(raw)
+		if err != nil || burst < 1 {
+			return ScoreLimits{}, fmt.Errorf("SCORE_RATE_BURST must be a whole number of requests, 1 or more")
+		}
+		limits.Burst = burst
+	}
+	if raw := os.Getenv("SCORE_TIMEOUT"); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 {
+			return ScoreLimits{}, fmt.Errorf("SCORE_TIMEOUT must be a positive duration such as 2s or 500ms")
+		}
+		limits.Timeout = timeout
+	}
+	return limits, nil
 }
 
 func isSpaceOrControl(r rune) bool {
