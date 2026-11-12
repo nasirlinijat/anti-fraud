@@ -20,7 +20,14 @@ type DBTX interface {
 // URL is invalid. Connections are opened in the background, so the service can
 // start while the database is unreachable and report that through GET /ready.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	return pgxpool.New(ctx, databaseURL)
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if TracingEnabled() {
+		config.ConnConfig.Tracer = queryTracer{}
+	}
+	return pgxpool.NewWithConfig(ctx, config)
 }
 
 func DatabaseUnavailable(err error) bool {

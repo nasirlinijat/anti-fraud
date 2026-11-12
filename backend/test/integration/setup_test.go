@@ -42,6 +42,7 @@ var (
 	runtimeRole       bool
 	testRedisInstance *testdb.Redis
 	testRedisClient   *redis.Client
+	appDatabaseURL    string
 )
 
 func TestMain(m *testing.M) {
@@ -64,6 +65,11 @@ func run(m *testing.M) int {
 			}
 		}()
 		ownerURL, runtimeURL = db.OwnerURL, db.RuntimeURL
+	}
+
+	appDatabaseURL = ownerURL
+	if runtimeURL != "" {
+		appDatabaseURL = runtimeURL
 	}
 
 	var err error
