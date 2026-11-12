@@ -107,14 +107,28 @@ func TestCachedBlocklistStoreMatchLowestID(t *testing.T) {
 }
 
 func TestCachedBlocklistStoreFallbackWhenNotReady(t *testing.T) {
-	tx := blocklistTx(t)
 	rClient := testRedis(t)
-	dbStore := NewBlocklistStore(tx)
-	cached := NewCachedBlocklistStore(dbStore, rClient)
-	ctx := context.Background()
+	pool := testPool(t)
+	cached := NewCachedBlocklistStore(NewBlocklistStore(pool), rClient)
+	ctx := t.Context()
+	const card = "cache-reload-fallback-card"
+
+	// The fallback lookup and reload use separate connections and both need to see the fixture.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO blocklist_entries (entry_type, value, reason)
+		VALUES ('card', $1, 'test fallback')`, card)
+	if err != nil {
+		t.Fatalf("insert fallback entry: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `
+			DELETE FROM blocklist_entries WHERE entry_type = 'card' AND value = $1`, card); err != nil {
+			t.Errorf("delete fallback entry: %v", err)
+		}
+	})
 
 	// Cache has not been loaded, so ready key is missing.
-	got, ok, err := cached.Match(ctx, models.BlocklistSubject{CardToken: "bad-card", PlayerID: "good-player"})
+	got, ok, err := cached.Match(ctx, models.BlocklistSubject{CardToken: card, PlayerID: "good-player"})
 	if err != nil || !ok {
 		t.Fatalf("Match = (%+v, %v, %v), want fallback to db match", got, ok, err)
 	}
@@ -122,10 +136,19 @@ func TestCachedBlocklistStoreFallbackWhenNotReady(t *testing.T) {
 		t.Errorf("matched %s, want card", got.Type)
 	}
 
-	// Wait briefly for background reload to finish.
-	time.Sleep(100 * time.Millisecond)
-	if val := rClient.Get(ctx, keyReady).Val(); val != "1" {
-		t.Errorf("ready key = %q after background reload, want 1", val)
+	reloadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if rClient.Get(reloadCtx, keyReady).Val() == "1" {
+			return
+		}
+		select {
+		case <-reloadCtx.Done():
+			t.Fatal("blocklist cache did not become ready after background reload")
+		case <-ticker.C:
+		}
 	}
 }
 
