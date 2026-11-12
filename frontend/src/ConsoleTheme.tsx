@@ -1,21 +1,57 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { XUIProvider, useDesignSystem, getTypographyTokens } from '@xsolla/xui-core'
+import { ThemePreferenceContext } from './themePreferenceContext'
 import { createGlobalStyle } from 'styled-components'
+import { colorMode, savedColorMode, systemColorMode, themeStorageKey, type ColorMode } from './themePreference'
 
 export function ConsoleTheme({ children }: { children: ReactNode }) {
-  const mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  return <XUIProvider initialMode={mode} initialProductContext="b2b"><SystemTheme />{children}</XUIProvider>
+  const [initialPreference] = useState(savedColorMode)
+  return <XUIProvider initialMode={initialPreference ?? systemColorMode()} initialProductContext="b2b">
+    <ThemePreferenceProvider initialPreference={initialPreference}><ThemeTokens />{children}</ThemePreferenceProvider>
+  </XUIProvider>
 }
 
-function SystemTheme() {
-  const { mode, setMode, theme } = useDesignSystem()
+function ThemePreferenceProvider({ children, initialPreference }: { children: ReactNode; initialPreference: ColorMode | null }) {
+  const { mode, setMode } = useDesignSystem()
+  const [preference, setPreference] = useState(initialPreference)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
-    const preference = window.matchMedia('(prefers-color-scheme: dark)')
-    const sync = () => setMode(preference.matches ? 'dark' : 'light')
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const sync = () => setMode(preference ?? systemColorMode())
     sync()
-    preference.addEventListener('change', sync)
-    return () => preference.removeEventListener('change', sync)
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [preference, setMode])
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key !== themeStorageKey && event.key !== null) return
+      const next = colorMode(event.newValue)
+      setPreference(next)
+      setMode(next ?? systemColorMode())
+      setError(null)
+    }
+    window.addEventListener('storage', sync)
+    return () => window.removeEventListener('storage', sync)
   }, [setMode])
+  useLayoutEffect(() => {
+    document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', mode)
+  }, [mode])
+  function toggle() {
+    const next = mode === 'dark' ? 'light' : 'dark'
+    setPreference(next)
+    setMode(next)
+    try {
+      window.localStorage.setItem(themeStorageKey, next)
+      setError(null)
+    } catch {
+      setError('Theme changed for this visit. Your choice could not be saved.')
+    }
+  }
+  return <ThemePreferenceContext.Provider value={{ mode: mode === 'dark' ? 'dark' : 'light', toggle, error }}>{children}</ThemePreferenceContext.Provider>
+}
+
+function ThemeTokens() {
+  const { mode, theme } = useDesignSystem()
   const colors = theme.colors
   const type = getTypographyTokens('b2b')
   return <ThemeVariables $mode={mode} $tokens={{

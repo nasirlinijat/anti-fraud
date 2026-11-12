@@ -21,7 +21,8 @@ independent project, without Xsolla product branding or sample account/billing t
 The current brandbook leads B2B with light surfaces, regular-width Pilat, and restrained
 Spark Blue. The Figma file supplies approved screen examples, not a reusable analytical
 Dashboard specification. Light is the visual reference; system-preference dark remains
-fully supported. No application appearance toggle or second theme source is introduced.
+fully supported. AF-121 originally followed the system preference; the subsequent manual
+appearance control is documented in the follow-up section below.
 
 ## Packages and integration
 
@@ -166,3 +167,69 @@ Detailed XUI component migrations of Review queue/case view, then Blocklist, Rul
 Tester, and Simulator are follow-ups. Their changes here are limited to the shell, tokens,
 heading hierarchy, and contained tables/narrow forms. The existing Simulator refs warning
 is separate. No Jira items are created or changed by this frontend migration.
+
+## Follow-up: saved appearance and Xsolla wordmark
+
+The `console-theme-toggle` follow-up adds the user-requested manual appearance control.
+The initial visit follows system appearance. A manual light or dark choice is stored in
+`anti-fraud.theme` for this browser origin and stays pinned across reloads, route changes,
+and subsequent OS appearance changes. There is deliberately no System reset control.
+Invalid or missing values fall back to the system; storage events synchronize other tabs.
+If saving is blocked, the choice remains effective in memory and an accessible, nonblocking
+message explains that it applies only for this visit. Native control/scrollbar appearance
+and the color-scheme meta tag follow the same resolved XUI provider mode.
+
+The top-right native toggle has a 64×44px target, `aria-pressed`, the stable accessible
+name “Dark mode”, a sliding thumb, and sun/moon SVGs. Only the thumb and icons animate
+(200ms); reduced-motion users receive an immediate state change. Page colors continue to
+use XUI tokens without a full-page transition or a second theme palette.
+
+The user-supplied Xsolla standalone wordmark is bundled as an SVG, preserving the supplied
+geometry, `#31CAE8` fallback and display-P3 color. Only the escaped XML namespace was
+normalized. It replaces the af square, above the retained project title/caption with 16px
+clear space. The image has `alt="Xsolla"`, measures 141×38px, and adds no external link.
+Sidebar, mobile header and drawer share this treatment. Mobile Menu sits below the toggle;
+at very narrow widths a separate actions row places Menu left and the toggle right.
+The independent-project footer and existing font authorization/delivery remain unchanged.
+
+References checked November 12, 2026:
+[official colors](https://brandbook.xsolla.com/document/28#/-/colors-1),
+[official logo usage](https://brandbook.xsolla.com/document/28#/-/logo),
+[localStorage behavior](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage),
+and [reduced motion](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion).
+The brandbook specifies standalone wordmarks for product UI and blue/black/white logo
+colors, with darker brand blue permitted on light surfaces for legibility. No package,
+backend API, authentication, account-setting, schema, or production deployment changes
+are part of this follow-up. localhost and 127.0.0.1, or different ports, store preferences
+separately because storage is scoped to the browser origin.
+
+Verification adds saved/system precedence, reload, invalid/blocked storage, actual
+cross-tab synchronization, keyboard/focus, reduced motion, logo geometry/clear space,
+and header positioning tests. Existing all-route 390/768/1280px and half-width reflow checks,
+charts, quality selection, accessibility scans and computed contrast checks remain active.
+Screenshots for the follow-up use `AF_EVIDENCE_DIR=/private/tmp/console-theme-evidence`,
+with the unchanged header captured under `before/` before editing. Curated comparisons
+are retained under `console-theme/` alongside this note.
+
+Follow-up validation: 24 existing Node tests and production build pass; the complete
+three-browser run passes 132 tests. A final 30-case theme run also passes after moving
+storage-failure feedback into normal header flow so it cannot obscure Menu. Existing
+Simulator refs and bundle-size warnings remain unchanged in kind; no new lint warnings.
+
+Comparison evidence:
+[before light](console-theme/before-light-1280.png),
+[after light](console-theme/after-light-1280.png),
+[before dark](console-theme/before-dark-1280.png),
+[after dark](console-theme/after-dark-1280.png),
+[mobile light](console-theme/after-light-390.png),
+[mobile dark](console-theme/after-dark-390.png),
+[light contrast](console-theme/contrast-light.json),
+[dark contrast](console-theme/contrast-dark.json).
+
+Local delivery check: only the frontend container was rebuilt and became healthy at
+`http://localhost:3000`; the backend and database container IDs were unchanged. The local
+page showed the supplied wordmark and Backend: ready. Manual switching to light remained
+selected after reload. Chrome's actual 200% zoom indicator and accessibility tree exposed
+the wordmark, theme control, Menu and period controls. User interaction interrupted the
+native drawer-click check at that zoom; automated all-route half-width reflow and drawer
+keyboard checks passed. The temporary zoom was restored to 100% and the test tab closed.
