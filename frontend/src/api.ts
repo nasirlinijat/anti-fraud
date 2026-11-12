@@ -243,6 +243,33 @@ export function getReviewCase(purchaseId: string, signal: AbortSignal): Promise<
   return request(`/reviews/${encodeURIComponent(purchaseId)}`, { signal })
 }
 
+export type NetworkStatus = 'blocklisted' | 'rejected' | 'blocked' | 'in_review' | 'clear'
+export type NetworkEntityType = 'device' | 'card' | 'player'
+
+export interface LinkedEntity {
+  type: 'player' | 'card'
+  value: string
+  purchases: number
+  status: NetworkStatus
+}
+
+export interface NetworkAnchor {
+  type: NetworkEntityType
+  value: string
+  blocklisted: boolean
+  linked_total: number
+  linked: LinkedEntity[]
+}
+
+export interface CaseNetwork {
+  window_days: number
+  anchors: NetworkAnchor[]
+}
+
+export function getReviewNetwork(purchaseId: string, signal: AbortSignal): Promise<CaseNetwork> {
+  return request(`/reviews/${encodeURIComponent(purchaseId)}/network`, { signal })
+}
+
 export interface Claim {
   purchase_id: string
   claimed_by: string

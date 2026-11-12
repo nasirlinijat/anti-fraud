@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  checkReadiness, getActiveRuleset, listReviews, publishRuleset, removeBlocklistEntry,
+  checkReadiness, getActiveRuleset, getReviewNetwork, listReviews, publishRuleset, removeBlocklistEntry,
   score, submitReviewDecision,
 } from '../src/api.ts'
 import { request } from '../src/request.ts'
@@ -122,4 +122,25 @@ test('a review save remains confirmed on 201 and preserves conflict status on 40
     status: 409, message: 'purchase has already been decided',
   })
   assert.equal(fetch.mock.callCount(), 2)
+})
+
+test('the review network is read with the session and a 401 reports the rejected session', async (t) => {
+  const { mock } = t
+  const network = { window_days: 30, anchors: [{ type: 'card', value: 'card-1', blocklisted: false, linked_total: 0, linked: [] }] }
+  const fetch = mock.method(globalThis, 'fetch', async () => fetch.mock.callCount() === 0
+    ? Response.json(network)
+    : Response.json({ error: 'missing or invalid session' }, { status: 401 }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  t.after(forgetSessionToken)
+  keepSessionToken('session-token')
+  const { signal } = new AbortController()
+
+  assert.deepEqual(await getReviewNetwork('42', signal), network)
+  await assert.rejects(getReviewNetwork('42', signal), { status: 401, message: 'missing or invalid session' })
+  const [path, options] = fetch.mock.calls[0].arguments
+  assert.equal(path, '/reviews/42/network')
+  assert.equal(options.headers.get('Authorization'), 'Bearer session-token')
+  assert.equal(options.headers.has('X-API-Key'), false)
+  assert.equal(rejections, 1)
 })

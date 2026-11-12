@@ -45,6 +45,10 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
     claimed_by: claimed ? 'demo-user' : null, claimed_at: claimed ? now : null })
   await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item()], next_cursor: null, model_enabled: true } }))
   await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null } }))
+  await page.route('**/reviews/demo-purchase/network', route => route.fulfill({ json: { window_days: 30, anchors: [
+    { type: 'card', value: 'demo-card', blocklisted: false, linked_total: 0, linked: [] },
+    { type: 'player', value: 'demo-player', blocklisted: false, linked_total: 0, linked: [] },
+  ] } }))
   await page.route('**/reviews/demo-purchase/claim', async route => { claimed = true; await route.fulfill({ status: 201, json: { purchase_id: 'demo-purchase', claimed_by: 'demo-user', claimed_at: now } }) })
   await page.route('**/reviews/demo-purchase/decision', async route => { posts++; await route.fulfill({ status: 201, json: {} }) })
   await page.goto('/#/reviews')
@@ -54,6 +58,7 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   await page.getByRole('button', { name: 'demo-transaction', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
   await expect(page.getByText('Claimed by you')).toBeVisible()
+  await expect(page.getByText("No other players or cards share this purchase's player or card in the 30 days around it.")).toBeVisible()
   await page.getByRole('button', { name: 'Back to the queue' }).click()
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
