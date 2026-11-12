@@ -42,7 +42,7 @@ To develop the backend on the host, run `make migrate` to prepare the database, 
 |---|---|
 | `make up` | Builds and starts the Docker stack, including migrations and the console |
 | `make down` | Stops the containers and keeps the database data |
-| `make run` | Starts PostgreSQL in Docker and runs the backend directly with Go |
+| `make run` | Starts PostgreSQL and Redis in Docker and runs the backend directly with Go |
 | `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
 | `make migrate` | Applies all pending database migrations |
@@ -331,6 +331,16 @@ The [STRIDE threat model](docs/threat-model.md) describes the local deployment's
 | `SCORE_TIMEOUT` | `2s` | Deadline for one score request, passed to every database query. Any Go duration, such as `500ms` |
 
 Over the limit the API answers `429 Too Many Requests` with a `Retry-After` header in seconds. Only requests with a valid key count, so wrong keys cannot use up the limit. When the deadline passes, the API answers `503 Service Unavailable` with `Retry-After: 1`, and nothing is saved: the purchase, its decision and its feature counts are written in one transaction that is rolled back. A retry with the same transaction ID then scores normally.
+
+## Blocklist cache
+
+Stage 1 of scoring matches cards, player IDs, devices, and IP addresses against a mirror of `blocklist_entries` kept in Redis.
+
+- **PostgreSQL is the source of truth.** All writes (operator additions and removals, and review rejection device blocks) commit to PostgreSQL first, then refresh the corresponding key in Redis.
+- **Fail-safe fallback.** If Redis is down, unreachable, or its mirror is being rebuilt, scoring transparently falls back to the PostgreSQL blocklist query without interrupting requests or failing readiness checks.
+- **Eviction safety.** Redis runs with `maxmemory-policy: noeviction` so entries are never silently dropped under memory pressure.
+- **Cache flush and reload.** If the Redis cache is flushed (`redis-cli flushdb`), the missing `ready` key triggers an asynchronous reload from PostgreSQL on the next score request.
+- **Configuration.** Set `REDIS_URL` to enable the cache (e.g. `redis://localhost:6379/0`). When unset or empty, the cache is disabled and scoring queries PostgreSQL directly.
 
 ## Logs
 

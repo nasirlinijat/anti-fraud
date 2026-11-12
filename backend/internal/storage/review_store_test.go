@@ -309,3 +309,50 @@ func TestClaimReportsPurchasesThatCannotBeClaimed(t *testing.T) {
 		})
 	}
 }
+
+type spyRefresher struct {
+	refreshed []string
+}
+
+func (s *spyRefresher) Refresh(ctx context.Context, t models.BlocklistType, value string) {
+	s.refreshed = append(s.refreshed, string(t)+":"+value)
+}
+
+func TestResolveCallsBlocklistRefresherOnDeviceBlock(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+
+	var id int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO purchases (transaction_id, event_time, amount_minor, player_id, card_token, device_id)
+		VALUES ('dev-block-tx', '2000-01-01 08:00:00+00', 5000, 'player-1', 'card-1', 'target-device')
+		RETURNING id`).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert purchase: %v", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO decisions (purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, decided_at)
+		VALUES ($1, 1, 'review', 60, '[]', '{}', now())`, id)
+	if err != nil {
+		t.Fatalf("insert decision: %v", err)
+	}
+
+	refresher := &spyRefresher{}
+	store := NewReviewStore(tx).UseBlocklistCache(refresher)
+
+	res, err := store.Resolve(ctx, models.ReviewDecision{
+		PurchaseID:  id,
+		Decision:    "reject",
+		AnalystID:   "analyst-1",
+		BlockDevice: true,
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !res.DeviceBlocked {
+		t.Fatal("DeviceBlocked = false, want true")
+	}
+	if len(refresher.refreshed) != 1 || refresher.refreshed[0] != "device:target-device" {
+		t.Errorf("refreshed = %v, want [device:target-device]", refresher.refreshed)
+	}
+}

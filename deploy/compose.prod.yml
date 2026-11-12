@@ -2,6 +2,9 @@ services:
   db:
     restart: unless-stopped
 
+  redis:
+    restart: unless-stopped
+
   backend:
     restart: unless-stopped
     environment:

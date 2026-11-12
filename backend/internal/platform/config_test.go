@@ -106,3 +106,56 @@ func TestLoadConfigRejectsWhitespaceOrControlCharsInAPIKey(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigRedisURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/antifraud")
+	t.Setenv("API_KEY", "test-key")
+
+	t.Run("optional when empty", func(t *testing.T) {
+		t.Setenv("REDIS_URL", "")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.RedisURL != "" {
+			t.Errorf("RedisURL = %q, want empty", cfg.RedisURL)
+		}
+	})
+
+	t.Run("valid url", func(t *testing.T) {
+		t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.RedisURL != "redis://localhost:6379/0" {
+			t.Errorf("RedisURL = %q, want redis://localhost:6379/0", cfg.RedisURL)
+		}
+	})
+
+	t.Run("invalid url hides secret", func(t *testing.T) {
+		t.Setenv("REDIS_URL", "not-a-redis-url://secret-password@invalid")
+		_, err := LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig returned no error for invalid REDIS_URL")
+		}
+		if !strings.Contains(err.Error(), "REDIS_URL") {
+			t.Errorf("error %q does not name REDIS_URL", err)
+		}
+		if strings.Contains(err.Error(), "secret-password") {
+			t.Errorf("error %q leaks credentials", err)
+		}
+	})
+}
+
+func TestNewRedis(t *testing.T) {
+	client, err := NewRedis("redis://localhost:6379/0")
+	if err != nil {
+		t.Fatalf("NewRedis: %v", err)
+	}
+	defer client.Close()
+
+	if _, err := NewRedis("invalid-scheme://localhost"); err == nil {
+		t.Error("NewRedis returned no error for invalid URL")
+	}
+}

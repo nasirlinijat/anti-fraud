@@ -135,8 +135,8 @@ func (s *BlocklistStore) AddIfAbsent(ctx context.Context, e models.BlocklistEntr
 	return saved, true, nil
 }
 
-// deleteEntry removes an entry and records the removal. It returns the number
-// of entries removed.
+// deleteEntry removes an entry and records the removal. It returns the removed
+// entry's type, value, and reason.
 const deleteEntry = `
 WITH removed AS (
     DELETE FROM blocklist_entries AS entry WHERE entry.id = $1
@@ -147,18 +147,45 @@ WITH removed AS (
            jsonb_build_object('type', entry_type, 'value', value, 'reason', reason)
     FROM removed
 )
-SELECT count(*) FROM removed`
+SELECT entry_type, value, reason FROM removed`
+
+func (s *BlocklistStore) remove(ctx context.Context, id int64, operatorID string) (models.BlocklistEntry, error) {
+	var e models.BlocklistEntry
+	err := s.conn.QueryRow(ctx, deleteEntry, id, operatorID).Scan(&e.Type, &e.Value, &e.Reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.BlocklistEntry{}, models.ErrBlocklistEntryNotFound
+	}
+	if err != nil {
+		return models.BlocklistEntry{}, fmt.Errorf("delete blocklist entry %d: %w", id, err)
+	}
+	return e, nil
+}
 
 // Remove deletes the entry with the given ID. It returns models.ErrBlocklistEntryNotFound if there is none.
 func (s *BlocklistStore) Remove(ctx context.Context, id int64, operatorID string) error {
-	var n int64
-	if err := s.conn.QueryRow(ctx, deleteEntry, id, operatorID).Scan(&n); err != nil {
-		return fmt.Errorf("delete blocklist entry %d: %w", id, err)
+	_, err := s.remove(ctx, id, operatorID)
+	return err
+}
+
+const findByTypeValue = `
+SELECT id, reason
+FROM blocklist_entries
+WHERE entry_type = $1 AND value = $2
+LIMIT 1`
+
+// Find returns the id and reason for an entry of the given type and value.
+// It reports whether the entry was found.
+func (s *BlocklistStore) Find(ctx context.Context, t models.BlocklistType, value string) (int64, string, bool, error) {
+	var id int64
+	var reason string
+	err := s.conn.QueryRow(ctx, findByTypeValue, string(t), value).Scan(&id, &reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, nil
 	}
-	if n == 0 {
-		return models.ErrBlocklistEntryNotFound
+	if err != nil {
+		return 0, "", false, fmt.Errorf("find blocklist entry %s/%s: %w", t, value, err)
 	}
-	return nil
+	return id, reason, true, nil
 }
 
 func optionalText(s *string) pgtype.Text {

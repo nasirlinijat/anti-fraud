@@ -29,12 +29,26 @@ services:
       SCORE_RATE_BURST: ${SCORE_RATE_BURST:-}
       SCORE_TIMEOUT: ${SCORE_TIMEOUT:-}
       DATABASE_URL: postgres://antifraud_api:${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MODEL_PATH: /models/lgbm-game-v5.json
     ports:
       - "127.0.0.1:${PORT:?set PORT in .env}:${PORT:?set PORT in .env}"
     depends_on:
       db-permissions:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
   frontend:
     build: ./frontend

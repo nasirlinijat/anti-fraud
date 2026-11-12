@@ -28,6 +28,7 @@ Purchases marked for review are decided by analysts in the review console.
 |---|---|---|---|
 | Backend | Go, standard library `net/http`, pgx | `backend/` | Initialized |
 | Database | PostgreSQL | Docker Compose | Initialized |
+| Cache | Redis | Docker Compose | Initialized |
 | Migrations | golang-migrate, run from its Docker image | `backend/migrations/` | Initialized |
 | Frontend | React, TypeScript, Vite | `frontend/` | Initialized |
 | ML training | Python, LightGBM | `ml/` | Not started |
@@ -52,7 +53,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Model serving | Trained in Python, exported to a file, and run inside the Go service |
 | Model data | IEEE-CIS converted to the API format and replayed through scoring (section 3.3) |
 | Demo traffic | A seeded simulator that sends purchases in the same API format |
-| Caching | None. Indexed PostgreSQL queries only, no Redis |
+| Caching | Redis mirror of the blocklist only, refreshed after each committed change, with PostgreSQL fallback. All other queries hit PostgreSQL |
 | Console updates | Polling every few seconds, no WebSockets |
 | API authentication | Service key for scoring. Console endpoints accept a signed-in session: reviewers can use the review endpoints, admins every console endpoint. Until the console signs in, they also accept the service key for configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
 
@@ -72,7 +73,7 @@ backend/
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
     │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
-    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts
+    ├── storage/        All SQL (purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts) and the Redis blocklist mirror
     ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── labels/         Private fraud labels, kept apart from everything scoring uses
@@ -135,7 +136,7 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
 
-The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
+The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REDIS_URL` is optional: when empty, the blocklist cache is disabled and lookups query PostgreSQL directly. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
 
 | Endpoint | Response |
 |---|---|
@@ -155,7 +156,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /admin/assignments` | Lists each active reviewer, and any other account still holding an open claim, with its open claims (purchase ID, amount, rule score, model score, claim time) and the number of purchases it decided. Requires an admin session; reviewers get 403 and keys 401 |
 | `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. A session must hold the claim on the purchase; an analyst key decides without one. Returns 409 for a purchase that was already decided or that the session has not claimed |
 
-`make test` defaults `TEST_DATABASE_URL` to the local database owner connection for test fixtures. The backend runs as the restricted `antifraud_api` role. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set. With it set, pass `-p 1`: test packages share one database, and packages running in parallel can deadlock on each other's rows.
+`make test` defaults `TEST_DATABASE_URL` to the local database owner connection and `TEST_REDIS_URL` to local Redis for test fixtures. The backend runs as the restricted `antifraud_api` role. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set. With it set, pass `-p 1`: test packages share one database, and packages running in parallel can deadlock on each other's rows.
 
 ### 5.1 Database Migrations
 
