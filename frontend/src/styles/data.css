@@ -153,6 +153,7 @@ caption {
     clip-path: inset(50%);
   }
 
+  .stack-table caption { display: block; }
   .stack-table tr { padding: var(--space-md); border-block-end: 1px solid var(--border); }
   .stack-table tr:last-child { border-block-end: 0; }
 

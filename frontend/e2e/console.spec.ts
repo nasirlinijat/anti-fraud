@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test } from '@playwright/test'
-import { mockConsole, quality, runId, statistics } from './fixtures'
+import { expect, test, type Page } from '@playwright/test'
+import { mockConsole, now, quality, runId, statistics } from './fixtures'
 
 test.beforeEach(async ({ page }) => { await mockConsole(page) })
 
@@ -155,4 +155,51 @@ test('blocked fonts leave both themes usable with large money and identifiers', 
     await expect(page.getByRole('link', { name: 'Review queue', exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
   }
+})
+
+const networkCase = { purchase_id: '41', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: 'demo-device',
+  amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model', fired_rules: [],
+  claimed_by: null, claimed_at: null }
+const linkedPlayers = Array.from({ length: 30 }, (_, index) => ({ type: 'player', value: `sim1-20261111T064452-player-${index}`,
+  purchases: 30 - index, status: ['rejected', 'rejected', 'in_review', 'in_review'][index] ?? 'clear' }))
+const network = { window_days: 30, anchors: [
+  { type: 'device', value: 'demo-device', blocklisted: true, linked_total: 31, linked: linkedPlayers },
+  { type: 'card', value: 'demo-card', blocklisted: false, linked_total: 1, linked: [{ type: 'player', value: 'demo-player-2', purchases: 1, status: 'blocked' }] },
+  { type: 'player', value: 'demo-player', blocklisted: false, linked_total: 0, linked: [] },
+] }
+
+async function openNetworkCase(page: Page) {
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [networkCase], next_cursor: null, model_enabled: true } }))
+  await page.route('**/reviews/41', route => route.fulfill({ json: { ...networkCase, ruleset_version: 3, player_purchases: [], device_activity: null } }))
+  await page.goto('/#/reviews')
+  await page.getByRole('button', { name: 'demo-transaction', exact: true }).click()
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`review case shows an accessible linked players, cards and devices panel in ${scheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.route('**/reviews/41/network', route => route.fulfill({ json: network }))
+    await openNetworkCase(page)
+    await expect(page.getByRole('heading', { name: 'Linked players, cards and devices' })).toBeVisible()
+    await expect(page.getByText('Device demo-device (blocklisted): 31 players, 2 rejected.')).toBeVisible()
+    await expect(page.getByRole('img', { name: /Diagram of linked players/ })).toBeVisible()
+    await expect(page.locator('.network-diagram').getByText('+23 more', { exact: true })).toBeVisible()
+    await page.getByText('View linked players, cards and devices as a table').click()
+    await expect(page.getByRole('rowheader', { name: 'sim1-20261111T064452-player-29', exact: true })).toBeVisible()
+    const audit = await new AxeBuilder({ page }).include('.review-case').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
+    expect(audit.violations).toEqual([])
+  })
+}
+
+test('a failed network load leaves the review case usable and can be retried', async ({ page }) => {
+  let failing = true
+  await page.route('**/reviews/41/network', route => failing
+    ? route.fulfill({ status: 500, json: { error: 'The linked players and cards could not be loaded.' } })
+    : route.fulfill({ json: network }))
+  await openNetworkCase(page)
+  await expect(page.getByText('The linked players and cards could not be loaded.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Fired rules' })).toBeVisible()
+  failing = false
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(page.getByText('Device demo-device (blocklisted): 31 players, 2 rejected.')).toBeVisible()
 })
