@@ -132,6 +132,8 @@ def load(path, identity_path=None):
     for column in [*RAW_COLUMNS, *DEVICE_COLUMNS, *CLIENT_COLUMNS, *GAME_COLUMNS]:
         if column not in df.columns:
             df[column] = np.nan
+    for name in REQUEST_CODE_COLUMNS.values():
+        df[name] = without_infinity(df[name])
     df["amount_minor"] = np.round(df["TransactionAmt"] * 100).astype("int64")
     df["TransactionAmt"] = df["amount_minor"] / 100
     df = df.sort_values(["TransactionDT", "TransactionID"], kind="stable").reset_index(drop=True)
@@ -183,6 +185,12 @@ REQUEST_CODE_COLUMNS = {
 }
 
 
+def without_infinity(codes):
+    """pandas reads the text "inf" as infinity, but the service reads it as
+    missing, so the model must see the same -1."""
+    return codes.replace([np.inf, -np.inf], np.nan)
+
+
 def load_requests(path):
     """Reads purchases written by the simulator's -dump option: one JSON object
     per line with the score request, its pattern and its fraud label. Returns
@@ -232,7 +240,7 @@ def load_requests(path):
     for field, name in REQUEST_TEXT_COLUMNS.items():
         df[name] = column(field)
     for field, name in REQUEST_CODE_COLUMNS.items():
-        df[name] = pd.to_numeric(column(field), errors="coerce")
+        df[name] = without_infinity(pd.to_numeric(column(field), errors="coerce"))
     df = df.sort_values(["TransactionDT", "TransactionID"], kind="stable").reset_index(drop=True)
     df["day"] = df["TransactionDT"] // SECONDS_PER_DAY
     return df

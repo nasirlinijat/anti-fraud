@@ -203,13 +203,13 @@ def test_load_export_joins_labels_and_counts_days(tmp_path):
     start = pd.Timestamp("2017-12-01T00:00:00Z")
     export = expected[["TransactionID", *features.FEATURES]].rename(columns={"TransactionID": "transaction_id"})
     export.insert(1, "event_time", [(start + pd.Timedelta(seconds=int(s))).strftime("%Y-%m-%dT%H:%M:%SZ") for s in raw["TransactionDT"]])
-    export.insert(2, "player_id", ["p1"] * 4 + ["p2"] * 2 + ["p1", "p3", "p4", "p5", "p5"])
+    export.insert(2, "player_id", ["p1"] * 4 + ["p2"] * 2 + ["p1", "p3", "p4", "p5", "p5", "p6"])
     export.insert(3, "model_score", "")
     export.to_csv(tmp_path / "inputs.csv", index=False)
     pd.DataFrame({"transaction_id": [str(i) for i in range(1, 8)], "is_fraud": [0, 0, 0, 1, 0, 0, 0]}).to_csv(tmp_path / "labels.csv", index=False)
 
     data, unlabelled = features.load_export(tmp_path / "inputs.csv", tmp_path / "labels.csv", start)
-    assert unlabelled == 4
+    assert unlabelled == 5
     assert len(data) == 7 and data["is_fraud"].tolist() == [0, 0, 0, 1, 0, 0, 0]
     assert data["day"].tolist() == (raw["TransactionDT"].head(7) // features.SECONDS_PER_DAY).tolist()
     pd.testing.assert_frame_equal(data[features.FEATURES], expected[features.FEATURES].head(7).astype(float))
@@ -322,3 +322,17 @@ def test_request_text_is_trimmed_and_empty_text_is_missing(tmp_path):
     assert built["device_distinct_players"].tolist() == [0, features.MISSING]
     assert built["billing_region_is_new_for_card"].tolist() == [0, 0]
     assert built["billing_region_code"].tolist() == [310, 310]
+
+
+@pytest.mark.parametrize("text", ["INF", "inf", "Infinity", "-inf", "-Infinity", "nan"])
+def test_non_finite_code_text_is_missing(tmp_path, text):
+    fields = {"card_issuer": text, "card_country": text, "card_category": text, "billing_country": text,
+              "billing_region": text}
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
+                           "card_token": "c1", **fields}),
+    ])
+    built = features.build(features.load_requests(dump))
+
+    for name in ["card_country", "card_category", "billing_country", "card_issuer_code", "billing_region_code"]:
+        assert built[name].tolist() == [features.MISSING], name
