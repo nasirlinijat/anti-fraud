@@ -25,6 +25,9 @@ services:
       API_KEY: ${API_KEY:?set API_KEY in .env}
       REVIEW_ANALYST_KEYS: ${REVIEW_ANALYST_KEYS:-}
       OPERATOR_API_KEYS: ${OPERATOR_API_KEYS:-}
+      SCORE_RATE_LIMIT: ${SCORE_RATE_LIMIT:-}
+      SCORE_RATE_BURST: ${SCORE_RATE_BURST:-}
+      SCORE_TIMEOUT: ${SCORE_TIMEOUT:-}
       DATABASE_URL: postgres://antifraud_api:${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}?sslmode=disable
       MODEL_PATH: /models/lgbm-game-v5.json
     ports:
