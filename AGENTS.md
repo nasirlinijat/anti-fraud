@@ -20,7 +20,7 @@ Purchases marked for review are decided by analysts in the review console.
 |---|---|
 | Deadline | 2026-11-17 |
 | Jira | Project `AF` on nasirlinijatdev.atlassian.net (Scrum, one-week sprints) |
-| Repository | `nasirlinijat/anti-fraud` (private) |
+| Repository | `nasirlinijat/anti-fraud` (public) |
 
 ## 2. Technology Stack
 
