@@ -27,6 +27,7 @@ GRANT DELETE ON blocklist_entries TO antifraud_api;
 GRANT SELECT, INSERT ON accounts, sessions TO antifraud_api;
 GRANT UPDATE (disabled_at) ON accounts TO antifraud_api;
 GRANT DELETE ON sessions TO antifraud_api;
+GRANT SELECT, INSERT ON review_claims TO antifraud_api;
 
 COMMIT;
 

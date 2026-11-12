@@ -31,7 +31,7 @@ func TestDecideChecksTheDecisionBeforeSaving(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, store := newService(t)
-			store.EXPECT().Resolve(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Times(0)
 
 			_, err := svc.Decide(context.Background(), 1, tt.decision, "analyst-1", tt.blockDevice)
 			if !errors.Is(err, tt.want) {
@@ -54,7 +54,7 @@ func TestDecideMapsTheStoreStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
 			svc, store := newService(t)
-			store.EXPECT().Resolve(gomock.Any(), int64(1), "reject", "analyst-1", true).
+			store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "reject", AnalystID: "analyst-1", BlockDevice: true}).
 				Return(models.Resolution{Status: tt.status, DeviceBlocked: true}, nil)
 
 			got, err := svc.Decide(context.Background(), 1, "reject", "analyst-1", true)
@@ -69,7 +69,7 @@ func TestDecideMapsTheStoreStatus(t *testing.T) {
 
 	t.Run("unknown status", func(t *testing.T) {
 		svc, store := newService(t)
-		store.EXPECT().Resolve(gomock.Any(), int64(1), "approve", "analyst-1", false).Return(models.Resolution{Status: "unexpected"}, nil)
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1", BlockDevice: false}).Return(models.Resolution{Status: "unexpected"}, nil)
 		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", false); err == nil {
 			t.Fatal("an unknown store status was accepted")
 		}
@@ -78,7 +78,7 @@ func TestDecideMapsTheStoreStatus(t *testing.T) {
 	t.Run("store error", func(t *testing.T) {
 		svc, store := newService(t)
 		storeErr := errors.New("database unavailable")
-		store.EXPECT().Resolve(gomock.Any(), int64(1), "approve", "analyst-1", false).Return(models.Resolution{}, storeErr)
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1", BlockDevice: false}).Return(models.Resolution{}, storeErr)
 		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", false); !errors.Is(err, storeErr) {
 			t.Fatalf("err = %v, want the store error", err)
 		}
@@ -99,9 +99,9 @@ func TestQueueReturnsOnePageAndTheNextCursor(t *testing.T) {
 
 	t.Run("full page has a next cursor", func(t *testing.T) {
 		svc, store := newService(t)
-		store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByRuleScore, after).Return(queueItems(review.PageSize+1, at), nil)
+		store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByRuleScore, after, nil).Return(queueItems(review.PageSize+1, at), nil)
 
-		page, err := svc.Queue(context.Background(), models.QueueByRuleScore, after)
+		page, err := svc.Queue(context.Background(), models.QueueByRuleScore, after, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,9 +113,9 @@ func TestQueueReturnsOnePageAndTheNextCursor(t *testing.T) {
 
 	t.Run("last page has none", func(t *testing.T) {
 		svc, store := newService(t)
-		store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByModelScore, nil).Return(queueItems(3, at), nil)
+		store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByModelScore, nil, nil).Return(queueItems(3, at), nil)
 
-		page, err := svc.Queue(context.Background(), models.QueueByModelScore, nil)
+		page, err := svc.Queue(context.Background(), models.QueueByModelScore, nil, nil)
 		if err != nil || len(page.Items) != 3 || page.Next != nil {
 			t.Fatalf("last page = %d items, next %v, err %v", len(page.Items), page.Next, err)
 		}
@@ -123,8 +123,8 @@ func TestQueueReturnsOnePageAndTheNextCursor(t *testing.T) {
 
 	t.Run("store error", func(t *testing.T) {
 		svc, store := newService(t)
-		store.EXPECT().Queue(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, errors.New("database unavailable"))
-		if _, err := svc.Queue(context.Background(), models.QueueByRuleScore, nil); err == nil {
+		store.EXPECT().Queue(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, errors.New("database unavailable"))
+		if _, err := svc.Queue(context.Background(), models.QueueByRuleScore, nil, nil); err == nil {
 			t.Fatal("a store error was not returned")
 		}
 	})
@@ -144,5 +144,86 @@ func TestCursorForModelOrderPutsMissingScoresLast(t *testing.T) {
 	without := review.CursorFor(models.QueueByModelScore, models.QueueItem{})
 	if with.ScoreKey != -0.8 || without.ScoreKey != 1 {
 		t.Fatalf("score keys = %v and %v, want -0.8 and 1", with.ScoreKey, without.ScoreKey)
+	}
+}
+
+func TestDecideClaimedRequiresTheUsernameToHoldTheClaim(t *testing.T) {
+	svc, store := newService(t)
+	username := "rita"
+	store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
+		PurchaseID: 7, Decision: "approve", AnalystID: "rita", ClaimedBy: &username,
+	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
+
+	if _, err := svc.DecideClaimed(context.Background(), 7, "approve", "rita", false); err != nil {
+		t.Fatalf("DecideClaimed: %v", err)
+	}
+}
+
+func TestDecideWithAKeyNeedsNoClaim(t *testing.T) {
+	svc, store := newService(t)
+	store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
+		PurchaseID: 7, Decision: "approve", AnalystID: "key-analyst",
+	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
+
+	if _, err := svc.Decide(context.Background(), 7, "approve", "key-analyst", false); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+}
+
+func TestDecideClaimedReportsAMissingClaim(t *testing.T) {
+	svc, store := newService(t)
+	store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Return(models.Resolution{Status: models.ResolutionNotClaimed}, nil)
+
+	_, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", false)
+
+	if !errors.Is(err, review.ErrNotClaimed) {
+		t.Fatalf("err = %v, want ErrNotClaimed", err)
+	}
+}
+
+func TestClaimMapsTheStoreStatus(t *testing.T) {
+	tests := []struct {
+		status models.ClaimStatus
+		want   error
+	}{
+		{models.ClaimSaved, nil},
+		{models.ClaimAlreadyYours, nil},
+		{models.ClaimNotFound, review.ErrPurchaseNotFound},
+		{models.ClaimNotReview, review.ErrNotUnderReview},
+		{models.ClaimAlreadyResolved, review.ErrAlreadyDecided},
+		{models.ClaimHeldByOther, review.ErrClaimedByOther},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			svc, store := newService(t)
+			store.EXPECT().Claim(gomock.Any(), int64(7), "rita").Return(models.Claim{Status: tt.status, ClaimedBy: "rita"}, nil)
+
+			got, err := svc.Claim(context.Background(), 7, "rita")
+
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+			if tt.want == nil && got.ClaimedBy != "rita" {
+				t.Fatalf("claim = %+v, want rita", got)
+			}
+		})
+	}
+
+	t.Run("unknown status", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().Claim(gomock.Any(), int64(7), "rita").Return(models.Claim{Status: "unexpected"}, nil)
+		if _, err := svc.Claim(context.Background(), 7, "rita"); err == nil {
+			t.Fatal("an unknown store status was accepted")
+		}
+	})
+}
+
+func TestQueuePassesTheClaimFilter(t *testing.T) {
+	svc, store := newService(t)
+	username := "rita"
+	store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByRuleScore, nil, &username).Return(nil, nil)
+
+	if _, err := svc.Queue(context.Background(), models.QueueByRuleScore, nil, &username); err != nil {
+		t.Fatal(err)
 	}
 }

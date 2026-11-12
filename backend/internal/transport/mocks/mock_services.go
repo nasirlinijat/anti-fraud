@@ -99,6 +99,21 @@ func (mr *MockReviewServiceMockRecorder) Case(ctx, purchaseID any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Case", reflect.TypeOf((*MockReviewService)(nil).Case), ctx, purchaseID)
 }
 
+// Claim mocks base method.
+func (m *MockReviewService) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Claim", ctx, purchaseID, username)
+	ret0, _ := ret[0].(models.Claim)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Claim indicates an expected call of Claim.
+func (mr *MockReviewServiceMockRecorder) Claim(ctx, purchaseID, username any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockReviewService)(nil).Claim), ctx, purchaseID, username)
+}
+
 // Decide mocks base method.
 func (m *MockReviewService) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
 	m.ctrl.T.Helper()
@@ -114,19 +129,34 @@ func (mr *MockReviewServiceMockRecorder) Decide(ctx, purchaseID, decision, analy
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Decide", reflect.TypeOf((*MockReviewService)(nil).Decide), ctx, purchaseID, decision, analystID, blockDevice)
 }
 
-// Queue mocks base method.
-func (m *MockReviewService) Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor) (review.Page, error) {
+// DecideClaimed mocks base method.
+func (m *MockReviewService) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Queue", ctx, order, after)
+	ret := m.ctrl.Call(m, "DecideClaimed", ctx, purchaseID, decision, username, blockDevice)
+	ret0, _ := ret[0].(models.Resolution)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecideClaimed indicates an expected call of DecideClaimed.
+func (mr *MockReviewServiceMockRecorder) DecideClaimed(ctx, purchaseID, decision, username, blockDevice any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideClaimed), ctx, purchaseID, decision, username, blockDevice)
+}
+
+// Queue mocks base method.
+func (m *MockReviewService) Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Queue", ctx, order, after, claimedBy)
 	ret0, _ := ret[0].(review.Page)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Queue indicates an expected call of Queue.
-func (mr *MockReviewServiceMockRecorder) Queue(ctx, order, after any) *gomock.Call {
+func (mr *MockReviewServiceMockRecorder) Queue(ctx, order, after, claimedBy any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockReviewService)(nil).Queue), ctx, order, after)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockReviewService)(nil).Queue), ctx, order, after, claimedBy)
 }
 
 // MockRulesetService is a mock of RulesetService interface.

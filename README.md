@@ -278,6 +278,8 @@ Sign in with `POST /auth/login` and send the returned token as `Authorization: B
 | `reviewer` | The review endpoints |
 | `admin` | The review endpoints and every statistics, quality, ruleset, blocklist and simulation endpoint, including changes |
 
+A reviewer or admin claims a purchase with `POST /reviews/{purchase_id}/claim` before deciding it, so that two people never work on the same purchase. Only the account holding the claim can decide it. `GET /reviews?claimed=mine` lists your own claims, and every queue item shows who has claimed it. Analyst keys cannot claim and decide without a claim, as before.
+
 Other endpoints answer a valid session of the wrong role with 403. Review decisions and configuration changes save the username. `POST /score` accepts only the service key. A request with an `Authorization` header is checked as a session and its `X-API-Key` is ignored; requests without one still use the keys described above, until the console signs in.
 
 ## Security

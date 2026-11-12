@@ -23,7 +23,7 @@ const queueTestKey = "queue-test-key"
 
 type queueFunc func(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error)
 
-func (fn queueFunc) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor) ([]models.QueueItem, error) {
+func (fn queueFunc) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, _ *string) ([]models.QueueItem, error) {
 	return fn(ctx, limit, order, after)
 }
 
@@ -35,7 +35,7 @@ func (fn caseFunc) Case(ctx context.Context, id int64) (models.CaseItem, error) 
 
 // Tests provide only the read method the request is expected to call.
 type queueReader interface {
-	Queue(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error)
+	Queue(context.Context, int, models.QueueOrder, *models.QueueCursor, *string) ([]models.QueueItem, error)
 }
 
 type caseReader interface {
@@ -47,8 +47,12 @@ type fakeReviewReads struct {
 	caseReader
 }
 
-func (fakeReviewReads) Resolve(context.Context, int64, string, string, bool) (models.Resolution, error) {
+func (fakeReviewReads) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected decision request")
+}
+
+func (fakeReviewReads) Claim(context.Context, int64, string) (models.Claim, error) {
+	panic("unexpected claim request")
 }
 
 const secondAnalystTestKey = "second-queue-test-key"
@@ -388,7 +392,7 @@ func TestQueuePagesInBothScoreOrders(t *testing.T) {
 			var cursor *models.QueueCursor
 			var got []int64
 			for range tc.want {
-				rows, err := store.Queue(ctx, 1, tc.order, cursor)
+				rows, err := store.Queue(ctx, 1, tc.order, cursor, nil)
 				if err != nil || len(rows) != 1 {
 					t.Fatalf("queue page: rows=%v err=%v", rows, err)
 				}

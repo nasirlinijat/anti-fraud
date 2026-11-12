@@ -134,8 +134,8 @@ func TestReviewAcceptsAnalystKeyOrReviewerOrAdminSession(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var actor string
-			handler := testAccess(t).Review(func(w http.ResponseWriter, _ *http.Request, id string) {
-				actor = id
+			handler := testAccess(t).Review(func(w http.ResponseWriter, _ *http.Request, a Actor) {
+				actor = a.ID
 				w.WriteHeader(http.StatusNoContent)
 			})
 
@@ -175,10 +175,37 @@ func TestSessionWithoutSessionStoreIsRejected(t *testing.T) {
 }
 
 func reviewHandler(access Access, actor *string) http.Handler {
-	return access.Review(func(w http.ResponseWriter, _ *http.Request, id string) {
-		*actor = id
+	return access.Review(func(w http.ResponseWriter, _ *http.Request, a Actor) {
+		*actor = a.ID
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func TestReviewTellsSessionsFromKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		value  string
+		want   Actor
+	}{
+		{"analyst key", APIKeyHeader, "analyst-key", Actor{ID: "key-analyst"}},
+		{"reviewer session", "Authorization", "Bearer reviewer-token", Actor{ID: "rita", Session: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got Actor
+			handler := testAccess(t).Review(func(w http.ResponseWriter, _ *http.Request, a Actor) {
+				got = a
+			})
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set(tc.header, tc.value)
+
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+
+			if got != tc.want {
+				t.Fatalf("actor = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }
 
 func configWriteHandler(access Access, actor *string) http.Handler {

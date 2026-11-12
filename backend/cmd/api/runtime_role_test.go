@@ -36,6 +36,7 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		"UPDATE accounts SET role = 'admin'",
 		"UPDATE sessions SET expires_at = now() + interval '1 year'",
 		"DELETE FROM accounts",
+		"UPDATE review_claims SET account_id = 1",
 	} {
 		tx, err := conn.Begin(ctx)
 		if err != nil {

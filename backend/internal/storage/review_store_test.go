@@ -49,7 +49,7 @@ func TestQueueReturnsReviewsOldestFirst(t *testing.T) {
 	earlier := insertReviewDecision(t, tx, "q-earlier", "review", at(10), &score,
 		`[{"name": "high_amount", "points": 30}, {"name": "card_velocity", "points": 40}]`)
 
-	got, err := NewReviewStore(tx).Queue(context.Background(), 2, models.QueueByRuleScore, nil)
+	got, err := NewReviewStore(tx).Queue(context.Background(), 2, models.QueueByRuleScore, nil, nil)
 	if err != nil {
 		t.Fatalf("Queue: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestQueueRespectsLimit(t *testing.T) {
 		insertReviewDecision(t, tx, id, "review", time.Date(2000, 1, 1, 9, i, 0, 0, time.UTC), nil, `[]`)
 	}
 
-	got, err := NewReviewStore(tx).Queue(context.Background(), 1, models.QueueByRuleScore, nil)
+	got, err := NewReviewStore(tx).Queue(context.Background(), 1, models.QueueByRuleScore, nil, nil)
 	if err != nil {
 		t.Fatalf("Queue: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestQueueReturnsDeviceID(t *testing.T) {
 		t.Fatalf("set device ID: %v", err)
 	}
 
-	got, err := NewReviewStore(tx).Queue(context.Background(), 2, models.QueueByRuleScore, nil)
+	got, err := NewReviewStore(tx).Queue(context.Background(), 2, models.QueueByRuleScore, nil, nil)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("Queue = %+v, %v; want 2 items", got, err)
 	}
@@ -212,7 +212,7 @@ func TestQueueAndCaseReturnTheSavedRuleMessage(t *testing.T) {
 	}
 
 	store := NewReviewStore(tx)
-	queue, err := store.Queue(context.Background(), 1, models.QueueByRuleScore, nil)
+	queue, err := store.Queue(context.Background(), 1, models.QueueByRuleScore, nil, nil)
 	if err != nil || len(queue) != 1 || !reflect.DeepEqual(queue[0].FiredRules, want) {
 		t.Errorf("Queue fired rules = %+v, %v; want %+v", queue, err, want)
 	}
@@ -277,5 +277,35 @@ func TestCaseReturnsPlayerAndDeviceHistory(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.DeviceActivity, wantDevice) {
 		t.Errorf("DeviceActivity = %+v, want %+v", got.DeviceActivity, wantDevice)
+	}
+}
+
+func TestClaimReportsPurchasesThatCannotBeClaimed(t *testing.T) {
+	tx := testTx(t)
+	createTestAccount(t, tx, "claim-test-rita")
+	at := time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+	allowed := insertReviewDecision(t, tx, "claim-allowed", "allow", at, nil, `[]`)
+	decided := insertReviewDecision(t, tx, "claim-decided", "review", at, nil, `[]`)
+	store := NewReviewStore(tx)
+	if _, err := store.Resolve(context.Background(), models.ReviewDecision{PurchaseID: decided, Decision: "approve", AnalystID: "key-analyst"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		purchaseID int64
+		want       models.ClaimStatus
+	}{
+		{"missing", 9223372036854775807, models.ClaimNotFound},
+		{"not under review", allowed, models.ClaimNotReview},
+		{"already decided", decided, models.ClaimAlreadyResolved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := store.Claim(context.Background(), tc.purchaseID, "claim-test-rita")
+
+			if err != nil || got.Status != tc.want {
+				t.Fatalf("Claim = %+v, %v; want status %s", got, err, tc.want)
+			}
+		})
 	}
 }

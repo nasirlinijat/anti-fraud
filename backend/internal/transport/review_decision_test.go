@@ -20,7 +20,7 @@ import (
 
 type rejectUnexpectedReviewAccess struct{}
 
-func (rejectUnexpectedReviewAccess) Queue(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error) {
+func (rejectUnexpectedReviewAccess) Queue(context.Context, int, models.QueueOrder, *models.QueueCursor, *string) ([]models.QueueItem, error) {
 	panic("unexpected queue read")
 }
 
@@ -28,8 +28,12 @@ func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (models.CaseIte
 	panic("unexpected case read")
 }
 
-func (rejectUnexpectedReviewAccess) Resolve(context.Context, int64, string, string, bool) (models.Resolution, error) {
+func (rejectUnexpectedReviewAccess) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected models.Resolution write")
+}
+
+func (rejectUnexpectedReviewAccess) Claim(context.Context, int64, string) (models.Claim, error) {
+	panic("unexpected claim write")
 }
 
 func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {

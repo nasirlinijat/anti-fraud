@@ -68,16 +68,30 @@ func (a Access) ConfigWrite(next func(http.ResponseWriter, *http.Request, string
 	}
 }
 
-// Review accepts an analyst key, or a reviewer or admin session. It passes the
-// analyst ID or the username to next, to be saved with review decisions.
-func (a Access) Review(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	byKey := RequireAnalyst(a.Analysts, next)
+// Actor is who made a review request.
+type Actor struct {
+	// ID is the username of a session or the analyst ID of a key. It is saved
+	// with review decisions.
+	ID string
+	// Session is true for a signed-in account, which can claim purchases, and
+	// false for an analyst key.
+	Session bool
+}
+
+// Review accepts an analyst key, or a reviewer or admin session, and passes
+// the actor to next.
+func (a Access) Review(next func(http.ResponseWriter, *http.Request, Actor)) http.HandlerFunc {
+	byKey := RequireAnalyst(a.Analysts, func(w http.ResponseWriter, r *http.Request, analystID string) {
+		next(w, r, Actor{ID: analystID})
+	})
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !hasAuthorization(r) {
 			byKey(w, r)
 			return
 		}
-		a.requireRole(w, r, []string{RoleReviewer, RoleAdmin}, next)
+		a.requireRole(w, r, []string{RoleReviewer, RoleAdmin}, func(w http.ResponseWriter, r *http.Request, username string) {
+			next(w, r, Actor{ID: username, Session: true})
+		})
 	}
 }
 

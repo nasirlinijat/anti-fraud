@@ -812,6 +812,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 128
+        - in: query
+          name: claimed
+          description: >-
+            `mine` lists only the purchases claimed by the signed-in account.
+            Needs a session. Omit to list every purchase awaiting review.
+          schema:
+            type: string
+            enum: [mine]
       responses:
         "200":
           description: A page of purchases awaiting review.
@@ -825,7 +833,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewPage"
         "400":
-          description: The sort order or cursor is invalid, or the cursor belongs to a different sort order.
+          description: >-
+            The sort order, cursor, or claimed filter is invalid, the cursor
+            belongs to a different sort order, or claimed=mine was sent with
+            an analyst key.
           content:
             application/json:
               schema:
@@ -848,11 +859,84 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}/claim:
+    post:
+      tags: [Reviews]
+      operationId: claimReview
+      summary: Claim a purchase awaiting review
+      description: >-
+        Gives the purchase to the signed-in reviewer or admin, so that only
+        that account can decide it. Claiming a purchase you already hold
+        returns the original claim with 200. Analyst keys cannot claim, and
+        decide without a claim.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*$'
+          description: Positive 64-bit purchase ID from the review queue, represented as a decimal string.
+      responses:
+        "201":
+          description: The purchase is now claimed by you.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewClaim"
+        "200":
+          description: You already held the claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewClaim"
+        "400":
+          description: The purchase ID is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          description: The request used an analyst key, which cannot claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The scored purchase does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >-
+            Another account holds the claim, the purchase has already been
+            decided, or it was scored with a different outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The claim could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /reviews/{purchase_id}/decision:
     post:
       tags: [Reviews]
       operationId: resolveReview
       summary: Approve or reject a purchase awaiting review
+      description: >-
+        A session must first claim the purchase with POST
+        /reviews/{purchase_id}/claim. An analyst key decides without a claim.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -915,7 +999,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: The purchase has already been decided or was scored with a different outcome.
+          description: >-
+            The purchase has already been decided or was scored with a
+            different outcome, or a session that does not hold the claim on
+            the purchase tried to decide it.
           content:
             application/json:
               schema:
@@ -1308,7 +1395,7 @@ components:
 
     ReviewItem:
       type: object
-      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, device_id, rule_score, model_score, model_version, fired_rules]
+      required: [purchase_id, transaction_id, event_time, queued_at, amount_minor, player_id, device_id, rule_score, model_score, model_version, fired_rules, claimed_by, claimed_at]
       properties:
         purchase_id:
           type: string
@@ -1353,6 +1440,31 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FiredRule"
+        claimed_by:
+          type: string
+          nullable: true
+          description: Username holding the claim on the purchase, or null while it is unclaimed.
+          example: alice
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the claim was made, in UTC, or null while the purchase is unclaimed.
+
+    ReviewClaim:
+      type: object
+      required: [purchase_id, claimed_by, claimed_at]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        claimed_by:
+          type: string
+          example: alice
+        claimed_at:
+          type: string
+          format: date-time
+          description: When the claim was made, in UTC.
 
     ReviewCase:
       allOf:

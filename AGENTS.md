@@ -65,7 +65,7 @@ backend/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/
     │   ├── score/      Score flow: saved decision, blocklist, model inputs, model, rules, save
-    │   ├── review/     Review rules: queue pages, one decision per purchase, reject can blocklist the device
+    │   ├── review/     Review rules: queue pages, claims, one decision per purchase, reject can blocklist the device
     │   ├── account/    Accounts: username and password checks, bcrypt hashing
     │   ├── auth/       Sign-in: password check, attempt limit, sessions stored by token hash
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
@@ -145,9 +145,10 @@ The server listens on the port given by the `PORT` environment variable (default
 | `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
 | `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
 | `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
-| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page. Requires a reviewer or admin session in the `Authorization: Bearer` header, or an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong session or key, and 503 for a key when no analyst keys are configured |
+| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page and who has claimed each purchase. `claimed=mine` lists only the purchases claimed by the signed-in account. Requires a reviewer or admin session in the `Authorization: Bearer` header, or an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong session or key, and 503 for a key when no analyst keys are configured |
 | `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, and device activity. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
-| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |
+| `POST /reviews/{purchase_id}/claim` | Claims a purchase awaiting review for the signed-in reviewer or admin, so that only that account can decide it. Requires a session; an analyst key gets 403. Returns 201 for a new claim, 200 for one you already hold, and 409 when another account holds it or the purchase was already decided |
+| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. A session must hold the claim on the purchase; an analyst key decides without one. Returns 409 for a purchase that was already decided or that the session has not claimed |
 
 `make test` defaults `TEST_DATABASE_URL` to the local database owner connection for test fixtures. The backend runs as the restricted `antifraud_api` role. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set. With it set, pass `-p 1`: test packages share one database, and packages running in parallel can deadlock on each other's rows.
 

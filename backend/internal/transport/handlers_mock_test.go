@@ -138,7 +138,7 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 	t.Run("queue page with a next cursor", func(t *testing.T) {
 		mux, service := newMux(t)
 		next := models.QueueCursor{DecidedAt: at, PurchaseID: 5, ScoreKey: -60}
-		service.EXPECT().Queue(gomock.Any(), models.QueueByRuleScore, (*models.QueueCursor)(nil)).
+		service.EXPECT().Queue(gomock.Any(), models.QueueByRuleScore, (*models.QueueCursor)(nil), (*string)(nil)).
 			Return(review.Page{Items: []models.QueueItem{{PurchaseID: 5, RuleScore: 60, DecidedAt: at}}, Next: &next}, nil)
 		wantResponse(t, send(mux, http.MethodGet, "/reviews", mockAnalystKey, ""), http.StatusOK, `"next_cursor":"`, `"model_enabled":true`)
 	})

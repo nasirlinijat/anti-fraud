@@ -23,9 +23,11 @@ import (
 const maxDecisionBytes = 1024
 
 type ReviewService interface {
-	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor) (review.Page, error)
+	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
+	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
+	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 }
 
 type ReviewHandler struct {
@@ -37,15 +39,15 @@ func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 	return &ReviewHandler{service: service, modelEnabled: modelEnabled}
 }
 
-// RegisterReviewRoutes exposes the queue, case evidence, and decisions to
-// analysts with a key and to signed-in reviewers and admins.
+// RegisterReviewRoutes exposes the queue, case evidence, claims, and decisions
+// to analysts with a key and to signed-in reviewers and admins. Only
+// signed-in accounts can claim, and they decide only what they have claimed.
 func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.Access) {
-	mux.HandleFunc("GET /reviews", access.Review(func(w http.ResponseWriter, r *http.Request, _ string) {
-		h.serveQueue(w, r)
-	}))
-	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
+	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveCase(w, r)
 	}))
+	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
 }
 
@@ -61,6 +63,8 @@ type reviewResponse struct {
 	ModelScore    *float64            `json:"model_score"`
 	ModelVersion  *string             `json:"model_version"`
 	FiredRules    []scoring.FiredRule `json:"fired_rules"`
+	ClaimedBy     *string             `json:"claimed_by"`
+	ClaimedAt     *time.Time          `json:"claimed_at"`
 }
 
 type playerPurchaseResponse struct {
@@ -98,13 +102,19 @@ type decisionResponse struct {
 	DeviceBlocked bool `json:"device_blocked"`
 }
 
+type claimResponse struct {
+	PurchaseID string    `json:"purchase_id"`
+	ClaimedBy  string    `json:"claimed_by"`
+	ClaimedAt  time.Time `json:"claimed_at"`
+}
+
 // decisionRequest is the body of a review decision.
 type decisionRequest struct {
 	Decision    string `json:"decision"`
 	BlockDevice bool   `json:"block_device"`
 }
 
-func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request) {
+func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
 	params, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		platform.WriteError(w, http.StatusBadRequest, "invalid query parameters")
@@ -123,7 +133,12 @@ func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request) {
 		platform.WriteError(w, http.StatusBadRequest, "invalid cursor")
 		return
 	}
-	page, err := h.service.Queue(r.Context(), order, after)
+	claimedBy, err := claimFilter(params["claimed"], actor)
+	if err != nil {
+		platform.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := h.service.Queue(r.Context(), order, after, claimedBy)
 	if err != nil {
 		log.Printf("read review queue: %v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")
@@ -183,10 +198,66 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, analystID string) {
+// claimFilter reads the claimed query parameter. The only value is "mine",
+// which needs a signed-in account; without it the queue is not filtered.
+func claimFilter(values []string, actor platform.Actor) (*string, error) {
+	if values == nil {
+		return nil, nil
+	}
+	if len(values) != 1 || values[0] != "mine" {
+		return nil, errors.New("claimed must be mine")
+	}
+	if !actor.Session {
+		return nil, errors.New("claimed=mine needs a signed-in account")
+	}
+	return &actor.ID, nil
+}
+
+func (h *ReviewHandler) serveClaim(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
 	id := r.PathValue("purchase_id")
+	purchaseID, ok := parsePurchaseID(id)
+	if !ok {
+		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
+		return
+	}
+	if !actor.Session {
+		platform.WriteError(w, http.StatusForbidden, "claiming a purchase needs a signed-in account")
+		return
+	}
+	claim, err := h.service.Claim(r.Context(), purchaseID, actor.ID)
+	if err != nil {
+		writeReviewError(w, err, "claim review")
+		return
+	}
+	status := http.StatusCreated
+	if claim.Status == models.ClaimAlreadyYours {
+		status = http.StatusOK
+	}
+	platform.WriteJSON(w, status, claimResponse{PurchaseID: id, ClaimedBy: claim.ClaimedBy, ClaimedAt: claim.ClaimedAt.UTC()})
+}
+
+// parsePurchaseID accepts only the canonical decimal form of a positive ID.
+func parsePurchaseID(id string) (int64, bool) {
 	purchaseID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || purchaseID <= 0 || strconv.FormatInt(purchaseID, 10) != id {
+		return 0, false
+	}
+	return purchaseID, true
+}
+
+// decide saves a decision. A signed-in account must hold the claim on the
+// purchase; an analyst key decides without one, as before claims existed.
+func (h *ReviewHandler) decide(ctx context.Context, purchaseID int64, body decisionRequest, actor platform.Actor) (models.Resolution, error) {
+	if actor.Session {
+		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+	}
+	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+}
+
+func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
+	id := r.PathValue("purchase_id")
+	purchaseID, ok := parsePurchaseID(id)
+	if !ok {
 		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
 		return
 	}
@@ -195,25 +266,34 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, an
 		return
 	}
 
-	result, err := h.service.Decide(r.Context(), purchaseID, body.Decision, analystID, body.BlockDevice)
+	result, err := h.decide(r.Context(), purchaseID, body, actor)
+	if err != nil {
+		writeReviewError(w, err, "save review decision")
+		return
+	}
+	platform.WriteJSON(w, http.StatusCreated, decisionResponse{
+		PurchaseID:    id,
+		Decision:      body.Decision,
+		AnalystID:     actor.ID,
+		ResolvedAt:    result.ResolvedAt.UTC(),
+		DeviceBlocked: result.DeviceBlocked,
+	})
+}
+
+// writeReviewError maps the review service errors to status codes. Any other
+// error is logged with the action that failed and answered with 500.
+func writeReviewError(w http.ResponseWriter, err error, action string) {
 	switch {
 	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject):
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, review.ErrPurchaseNotFound):
 		platform.WriteError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, review.ErrNotUnderReview), errors.Is(err, review.ErrAlreadyDecided):
+	case errors.Is(err, review.ErrNotUnderReview), errors.Is(err, review.ErrAlreadyDecided),
+		errors.Is(err, review.ErrNotClaimed), errors.Is(err, review.ErrClaimedByOther):
 		platform.WriteError(w, http.StatusConflict, err.Error())
-	case err != nil:
-		log.Printf("save review decision: %v", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 	default:
-		platform.WriteJSON(w, http.StatusCreated, decisionResponse{
-			PurchaseID:    id,
-			Decision:      body.Decision,
-			AnalystID:     analystID,
-			ResolvedAt:    result.ResolvedAt.UTC(),
-			DeviceBlocked: result.DeviceBlocked,
-		})
+		log.Printf("%s: %v", action, err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
 	}
 }
 
@@ -261,6 +341,8 @@ func newReviewResponse(row models.QueueItem) reviewResponse {
 		ModelScore:    row.ModelScore,
 		ModelVersion:  row.ModelVersion,
 		FiredRules:    firedRules,
+		ClaimedBy:     row.ClaimedBy,
+		ClaimedAt:     row.ClaimedAt,
 	}
 }
 
