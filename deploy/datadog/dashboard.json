@@ -184,7 +184,7 @@
               "check": "http.can_connect",
               "grouping": "cluster",
               "group_by": [],
-              "tags": ["instance:backend-ready"]
+              "tags": ["instance:backend_ready"]
             }
           }
         ]
