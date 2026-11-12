@@ -2,9 +2,9 @@ import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 
-const serviceRoutes = '^/(?:score|stats|blocklist|rulesets|simulations)(?:/|\\?|$)'
-const reviewRoutes = '^/reviews(?:/|\\?|$)'
-const protectedRoute = new RegExp(`${serviceRoutes}|${reviewRoutes}`)
+const scoreRoute = '^/score(?:/|\\?|$)'
+const sessionRoutes = '^/(?:auth|admin|reviews|stats|blocklist|rulesets|simulations)(?:/|\\?|$)'
+const protectedRoute = new RegExp(`${scoreRoute}|${sessionRoutes}`)
 const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i
 
 // https://vite.dev/config/
@@ -42,18 +42,15 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/health': backendUrl,
         '/ready': backendUrl,
-        [serviceRoutes]: {
+        // POST /score accepts only the service key, so the proxy adds it for the Tester page.
+        [scoreRoute]: {
           target: backendUrl,
           configure(proxy) {
-            proxy.on('proxyReq', (outgoing, incoming) => {
-              if (incoming.method === 'GET' || incoming.method === 'HEAD' || /^\/score(?:[/?]|$)/.test(incoming.url ?? '')) {
-                outgoing.setHeader('X-API-Key', env.API_KEY ?? '')
-              }
-            })
+            proxy.on('proxyReq', outgoing => outgoing.setHeader('X-API-Key', env.API_KEY ?? ''))
           },
         },
-        // Forward the key entered in the review queue.
-        [reviewRoutes]: backendUrl,
+        // Every other console request carries the session token of the signed-in account.
+        [sessionRoutes]: backendUrl,
       },
     },
   }

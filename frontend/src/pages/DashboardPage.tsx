@@ -1,9 +1,8 @@
-import { Button } from '@xsolla/xui-button'
-import { Typography } from '@xsolla/xui-typography'
 import { lazy, Suspense, useCallback, useState } from 'react'
 import { getStats, periods, type Period, type Stats } from '../api'
 import { OutcomeBadge, TimeDisplayToggle, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
+import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
@@ -63,10 +62,9 @@ function DashboardPage() {
 
   return (
     <div className="dashboard">
-      <div className="dashboard-head">
-        <div><p className="eyebrow">Operations overview</p><Typography as="h1" variant="h3">Dashboard</Typography></div>
+      <PageHeader eyebrow="Operations" title="Dashboard">
         <PeriodButtons period={period} onChange={changePeriod} />
-      </div>
+      </PageHeader>
       {error && (
         <ErrorState polite onRetry={retry} pending={pending}>
           {error} {shown && 'Showing the last successful update for this period. '}Retrying automatically.
@@ -106,8 +104,8 @@ function DashboardPage() {
 
           {outcomes.total === 0 && (
             <EmptyState>
-              No decisions in this period yet. Choose another period, score a purchase in <a href="#/tester">Tester</a>, or run{' '}
-              <code>make simulate</code>.
+              No decisions in this period yet. Choose another period, score a purchase in <a href="#/tester">Tester</a>, or start a run in{' '}
+              <a href="#/simulator">Simulator</a>.
             </EmptyState>
           )}
         </>
@@ -119,11 +117,9 @@ function DashboardPage() {
 
 function PeriodButtons({ period, onChange }: { period: Period; onChange: (period: Period) => void }) {
   return (
-    <div className="periods" role="group" aria-label="Period">
+    <div className="segmented periods" role="group" aria-label="Period">
       {periods.map((p) => (
-        <Button key={p} type="button" size="md" tone={p === period ? 'brand' : 'mono'} variant={p === period ? 'primary' : 'secondary'} aria-pressed={p === period} onPress={() => onChange(p)}>
-          {periodNames[p]}
-        </Button>
+        <button key={p} type="button" aria-pressed={p === period} onClick={() => onChange(p)}>{periodNames[p]}</button>
       ))}
     </div>
   )
@@ -179,7 +175,7 @@ function TopRules({ rules, decisions }: { rules: Stats['top_rules']; decisions: 
   const maxFired = Math.max(1, ...rules.map((r) => r.fired))
   return (
     <section className="panel">
-      <Typography as="h2" variant="h5" marginBottom={16}>Most fired rules</Typography>
+      <h2>Most fired rules</h2>
       {rules.length === 0 ? (
         <EmptyState>No rule fired in this period.</EmptyState>
       ) : (
@@ -207,7 +203,7 @@ function TopRules({ rules, decisions }: { rules: Stats['top_rules']; decisions: 
 function ModelPanel({ model }: { model: Stats['model'] }) {
   return (
     <section className="panel">
-      <Typography as="h2" variant="h5" marginBottom={16}>Fraud model</Typography>
+      <h2>Fraud model</h2>
       {model.scored === 0 ? (
         <EmptyState>No decision in this period has a model score. The backend may run with rules only.</EmptyState>
       ) : (

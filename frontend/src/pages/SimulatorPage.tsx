@@ -18,11 +18,13 @@ import {
   type SimulationDraft,
 } from '../simulation'
 import { TimeDisplayToggle, Timestamp } from '../Display'
+import { Button } from '../ui/Button'
+import { PageHeader } from '../ui/PageHeader'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 
-type Attempt = { settings: SimulationSettings; operatorKey: string }
+type Attempt = { settings: SimulationSettings }
 const number = new Intl.NumberFormat('en-US')
 const statusNames = {
   starting: 'Starting',
@@ -47,11 +49,8 @@ export default function SimulatorPage() {
 
   return (
     <div className="simulator">
-      <h1>Simulator</h1>
-      <p className="muted">
-        Send simulated purchases through scoring and follow the actual decisions. Runs keep going when you
-        leave this page.
-      </p>
+      <PageHeader eyebrow="Tools" title="Simulator"
+        lead="Send simulated purchases through scoring and follow the actual decisions. Runs keep going when you leave this page." />
       {runs.disabled && <DisabledNotice onRecheck={runs.recheck} />}
       {loadError && (
         <ErrorState onRetry={polling.retry} pending={polling.pending} polite>
@@ -69,13 +68,10 @@ export default function SimulatorPage() {
       </div>
       {outcome.writeError && <ErrorState>{outcome.writeError}</ErrorState>}
       {conflictId && conflictId !== activeId && (
-        <button type="button" className="secondary" onClick={() => runs.follow(conflictId)}>
-          View active run
-        </button>
+        <Button variant="secondary" onClick={() => runs.follow(conflictId)}>View active run</Button>
       )}
       {attempt && !writes.writing && (
-        <RetryPanel attempt={attempt} operatorKey={form.operatorKey}
-          onRetry={() => void launch(sim, attempt)} onDiscard={outcome.discardAttempt} />
+        <RetryPanel onRetry={() => void launch(sim, attempt)} onDiscard={outcome.discardAttempt} />
       )}
       <p className="muted small" role="status">
         {outcome.notice}
@@ -266,7 +262,6 @@ async function loadRuns(selectedId: string | null, signal: AbortSignal) {
 
 function useSimulationForm(available: string[]) {
   const [draft, setDraft] = useState<SimulationDraft>(defaultSimulationDraft)
-  const [operatorKey, setOperatorKey] = useState('')
   const [fields, setFields] = useState<Record<string, string>>({})
   const ref = useRef<HTMLFormElement>(null)
 
@@ -289,16 +284,10 @@ function useSimulationForm(available: string[]) {
     if (error) setFields((current) => ({ ...current, [name]: error }))
   }
 
-  function changeKey(value: string) {
-    setOperatorKey(value)
-    clearField('operator_key')
-  }
-
   // validate shows every problem and moves focus to the first one. It returns
   // the settings only when there is no problem.
   function validate() {
     const validated = validateSimulation(draft, available)
-    if (!operatorKey.trim()) validated.fields.operator_key = 'Enter your operator key to start a run.'
     setFields(validated.fields)
     if (Object.keys(validated.fields).length || !validated.settings) {
       const name = Object.keys(validated.fields)[0]
@@ -308,7 +297,7 @@ function useSimulationForm(available: string[]) {
     return validated.settings
   }
 
-  return { draft, operatorKey, fields, ref, setFields, change, check, changeKey, validate }
+  return { draft, fields, ref, setFields, change, check, validate }
 }
 
 function submit(sim: Simulator, event: FormEvent) {
@@ -317,10 +306,7 @@ function submit(sim: Simulator, event: FormEvent) {
   if (writes.busy.current || outcome.attempt || runs.disabled || !runs.history || runs.loadError || runs.activeId) return
   const settings = form.validate()
   if (!settings) return
-  const saved = {
-    settings: { ...settings, request_id: crypto.randomUUID() },
-    operatorKey: form.operatorKey.trim(),
-  }
+  const saved = { settings: { ...settings, request_id: crypto.randomUUID() } }
   outcome.setAttempt(saved)
   void launch(sim, saved)
 }
@@ -332,7 +318,7 @@ async function launch({ form, writes, outcome, runs }: Simulator, saved: Attempt
   outcome.setNotice('')
   await writes.run({
     polling: runs.polling,
-    send: (signal) => startSimulation(saved.settings, saved.operatorKey, signal),
+    send: (signal) => startSimulation(saved.settings, signal),
     onSaved: (result) => {
       runs.show(result)
       outcome.setAttempt(null)
@@ -352,7 +338,7 @@ async function launch({ form, writes, outcome, runs }: Simulator, saved: Attempt
       } else if (uncertainStart(error)) {
         outcome.setAttempt(saved)
         outcome.setWriteError(
-          'The start could not be confirmed. It may already be running. Check recent runs or retry this same start with the original operator key.',
+          'The start could not be confirmed. It may already be running. Check recent runs or retry this same start.',
         )
       } else {
         outcome.setAttempt(null)
@@ -370,36 +356,26 @@ function startFieldErrors(fields: Record<string, string>): Record<string, string
 }
 
 function startErrorMessage(error: unknown): string {
-  if (error instanceof ApiError && error.status === 401) return 'The operator key was rejected. Check it and try again.'
   if (error instanceof Error) return error.message
   return 'The run could not be started.'
 }
 
-async function stopRun({ form, writes, outcome, runs }: Simulator) {
+async function stopRun({ writes, outcome, runs }: Simulator) {
   const { run } = runs
   if (!run || !isActive(run.status) || run.status === 'stopping' || outcome.pendingStopId || writes.busy.current) return
-  if (!form.operatorKey.trim()) {
-    outcome.setWriteError('Enter your operator key to stop this run.')
-    return
-  }
   outcome.setWriteError(null)
   outcome.setNotice('')
   await writes.run({
     polling: runs.polling,
-    send: (signal) => stopSimulation(run.id, form.operatorKey.trim(), signal),
+    send: (signal) => stopSimulation(run.id, signal),
     onSaved: (result) => {
       runs.setRun(result)
       outcome.setPendingStopId(null)
       outcome.setNotice('Stop request confirmed.')
     },
-    onFailed: (error) => {
-      const rejected = error instanceof ApiError && error.status === 401
-      if (!rejected) outcome.setPendingStopId(run.id)
-      outcome.setWriteError(
-        rejected
-          ? 'The operator key was rejected. The run may still be active.'
-          : 'The stop could not be confirmed. Refreshing progress; you can safely request Stop again if it is still active.',
-      )
+    onFailed: () => {
+      outcome.setPendingStopId(run.id)
+      outcome.setWriteError('The stop could not be confirmed. Refreshing progress; you can safely request Stop again if it is still active.')
     },
   })
 }
@@ -411,9 +387,7 @@ function DisabledNotice({ onRecheck }: { onRecheck: () => void }) {
       <p>
         Ask the operator to enable <code>SIMULATION_ENABLED</code> on this backend and restart it.
       </p>
-      <button type="button" className="secondary" onClick={onRecheck}>
-        Check availability
-      </button>
+      <Button variant="secondary" onClick={onRecheck}>Check availability</Button>
     </div>
   )
 }
@@ -452,24 +426,17 @@ function StartForm({ form, runs, writing, locked, onSubmit }: {
           )}
         </div>
       </fieldset>
-      <OperatorKeyField value={form.operatorKey} error={fields.operator_key} disabled={writing || disabled}
-        onChange={form.changeKey} />
       <div className="simulation-actions">
-        <button
-          type="submit"
-          disabled={locked || disabled || !history || Boolean(runs.loadError) || Boolean(activeId)}
-        >
+        <Button type="submit" disabled={locked || disabled || !history || Boolean(runs.loadError) || Boolean(activeId)}>
           {writing ? 'Working…' : 'Start run'}
-        </button>
+        </Button>
+        {activeId && (
+          <>
+            <span className="muted small">A run is already active.</span>
+            <Button variant="secondary" size="sm" onClick={() => runs.follow(activeId)}>View active run</Button>
+          </>
+        )}
       </div>
-      {activeId && (
-        <p className="muted small">
-          A run is already active.{' '}
-          <button className="secondary" type="button" onClick={() => runs.follow(activeId)}>
-            View active run
-          </button>
-        </p>
-      )}
     </form>
   )
 }
@@ -503,10 +470,10 @@ function ScenarioField({ value, error, available, onChange }: {
           {error}
         </span>
       )}
-      <p className="muted small">
+      <span className="field-hint">
         Mixed traffic includes normal purchases, legitimate edge cases and suspicious patterns. A
         scenario can produce several purchases; outcomes depend on rules, model and history.
-      </p>
+      </span>
     </div>
   )
 }
@@ -547,7 +514,7 @@ function NumberField({ name, label, hint, min, max, form, disabled }: {
   return (
     <div className={error ? 'field invalid' : 'field'}>
       <label htmlFor={`simulation-${name}`}>{label}</label>
-      <span id={`simulation-${name}-hint`} className="muted small">
+      <span id={`simulation-${name}-hint`} className="field-hint">
         {hint}
       </span>
       <input
@@ -570,38 +537,6 @@ function NumberField({ name, label, hint, min, max, form, disabled }: {
       {error && (
         <span id={`simulation-${name}-error`} className="error-text">
           {error}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function OperatorKeyField({ value, error, disabled, onChange }: {
-  value: string
-  error?: string
-  disabled: boolean
-  onChange: (key: string) => void
-}) {
-  return (
-    <div className={error ? 'field invalid' : 'field'}>
-      <label htmlFor="simulation-operator-key">Operator key</label>
-      <input
-        id="simulation-operator-key"
-        name="operator_key"
-        type="password"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? 'simulation-key-error' : 'simulation-key-hint'}
-      />
-      {error ? (
-        <span id="simulation-key-error" className="error-text">
-          {error}
-        </span>
-      ) : (
-        <span id="simulation-key-hint" className="muted small">
-          Required to start or stop. Kept in memory for this page only.
         </span>
       )}
     </div>
@@ -684,14 +619,9 @@ function RunDetails({ run, time, stopBlocked, onStop }: {
           </>
         )}
       </p>
-      <button
-        type="button"
-        className="secondary"
-        disabled={stopBlocked || !isActive(run.status) || run.status === 'stopping'}
-        onClick={onStop}
-      >
+      <Button variant="danger" disabled={stopBlocked || !isActive(run.status) || run.status === 'stopping'} onClick={onStop}>
         {run.status === 'stopping' ? 'Stopping…' : 'Stop run'}
-      </button>
+      </Button>
     </>
   )
 }
@@ -715,21 +645,14 @@ function RunTiles({ run }: { run: SimulationRun }) {
   )
 }
 
-function RetryPanel({ attempt, operatorKey, onRetry, onDiscard }: {
-  attempt: Attempt
-  operatorKey: string
-  onRetry: () => void
-  onDiscard: () => void
-}) {
+function RetryPanel({ onRetry, onDiscard }: { onRetry: () => void; onDiscard: () => void }) {
   return (
     <div className="panel simulation-retry">
-      <p>This retry keeps the original settings and request ID. Use the same operator key.</p>
-      <button type="button" disabled={operatorKey.trim() !== attempt.operatorKey} onClick={onRetry}>
-        Retry start
-      </button>{' '}
-      <button type="button" className="secondary" onClick={onDiscard}>
-        Discard retry
-      </button>
+      <p>This retry keeps the original settings and request ID, so it cannot start a second run.</p>
+      <div className="button-row">
+        <Button onClick={onRetry}>Retry start</Button>
+        <Button variant="secondary" onClick={onDiscard}>Discard retry</Button>
+      </div>
     </div>
   )
 }
@@ -747,12 +670,12 @@ function RecentRuns({ items, currentId, onFollow }: {
           <li key={item.id}>
             <button
               type="button"
-              className="secondary"
+              className="run-link"
               aria-current={currentId === item.id ? 'true' : undefined}
               onClick={() => onFollow(item.id)}
             >
-              <span className="simulation-id">{item.id}</span> · {statusNames[item.status]} ·{' '}
-              {number.format(item.sent)} sent
+              <span className="simulation-id">{item.id}</span>
+              <span className="muted small">{statusNames[item.status]} · {number.format(item.sent)} sent</span>
             </button>
           </li>
         ))}

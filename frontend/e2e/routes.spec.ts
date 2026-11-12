@@ -1,21 +1,23 @@
 import { expect, test } from '@playwright/test'
-import { mockConsole, now } from './fixtures'
+import { mockConsole, now, sessionToken } from './fixtures'
 
 test.beforeEach(async ({ page }) => { await mockConsole(page) })
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  test(`six routes fit target widths and zoom-equivalent widths in ${colorScheme}`, async ({ page }) => {
+  test(`every route fits target widths and zoom-equivalent widths in ${colorScheme}`, async ({ page }) => {
+    // Eight pages are checked at six widths, which takes longer than one page's test.
+    test.slow()
     await page.emulateMedia({ colorScheme })
     for (const width of [390, 768, 1280, 195, 384, 640]) {
       await page.setViewportSize({ width, height: 960 })
-      for (const route of ['dashboard', 'reviews', 'blocklist', 'rulesets', 'tester', 'simulator']) {
+      for (const route of ['dashboard', 'reviews', 'assignments', 'blocklist', 'rulesets', 'tester', 'simulator', 'accounts']) {
         await page.goto(`/#/${route}`)
         await expect(page.locator('main h1')).toBeVisible()
-        const overflow = await page.evaluate(() => [...document.querySelectorAll('main *')].filter(element => element.getBoundingClientRect().right > innerWidth + 1 && !element.closest('.legacy-table-scroll, .decision-table, .table-scroll')).slice(0, 5).map(element => `${element.tagName}.${element.className}`))
+        const overflow = await page.evaluate(() => [...document.querySelectorAll('main *')].filter(element => element.getBoundingClientRect().right > innerWidth + 1 && !element.closest('.decision-table, .table-scroll')).slice(0, 5).map(element => `${element.tagName}.${element.className}`))
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${route} at ${width}: ${overflow.join(', ')}`).toBe(true)
         if (width < 1024) {
           await page.getByRole('button', { name: 'Menu', exact: true }).click()
-          await expect(page.getByRole('link', { name: 'Simulator', exact: true })).toBeVisible()
+          await expect(page.getByRole('dialog').getByRole('link', { name: 'Simulator', exact: true })).toBeVisible()
           await page.keyboard.press('Escape')
         }
       }
@@ -35,18 +37,23 @@ test('Tester native form submits once and retains the saved outcome', async ({ p
   expect(posts).toBe(1)
 })
 
-test('review evidence, confirmation cancellation and approval remain usable', async ({ page }) => {
+test('a purchase is claimed, shows its evidence, and is approved only after confirmation', async ({ page }) => {
+  let claimed = false
   let posts = 0
-  const item = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
-    amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model', fired_rules: [] }
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item], next_cursor: null, model_enabled: true } }))
-  await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item, ruleset_version: 3, player_purchases: [], device_activity: null } }))
+  const item = () => ({ purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
+    amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model', fired_rules: [],
+    claimed_by: claimed ? 'demo-user' : null, claimed_at: claimed ? now : null })
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item()], next_cursor: null, model_enabled: true } }))
+  await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null } }))
+  await page.route('**/reviews/demo-purchase/claim', async route => { claimed = true; await route.fulfill({ status: 201, json: { purchase_id: 'demo-purchase', claimed_by: 'demo-user', claimed_at: now } }) })
   await page.route('**/reviews/demo-purchase/decision', async route => { posts++; await route.fulfill({ status: 201, json: {} }) })
   await page.goto('/#/reviews')
-  await page.getByLabel('Analyst key', { exact: true }).fill('synthetic-analyst')
-  await page.getByRole('button', { name: 'Open queue' }).click()
+  await expect(page.getByRole('button', { name: 'Approve demo-transaction' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Claim demo-transaction' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'You claimed demo-transaction' })).toBeVisible()
   await page.getByRole('button', { name: 'demo-transaction', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Review case' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
+  await expect(page.getByText('Claimed by you')).toBeVisible()
   await page.getByRole('button', { name: 'Back to the queue' }).click()
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -56,23 +63,41 @@ test('review evidence, confirmation cancellation and approval remain usable', as
   await expect.poll(() => posts).toBe(1)
 })
 
-test('Blocklist native controls keep operator writes and removal confirmation', async ({ page }) => {
+test('a purchase claimed by another account offers no decision', async ({ page }) => {
+  const item = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
+    amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: null, model_version: null, fired_rules: [],
+    claimed_by: 'other-reviewer', claimed_at: now }
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [item], next_cursor: null, model_enabled: false } }))
+  await page.goto('/#/reviews')
+  await expect(page.getByText('Claimed by other-reviewer', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^(Claim|Approve|Reject) demo-transaction$/ })).toHaveCount(0)
+})
+
+test('Blocklist entries are added with the session and removed after confirmation', async ({ page }) => {
   let saved = false
+  const writes: (string | undefined)[] = []
   const entry = { id: 1, type: 'player', value: 'demo-player', reason: 'Synthetic example', created_at: now }
   await page.route('**/blocklist', async route => {
-    if (route.request().method() === 'POST') { saved = true; return route.fulfill({ status: 201, json: entry }) }
+    if (route.request().method() === 'POST') {
+      saved = true
+      writes.push(route.request().headers().authorization)
+      return route.fulfill({ status: 201, json: entry })
+    }
     return route.fulfill({ json: { entries: saved ? [entry] : [] } })
   })
   await page.route('**/blocklist/1', async route => { saved = false; await route.fulfill({ status: 204 }) })
   await page.goto('/#/blocklist')
-  await page.getByLabel('Operator key', { exact: true }).fill('synthetic-operator')
   await page.getByLabel('Type', { exact: true }).selectOption('player')
   await page.getByLabel('Value', { exact: false }).fill('demo-player')
   await page.getByLabel('Reason', { exact: false }).fill('Synthetic example')
   await page.getByRole('button', { name: 'Add to blocklist' }).click()
-  await expect(page.getByRole('cell', { name: 'demo-player', exact: true })).toBeVisible()
-  page.once('dialog', dialog => dialog.accept())
-  await page.getByRole('button', { name: /Remove/ }).click()
+  await expect(page.getByRole('rowheader', { name: 'demo-player', exact: true })).toBeVisible()
+  expect(writes).toEqual([`Bearer ${sessionToken}`])
+  await page.getByRole('button', { name: /Remove player/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.getByRole('rowheader', { name: 'demo-player', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /Remove player/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove entry', exact: true }).click()
   await expect(page.getByText('The blocklist is empty.', { exact: false })).toBeVisible()
 })
 
@@ -82,15 +107,13 @@ test('Rulesets can select read-only history and return to the editable version',
   await page.route('**/rulesets/2', route => route.fulfill({ json: { ...ruleset, version: 2 } }))
   await page.goto('/#/rulesets')
   await page.getByRole('button', { name: 'Version 2', exact: true }).click()
-  await expect(page.getByText(/viewing version 2 \(read-only\)/)).toBeVisible()
+  await expect(page.getByText('Viewing version 2 (read-only)')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Publish new version' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Edit active version (3)' }).click()
-  await expect(page.getByRole('button', { name: 'Publish new version' })).toBeDisabled()
-  await page.getByLabel('Operator key', { exact: true }).fill('synthetic-operator')
   await expect(page.getByRole('button', { name: 'Publish new version' })).toBeEnabled()
 })
 
-test('Simulator can start, follow and stop a synthetic run through native controls', async ({ page }) => {
+test('Simulator can start, follow and stop a synthetic run', async ({ page }) => {
   let active = false
   let status = 'running'
   const run = () => ({ id: 'demo-simulation', status, created_at: now, finished_at: status === 'stopped' ? now : null,
@@ -101,7 +124,6 @@ test('Simulator can start, follow and stop a synthetic run through native contro
   await page.route('**/simulations/demo-simulation', route => route.fulfill({ json: run() }))
   await page.route('**/simulations/demo-simulation/stop', async route => { status = 'stopped'; await route.fulfill({ json: run() }) })
   await page.goto('/#/simulator')
-  await page.getByLabel('Operator key', { exact: true }).fill('synthetic-operator')
   await page.getByRole('button', { name: 'Start run', exact: true }).click()
   await expect(page.locator('.simulation-progress .simulation-status')).toHaveText('Running')
   await page.getByRole('button', { name: 'Stop run', exact: true }).click()

@@ -233,3 +233,29 @@ selected after reload. Chrome's actual 200% zoom indicator and accessibility tre
 the wordmark, theme control, Menu and period controls. User interaction interrupted the
 native drawer-click check at that zoom; automated all-route half-width reflow and drawer
 keyboard checks passed. The temporary zoom was restored to 100% and the test tab closed.
+
+## Follow-up: sign-in, role-based pages and full redesign
+
+AF-136 to AF-140 replace the retained legacy styling on every page and add the console
+sign-in. The XUI provider remains the only source of color, type and spacing tokens;
+`src/styles/` holds one stylesheet per concern (base, controls, shell, data, pages, login)
+and derives the few extra values (hover, shadow, radius scale) from those tokens. The
+sidebar, buttons, status label and headings are now native elements styled with the
+tokens, so the button, typography, status and sidebar XUI packages are no longer installed.
+
+- Sign-in: a two-column screen with a fixed dark brand panel and the form; one column
+  below 56rem. A wrong username, wrong password and disabled account share one message.
+  A 429 shows a countdown from `Retry-After` and keeps the button from sending.
+- Session: the token is kept in `localStorage` under `anti-fraud.session`, checked with
+  `GET /auth/me` on load, and sent as `Authorization: Bearer`. Any 401 on a session
+  request returns to sign-in with an explanation. Signing out in one tab applies to all.
+- Roles: reviewers see the review queue; admins see every page, including Assignments
+  and Accounts. A page outside the role shows a "not available" state.
+- Review queue: a purchase is claimed before it is decided. Rows show who holds the
+  claim, and the actions follow it. Below 48rem, rows of the main tables become cards
+  and keep their table roles.
+- The proxies add the service key only to `POST /score`.
+
+Checks: `npm run check`, `npm run build`, and the Chromium browser suite, which now
+includes sign-in, role, claim, account and assignment flows and axe scans of the
+sign-in screen and every page in both themes at 1280 and 390 pixels.

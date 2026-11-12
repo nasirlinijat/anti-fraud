@@ -82,19 +82,19 @@ test('start retry uses the same request and accepts 202 and idempotent 200', asy
   }
   const calls = []
   mock.method(globalThis, 'fetch', async (path, init) => {
-    calls.push({ path, body: init.body, key: init.headers['X-API-Key'] })
+    calls.push({ path, body: init.body })
     if (calls.length === 1) throw new TypeError('connection lost')
     return Response.json({ id: 'sim-saved' }, { status: calls.length === 2 ? 202 : 200 })
   })
-  await assert.rejects(startSimulation(settings, 'operator'), { kind: 'network' })
-  assert.equal((await startSimulation(settings, 'operator')).id, 'sim-saved')
-  assert.equal((await startSimulation(settings, 'operator')).id, 'sim-saved')
+  await assert.rejects(startSimulation(settings), { kind: 'network' })
+  assert.equal((await startSimulation(settings)).id, 'sim-saved')
+  assert.equal((await startSimulation(settings)).id, 'sim-saved')
   assert.deepEqual(
     calls,
-    Array(3).fill({ path: '/simulations', body: JSON.stringify(settings), key: 'operator' }),
+    Array(3).fill({ path: '/simulations', body: JSON.stringify(settings) }),
   )
 })
-test('reads omit operator credentials and stop encodes the run ID', async ({ mock }) => {
+test('reads and writes send no API key and stop encodes the run ID', async ({ mock }) => {
   const calls = []
   mock.method(globalThis, 'fetch', async (path, init) => {
     calls.push([path, init])
@@ -102,11 +102,10 @@ test('reads omit operator credentials and stop encodes the run ID', async ({ moc
   })
   await listSimulations()
   await getSimulation('run/id')
-  await stopSimulation('run/id', 'operator')
+  await stopSimulation('run/id')
   assert.equal(calls[0][0], '/simulations?limit=10')
-  assert.equal(calls[0][1].headers, undefined)
+  for (const [, init] of calls) assert.equal(init.headers.has('X-API-Key'), false)
   assert.equal(calls[1][0], '/simulations/run%2Fid')
   assert.equal(calls[2][0], '/simulations/run%2Fid/stop')
   assert.equal(calls[2][1].method, 'POST')
-  assert.equal(calls[2][1].headers['X-API-Key'], 'operator')
 })

@@ -1,3 +1,5 @@
+import { reportSessionRejected, sessionToken } from './session.ts'
+
 export interface ErrorResponse {
   error: string
   fields?: Record<string, string>
@@ -11,19 +13,32 @@ export class ApiError extends Error {
   readonly status?: number
   readonly fields?: ErrorResponse['fields']
   readonly activeRunId?: string
+  readonly retryAfterSeconds?: number
 
-  constructor(kind: Failure, message: string, status?: number, details: { fields?: ErrorResponse['fields']; activeRunId?: string } = {}) {
+  constructor(kind: Failure, message: string, status?: number, details: ErrorDetails = {}) {
     super(message)
     this.kind = kind
     this.status = status
     this.fields = details.fields
     this.activeRunId = details.activeRunId
+    this.retryAfterSeconds = details.retryAfterSeconds
   }
 }
 
+interface ErrorDetails {
+  fields?: ErrorResponse['fields']
+  activeRunId?: string
+  retryAfterSeconds?: number
+}
+
+// A session request carries the signed-in account's token. A service request
+// gets the service key from the console proxy. Sign-in and readiness send
+// no credentials.
+type Auth = 'session' | 'service' | 'none'
+
 interface RequestOptions<T> extends Omit<RequestInit, 'signal'> {
   signal?: AbortSignal
-  auth?: 'service' | 'analyst' | 'operator' | 'none'
+  auth?: Auth
   expectedStatus?: number
   read?: (response: Response) => Promise<T>
 }
@@ -43,8 +58,31 @@ function readError(body: unknown, status: number): ErrorResponse {
   return { error: `The backend answered with status ${status}.` }
 }
 
+function withCredentials(headers: HeadersInit | undefined, auth: Auth): Headers {
+  const result = new Headers(headers)
+  const token = sessionToken()
+  if (auth === 'session' && token) result.set('Authorization', `Bearer ${token}`)
+  return result
+}
+
+function retryAfterSeconds(response: Response): number | undefined {
+  const seconds = Number(response.headers.get('Retry-After'))
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+}
+
+async function httpError(response: Response, auth: Auth): Promise<ApiError> {
+  const body: unknown = await response.json().catch(() => null)
+  const { error, fields, active_run_id } = readError(body, response.status)
+  const message = response.status === 401 && auth === 'service'
+    ? `${error.endsWith('.') ? error : `${error}.`} Check API_KEY in .env and restart the console and backend.`
+    : error
+  return new ApiError('http', message, response.status, {
+    fields, activeRunId: active_run_id, retryAfterSeconds: retryAfterSeconds(response),
+  })
+}
+
 export async function request<T>(path: string, options: RequestOptions<T> = {}): Promise<T> {
-  const { signal, auth = 'service', expectedStatus, read, ...init } = options
+  const { signal, auth = 'session', expectedStatus, read, headers, ...init } = options
   signal?.throwIfAborted()
   const controller = new AbortController()
   const cancel = () => controller.abort(signal?.reason)
@@ -53,14 +91,11 @@ export async function request<T>(path: string, options: RequestOptions<T> = {}):
   let response: Response | undefined
 
   try {
-    response = await fetch(path, { ...init, signal: controller.signal })
+    response = await fetch(path, { ...init, headers: withCredentials(headers, auth), signal: controller.signal })
     if (!response.ok || (expectedStatus !== undefined && response.status !== expectedStatus)) {
-      const body: unknown = await response.json().catch(() => null)
-      const { error, fields, active_run_id } = readError(body, response.status)
-      const message = response.status === 401 && auth === 'service'
-        ? `${error.endsWith('.') ? error : `${error}.`} Check API_KEY in .env and restart the console and backend.`
-        : error
-      throw new ApiError('http', message, response.status, { fields, activeRunId: active_run_id })
+      // The backend no longer accepts the token, so the console returns to sign-in.
+      if (response.status === 401 && auth === 'session') reportSessionRejected()
+      throw await httpError(response, auth)
     }
     const result = read ? await read(response) : await response.json() as T
     controller.signal.throwIfAborted()

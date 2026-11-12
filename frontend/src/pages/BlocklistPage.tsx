@@ -9,6 +9,9 @@ import {
   type ErrorResponse,
 } from '../api'
 import { TimeDisplayToggle, Timestamp } from '../Display'
+import { Button } from '../ui/Button'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
@@ -30,7 +33,7 @@ const placeholders: Record<EntryType, string> = {
 function BlocklistPage() {
   const [entries, setEntries] = useState<BlocklistEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [operatorKey, setOperatorKey] = useState('')
+  const [toRemove, setToRemove] = useState<BlocklistEntry | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
@@ -47,14 +50,12 @@ function BlocklistPage() {
   const refreshEntries = loadError ? undefined : retry
 
   const remove = async (entry: BlocklistEntry) => {
-    if (removing !== null || !operatorKey.trim()) return
-    if (!window.confirm(`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value} from the blocklist?`)) {
-      return
-    }
+    setToRemove(null)
+    if (removing !== null) return
     setRemoving(entry.id)
     setRemoveError(null)
     setNotice(null)
-    const res = await removeBlocklistEntry(entry.id, operatorKey.trim())
+    const res = await removeBlocklistEntry(entry.id)
     setRemoving(null)
     if (res.ok) setNotice(`${typeNames[entry.type]} ${entry.value} is no longer blocked.`)
     else setRemoveError(res.error.error)
@@ -63,45 +64,41 @@ function BlocklistPage() {
 
   return (
     <div className="blocklist">
-      <h1>Blocklist</h1>
-      <p className="muted">
-        A purchase whose card, device, player or IP address is on the blocklist is blocked before the rules run. A new
-        entry applies to the next scored purchase.
-      </p>
-
-      <div className="field">
-        <label htmlFor="blocklist-operator-key">Operator key</label>
-        <input id="blocklist-operator-key" type="password" autoComplete="off" value={operatorKey}
-          onChange={(event) => setOperatorKey(event.target.value)} />
+      <PageHeader eyebrow="Configuration" title="Blocklist"
+        lead="A purchase whose card, device, player or IP address is on the blocklist is blocked before the rules run. A new entry applies to the next scored purchase." />
+      <div className="split-layout">
+        <section className="panel" aria-labelledby="blocklist-entries">
+          <div className="panel-head">
+            <h2 id="blocklist-entries">Entries{entries ? ` (${entries.length})` : ''}</h2>
+            {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
+          </div>
+          <p className={notice ? 'notice' : 'visually-hidden'} role="status">{notice}</p>
+          {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
+          {removeError && (
+            <ErrorState onRetry={refreshEntries} retryLabel="Refresh entries" pending={pending}>
+              {removeError}
+            </ErrorState>
+          )}
+          {!entries && (!loadError || pending) && <LoadingSkeleton shape="table" label="Loading blocklist…" />}
+          {entries && entries.length === 0 && <EmptyState>The blocklist is empty. Use Add an entry to block a value.</EmptyState>}
+          {entries && entries.length > 0 && (
+            <EntriesTable entries={entries} time={time} disabled={removing !== null} onRemove={setToRemove} />
+          )}
+        </section>
+        <AddEntryForm pending={pending} onRefresh={refreshEntries} onNotice={setNotice} onAdded={refresh} />
       </div>
-
-      <AddEntryForm operatorKey={operatorKey} pending={pending} onRefresh={refreshEntries} onNotice={setNotice} onAdded={refresh} />
-
-      <p className="muted small" aria-live="polite">
-        {notice}
-      </p>
-
-      <section>
-        <h2>Entries{entries ? ` (${entries.length})` : ''}</h2>
-        {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
-        {removeError && (
-          <ErrorState onRetry={refreshEntries} retryLabel="Refresh entries" pending={pending}>
-            {removeError}
-          </ErrorState>
-        )}
-        {!entries && (!loadError || pending) && <LoadingSkeleton shape="table" label="Loading blocklist…" />}
-        {entries && entries.length === 0 && <EmptyState>The blocklist is empty. Use Add an entry above to block a value.</EmptyState>}
-        {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
-        {entries && entries.length > 0 && (
-          <EntriesTable entries={entries} time={time} disabled={removing !== null || !operatorKey.trim()} onRemove={remove} />
-        )}
-      </section>
+      <ConfirmDialog open={toRemove !== null} title="Remove this entry?" confirmLabel="Remove entry" danger
+        onCancel={() => setToRemove(null)} onConfirm={() => { if (toRemove) void remove(toRemove) }}>
+        <p>
+          {toRemove && `${typeNames[toRemove.type]} ${toRemove.value}`} will no longer be blocked. Purchases that use it are
+          scored by the rules again.
+        </p>
+      </ConfirmDialog>
     </div>
   )
 }
 
-function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
-  operatorKey: string
+function AddEntryForm({ pending, onRefresh, onNotice, onAdded }: {
   pending: boolean
   onRefresh?: () => void
   onNotice: (notice: string | null) => void
@@ -116,10 +113,10 @@ function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
 
   const add = async (e: FormEvent) => {
     e.preventDefault()
-    if (saving || !operatorKey.trim()) return
+    if (saving) return
     setSaving(true)
     onNotice(null)
-    const res = await addBlocklistEntry({ type, value, reason }, operatorKey.trim())
+    const res = await addBlocklistEntry({ type, value, reason })
     setSaving(false)
     if (!res.ok) {
       setFormError(res.error)
@@ -133,8 +130,8 @@ function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
   }
 
   return (
-    <form className="panel blocklist-form" onSubmit={add} noValidate>
-      <h2>Add an entry</h2>
+    <form className="panel blocklist-form" onSubmit={add} noValidate aria-labelledby="blocklist-add">
+      <h2 id="blocklist-add">Add an entry</h2>
       <div className="fields">
         <div className={fields.type ? 'field invalid' : 'field'}>
           <label htmlFor="entry-type">Type</label>
@@ -150,7 +147,7 @@ function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
         <RequiredField name="value" label="Value" value={value} error={fields.value} disabled={saving}
           placeholder={placeholders[type]} onChange={setValue} />
         <RequiredField name="reason" label="Reason" wide value={reason} error={fields.reason} disabled={saving}
-          placeholder="Why is it blocked? For example: chargeback on 2026-11-08" onChange={setReason} />
+          placeholder="Chargeback on 2026-11-08" onChange={setReason} />
       </div>
       {formError && (
         <ErrorState onRetry={Object.keys(fields).length === 0 ? onRefresh : undefined}
@@ -158,9 +155,7 @@ function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
           {formError.error}
         </ErrorState>
       )}
-      <button type="submit" disabled={saving || !operatorKey.trim()}>
-        {saving ? 'Adding…' : 'Add to blocklist'}
-      </button>
+      <Button type="submit" disabled={saving}>{saving ? 'Adding…' : 'Add to blocklist'}</Button>
     </form>
   )
 }
@@ -207,42 +202,35 @@ function EntriesTable({ entries, time, disabled, onRemove }: {
   onRemove: (entry: BlocklistEntry) => void
 }) {
   return (
-    <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Blocklist data"><table>
-      <thead>
-        <tr>
-          <th scope="col">Type</th>
-          <th scope="col">Value</th>
-          <th scope="col">Reason</th>
-          <th scope="col">Added</th>
-          <th scope="col">
-            <span className="visually-hidden">Actions</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {entries.map((entry) => (
-          <tr key={entry.id}>
-            <td>{typeNames[entry.type]}</td>
-            <td>
-              <code>{entry.value}</code>
-            </td>
-            <td>{entry.reason}</td>
-            <td className="muted small"><Timestamp value={entry.created_at} display={time} /></td>
-            <td className="num">
-              <button
-                type="button"
-                className="secondary"
-                disabled={disabled}
-                onClick={() => onRemove(entry)}
-                aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}
-              >
-                Remove
-              </button>
-            </td>
+    <div className="table-scroll" role="region" tabIndex={0} aria-label="Blocklist data">
+      <table className="stack-table" role="table">
+        <thead role="rowgroup">
+          <tr role="row">
+            <th role="columnheader" scope="col">Value</th>
+            <th role="columnheader" scope="col">Type</th>
+            <th role="columnheader" scope="col">Reason</th>
+            <th role="columnheader" scope="col">Added</th>
+            <th role="columnheader" scope="col"><span className="visually-hidden">Actions</span></th>
           </tr>
-        ))}
-      </tbody>
-    </table></div>
+        </thead>
+        <tbody role="rowgroup">
+          {entries.map((entry) => (
+            <tr role="row" key={entry.id}>
+              <th role="rowheader" scope="row"><code>{entry.value}</code></th>
+              <td role="cell" data-label="Type">{typeNames[entry.type]}</td>
+              <td role="cell" data-label="Reason">{entry.reason}</td>
+              <td role="cell" data-label="Added"><Timestamp value={entry.created_at} display={time} /></td>
+              <td role="cell" className="cell-action">
+                <Button variant="danger" size="sm" disabled={disabled} onClick={() => onRemove(entry)}
+                  aria-label={`Remove ${typeNames[entry.type].toLowerCase()} ${entry.value}`}>
+                  Remove
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

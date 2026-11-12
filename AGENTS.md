@@ -48,7 +48,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Database access | Raw SQL run with the pgx driver, kept as constants in the storage layer |
 | Schema changes | Versioned SQL migration files applied with golang-migrate |
 | Rule configuration | Versioned rulesets in the database. A stored version never changes: a change adds a new version and makes it the only active one, in one transaction |
-| Frontend | React with TypeScript |
+| Frontend | React with TypeScript. The console opens on a sign-in screen, sends the session token with every request, and shows each role only its pages: the review queue for reviewers, every page for admins. The proxy adds the service key only to `POST /score` |
 | Model role | Assist only: it can clear a review or add one, but never produces a block |
 | Model serving | Trained in Python, exported to a file, and run inside the Go service |
 | Model data | IEEE-CIS converted to the API format and replayed through scoring (section 3.3) |

@@ -43,7 +43,6 @@ export interface Stats {
   decision_series: DecisionSeries
 }
 
-// getStats reads the dashboard statistics for a period. The proxy adds the API key.
 export function getStats(period: Period, signal?: AbortSignal): Promise<Stats> {
   return request(`/stats?period=${period}`, { signal })
 }
@@ -61,7 +60,7 @@ export interface BlocklistEntry {
 
 export type Saved<T> = { ok: true; value: T } | { ok: false; error: ErrorResponse }
 
-async function save<T>(operation: () => Promise<T>): Promise<Saved<T>> {
+export async function save<T>(operation: () => Promise<T>): Promise<Saved<T>> {
   try {
     return { ok: true, value: await operation() }
   } catch (error) {
@@ -125,11 +124,10 @@ export async function listRulesets(signal?: AbortSignal): Promise<RulesetSummary
   return result.versions
 }
 
-export function publishRuleset(config: RulesetConfig, operatorKey: string): Promise<Saved<Ruleset>> {
+export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
   return save(() => request('/rulesets', {
     method: 'POST',
-    auth: 'operator',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config, (_key, value: unknown) => {
       if (typeof value !== 'bigint') return value
       const number = Number(value)
@@ -141,34 +139,34 @@ export function publishRuleset(config: RulesetConfig, operatorKey: string): Prom
   }))
 }
 
-// The proxy adds the service key to blocklist reads.
 export async function listBlocklist(signal?: AbortSignal): Promise<BlocklistEntry[]> {
   const result = await request<{ entries: BlocklistEntry[] }>('/blocklist', { signal })
   return result.entries
 }
 
-export function addBlocklistEntry(entry: { type: string; value: string; reason: string }, operatorKey: string): Promise<Saved<BlocklistEntry>> {
+export function addBlocklistEntry(entry: { type: string; value: string; reason: string }): Promise<Saved<BlocklistEntry>> {
   return save(() => request<BlocklistEntry>('/blocklist', {
     method: 'POST',
-    auth: 'operator',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry),
   }))
 }
 
-export function removeBlocklistEntry(id: number, operatorKey: string): Promise<Saved<null>> {
-  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', auth: 'operator', headers: { 'X-API-Key': operatorKey }, read: async () => null }))
+export function removeBlocklistEntry(id: number): Promise<Saved<null>> {
+  return save(() => request(`/blocklist/${id}`, { method: 'DELETE', read: async () => null }))
 }
 
 export type ScoreResult =
   | { ok: true; response: ScoreResponse }
   | { ok: false; status: number; error: ErrorResponse }
 
-// score sends one score request. The proxy adds the API key.
+// score sends one score request. POST /score accepts only the service key,
+// which the console proxy adds.
 export async function score(purchase: Record<string, unknown>): Promise<ScoreResult> {
   try {
     const response = await request<ScoreResponse>('/score', {
       method: 'POST',
+      auth: 'service',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(purchase),
     })
@@ -194,6 +192,8 @@ export interface Review {
   model_score: number | null
   model_version: string | null
   fired_rules: FiredRule[]
+  claimed_by: string | null
+  claimed_at: string | null
 }
 
 export interface PlayerPurchase {
@@ -224,25 +224,45 @@ export interface QueuePage {
 export type ReviewSort = 'rule_score' | 'model_score'
 export type Decision = 'approve' | 'reject'
 
-export function listReviews(analystKey: string, sort: ReviewSort, cursor: string | null, signal: AbortSignal): Promise<QueuePage> {
+export type ClaimFilter = 'all' | 'mine'
+
+export interface QueueQuery {
+  sort: ReviewSort
+  cursor: string | null
+  claimed: ClaimFilter
+}
+
+export function listReviews({ sort, cursor, claimed }: QueueQuery, signal: AbortSignal): Promise<QueuePage> {
   const params = new URLSearchParams({ sort })
   if (cursor !== null) params.set('cursor', cursor)
-  return request(`/reviews?${params}`, { auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal })
+  if (claimed === 'mine') params.set('claimed', 'mine')
+  return request(`/reviews?${params}`, { signal })
 }
 
-export function getReviewCase(analystKey: string, purchaseId: string, signal: AbortSignal): Promise<ReviewCase> {
-  return request(`/reviews/${encodeURIComponent(purchaseId)}`, {
-    auth: 'analyst', headers: { 'X-API-Key': analystKey }, signal,
-  })
+export function getReviewCase(purchaseId: string, signal: AbortSignal): Promise<ReviewCase> {
+  return request(`/reviews/${encodeURIComponent(purchaseId)}`, { signal })
 }
 
-export async function submitReviewDecision(analystKey: string, purchaseId: string,
-  decision: Decision, blockDevice: boolean, signal: AbortSignal): Promise<boolean> {
+export interface Claim {
+  purchase_id: string
+  claimed_by: string
+  claimed_at: string
+}
+
+export function claimReview(purchaseId: string, signal?: AbortSignal): Promise<Claim> {
+  return request(`/reviews/${encodeURIComponent(purchaseId)}/claim`, { method: 'POST', signal })
+}
+
+export function releaseClaim(purchaseId: string): Promise<Saved<null>> {
+  return save(() => request(`/reviews/${encodeURIComponent(purchaseId)}/claim`, { method: 'DELETE', read: async () => null }))
+}
+
+export async function submitReviewDecision(purchaseId: string, decision: Decision,
+  blockDevice: boolean, signal: AbortSignal): Promise<boolean> {
   try {
     const result = await request<{ device_blocked?: boolean } | null>(`/reviews/${encodeURIComponent(purchaseId)}/decision`, {
-      auth: 'analyst',
       method: 'POST',
-      headers: { 'X-API-Key': analystKey, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(decision === 'reject' && blockDevice ? { decision, block_device: true } : { decision }),
       expectedStatus: 201,
       signal,
@@ -289,13 +309,12 @@ export function listSimulations(signal?: AbortSignal): Promise<SimulationHistory
 export function getSimulation(id: string, signal?: AbortSignal): Promise<SimulationRun> {
   return request(`/simulations/${encodeURIComponent(id)}`, { signal })
 }
-export function startSimulation(settings: SimulationSettings, operatorKey: string, signal?: AbortSignal): Promise<SimulationRun> {
-  return request('/simulations', { method: 'POST', auth: 'operator', signal,
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': operatorKey }, body: JSON.stringify(settings) })
+export function startSimulation(settings: SimulationSettings, signal?: AbortSignal): Promise<SimulationRun> {
+  return request('/simulations', { method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })
 }
-export function stopSimulation(id: string, operatorKey: string, signal?: AbortSignal): Promise<SimulationRun> {
-  return request(`/simulations/${encodeURIComponent(id)}/stop`, { method: 'POST', auth: 'operator', signal,
-    headers: { 'X-API-Key': operatorKey } })
+export function stopSimulation(id: string, signal?: AbortSignal): Promise<SimulationRun> {
+  return request(`/simulations/${encodeURIComponent(id)}/stop`, { method: 'POST', signal })
 }
 
 export type QualitySource = 'simulator' | 'ieee-cis'

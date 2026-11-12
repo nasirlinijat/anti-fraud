@@ -1,5 +1,4 @@
 import { useId } from 'react'
-import { Typography } from '@xsolla/xui-typography'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DecisionSeries } from '../api'
 import { outcomeLabels } from '../displayFormat'
@@ -35,7 +34,7 @@ export default function DecisionChart({ series, since, until }: { series: Decisi
 
   return (
     <section className="panel decision-panel">
-      <Typography as="h2" variant="h5" marginBottom={16}>Decisions over time</Typography>
+      <h2>Decisions over time</h2>
       <figure className="decision-figure">
         <figcaption className="muted small">One bar per {bucketSize(series.bucket_seconds)}. Times are UTC.</figcaption>
         <ResponsiveContainer width="100%" height={260}>

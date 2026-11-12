@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { Period, QualityReport, QualitySource, Stats } from '../src/api'
+import type { Role } from '../src/session'
 
 export const evidenceDirectory = process.env.AF_EVIDENCE_DIR ?? join(tmpdir(), 'af121-evidence')
 
@@ -31,13 +32,26 @@ export function quality(source: QualitySource = 'simulator', run = runId): Quali
     coverage: { pending: 2, quarantined: 1, scored_decisions: 803, run_status: 'running' } }
 }
 
-export async function mockConsole(page: Page) {
+export const sessionToken = 'synthetic-session-token'
+
+// mockConsole answers the console's reads with synthetic data. By default an
+// admin is already signed in; pass null to start at the sign-in screen.
+export async function mockConsole(page: Page, role: Role | null = 'admin') {
   await page.clock.install({ time: new Date(now) })
+  if (role) await page.addInitScript(token => window.localStorage.setItem('anti-fraud.session', token), sessionToken)
   await page.route('**/*', async route => {
     const url = new URL(route.request().url())
     if (url.origin !== 'http://127.0.0.1:4173') return route.continue()
     const source = url.searchParams.get('source') === 'ieee-cis' ? 'ieee-cis' : 'simulator'
     if (url.pathname === '/ready') return route.fulfill({ status: 200, body: '' })
+    if (url.pathname === '/auth/me') {
+      const signedIn = route.request().headers().authorization === `Bearer ${sessionToken}`
+      return signedIn
+        ? route.fulfill({ json: { username: 'demo-user', role: role ?? 'admin' } })
+        : route.fulfill({ status: 401, json: { error: 'missing or invalid session' } })
+    }
+    if (url.pathname === '/admin/accounts') return route.fulfill({ json: { accounts: [{ username: 'demo-user', role: 'admin', disabled: false, created_at: now }] } })
+    if (url.pathname === '/admin/assignments') return route.fulfill({ json: { reviewers: [] } })
     if (url.pathname === '/stats') return route.fulfill({ json: statistics((url.searchParams.get('period') ?? '24h') as Period) })
     if (url.pathname === '/stats/quality/runs') return route.fulfill({ json: { source, run_ids: [runId], next_cursor: url.searchParams.has('after') ? undefined : runId } })
     if (url.pathname === '/stats/quality') return route.fulfill({ json: quality(source, url.searchParams.get('run_id') ?? runId) })
@@ -48,4 +62,14 @@ export async function mockConsole(page: Page) {
     if (url.pathname === '/rulesets') return route.fulfill({ json: { versions: [] } })
     return route.continue()
   })
+}
+
+// signIn goes through the sign-in form, for tests where no saved session can be restored.
+export async function signIn(page: Page) {
+  await page.route('**/auth/login', route => route.fulfill({
+    json: { token: sessionToken, expires_at: '2026-11-13T00:00:00Z', account: { username: 'demo-user', role: 'admin' } },
+  }))
+  await page.getByLabel('Username', { exact: true }).fill('demo-user')
+  await page.getByLabel('Password', { exact: true }).fill('synthetic-password')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 }
