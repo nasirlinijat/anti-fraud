@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 type fakeQuality struct {
@@ -27,7 +29,7 @@ func (f *fakeQuality) Runs(_ context.Context, source, after string, limit int) (
 }
 func qualityGet(src QualitySource, path string, keys ...string) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
-	RegisterQualityRoutes(mux, src, "quality-key")
+	RegisterQualityRoutes(mux, src, platform.Access{ServiceKey: "quality-key"})
 	req := httptest.NewRequest("GET", path, nil)
 	for _, key := range keys {
 		req.Header.Add("X-API-Key", key)

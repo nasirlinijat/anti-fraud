@@ -61,6 +61,8 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"ListModelInputs", trainingdata.ModelInputsPageSQL, []any{at, "txn-1", int32(5000)}},
 		{"PlayerEarlierModelScores", storage.PlayerEarlierModelScoresSQL, []any{"player-1", at, "txn-1"}},
 		{"CountDeviceDistinctCardsLastHour", storage.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
+		{"AssignmentReviewers", storage.AssignmentReviewersSQL, nil},
+		{"OpenClaims", storage.OpenClaimsSQL, nil},
 		{"GetTrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
 		}},

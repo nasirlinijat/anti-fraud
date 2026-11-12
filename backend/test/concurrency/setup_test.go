@@ -94,9 +94,10 @@ func newMux(pool *pgxpool.Pool) (*http.ServeMux, error) {
 	}
 	rulesets := storage.NewRulesetStore(pool)
 	mux := http.NewServeMux()
+	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))), serviceKey)
-	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), serviceKey, operators)
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), false), analysts)
+	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), false), access)
 	return mux, nil
 }
 

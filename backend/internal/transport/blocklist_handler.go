@@ -33,10 +33,10 @@ func NewBlocklistHandler(service BlocklistService) *BlocklistHandler {
 
 // RegisterBlocklistRoutes registers GET and POST /blocklist and DELETE /blocklist/{id}
 // behind API key authentication.
-func RegisterBlocklistRoutes(mux *http.ServeMux, h *BlocklistHandler, apiKey string, operators platform.OperatorKeys) {
-	mux.Handle("GET /blocklist", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.list)))
-	mux.Handle("POST /blocklist", platform.RequireOperator(operators, h.add))
-	mux.Handle("DELETE /blocklist/{id}", platform.RequireOperator(operators, h.remove))
+func RegisterBlocklistRoutes(mux *http.ServeMux, h *BlocklistHandler, access platform.Access) {
+	mux.Handle("GET /blocklist", access.ConfigRead(http.HandlerFunc(h.list)))
+	mux.Handle("POST /blocklist", access.ConfigWrite(h.add))
+	mux.Handle("DELETE /blocklist/{id}", access.ConfigWrite(h.remove))
 }
 
 type blocklistListResponse struct {

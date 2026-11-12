@@ -23,6 +23,10 @@ type QueueItem struct {
 	ModelVersion *string
 	FiredRules   []scoring.FiredRule
 	DecidedAt    time.Time
+	// ClaimedBy is the username holding the claim, or nil while the purchase is unclaimed.
+	ClaimedBy *string
+	// ClaimedAt is when the claim was made, or nil while the purchase is unclaimed.
+	ClaimedAt *time.Time
 }
 
 // CaseItem is a purchase marked for review, with the evidence behind the decision.
@@ -74,7 +78,65 @@ const (
 	ResolutionNotFound        ResolutionStatus = "not_found"
 	ResolutionNotReview       ResolutionStatus = "not_review"
 	ResolutionAlreadyResolved ResolutionStatus = "already_resolved"
+	ResolutionNotClaimed      ResolutionStatus = "not_claimed"
 )
+
+// ReviewDecision is a decision on a purchase under review.
+type ReviewDecision struct {
+	PurchaseID  int64
+	Decision    string
+	AnalystID   string
+	BlockDevice bool
+	// ClaimedBy is the username that must hold the claim on the purchase, or
+	// nil for a decision made with an analyst key, which needs no claim.
+	ClaimedBy *string
+}
+
+type ClaimStatus string
+
+const (
+	ClaimSaved           ClaimStatus = "claimed"
+	ClaimAlreadyYours    ClaimStatus = "already_yours"
+	ClaimNotFound        ClaimStatus = "not_found"
+	ClaimNotReview       ClaimStatus = "not_review"
+	ClaimAlreadyResolved ClaimStatus = "already_resolved"
+	ClaimHeldByOther     ClaimStatus = "held_by_other"
+)
+
+// ReviewerWork is what one account is working on: its open claims and the
+// number of purchases it has decided.
+type ReviewerWork struct {
+	Username   string
+	Role       Role
+	Disabled   bool
+	Decided    int64
+	OpenClaims []OpenClaim
+}
+
+// OpenClaim is a claimed purchase that is still awaiting a decision.
+type OpenClaim struct {
+	PurchaseID  int64
+	AmountMinor int64
+	RuleScore   int
+	// ModelScore is nil when the purchase was scored without a model.
+	ModelScore *float64
+	ClaimedAt  time.Time
+}
+
+type ReleaseStatus string
+
+const (
+	ReleaseSaved           ReleaseStatus = "released"
+	ReleaseNoOpenClaim     ReleaseStatus = "no_open_claim"
+	ReleaseAlreadyResolved ReleaseStatus = "already_resolved"
+)
+
+// Claim is the result of claiming a purchase under review.
+type Claim struct {
+	Status    ClaimStatus
+	ClaimedBy string
+	ClaimedAt time.Time
+}
 
 type Resolution struct {
 	Status        ResolutionStatus

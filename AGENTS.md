@@ -54,7 +54,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Demo traffic | A seeded simulator that sends purchases in the same API format |
 | Caching | None. Indexed PostgreSQL queries only, no Redis |
 | Console updates | Polling every few seconds, no WebSockets |
-| API authentication | Service key for scoring and configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
+| API authentication | Service key for scoring. Console endpoints accept a signed-in session: reviewers can use the review endpoints, admins every console endpoint. Until the console signs in, they also accept the service key for configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
 
 ### 3.2 Backend Layout
 
@@ -65,12 +65,14 @@ backend/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/
     │   ├── score/      Score flow: saved decision, blocklist, model inputs, model, rules, save
-    │   ├── review/     Review rules: queue pages, one decision per purchase, reject can blocklist the device
+    │   ├── review/     Review rules: queue pages, claims, one decision per purchase, reject can blocklist the device
+    │   ├── account/    Accounts: username and password checks, bcrypt hashing
+    │   ├── auth/       Sign-in: password check, attempt limit, sessions stored by token hash
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
     │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
-    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs
+    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts
     ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── labels/         Private fraud labels, kept apart from everything scoring uses
@@ -140,9 +142,18 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /health` | 200 while the process is running |
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 | `POST /score` | Scores a purchase and returns its saved decision. Requires the `X-API-Key` header. A matching retry returns the saved decision with 200. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a saved transaction ID with different purchase fields |
-| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page. Requires an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong key and 503 when no analyst keys are configured |
+| `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
+| `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
+| `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
+| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page and who has claimed each purchase. `claimed=mine` lists only the purchases claimed by the signed-in account. Requires a reviewer or admin session in the `Authorization: Bearer` header, or an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong session or key, and 503 for a key when no analyst keys are configured |
 | `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, and device activity. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
-| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |
+| `POST /reviews/{purchase_id}/claim` | Claims a purchase awaiting review for the signed-in reviewer or admin, so that only that account can decide it. Requires a session; an analyst key gets 403. Returns 201 for a new claim, 200 for one you already hold, and 409 when another account holds it or the purchase was already decided |
+| `DELETE /reviews/{purchase_id}/claim` | Releases an open claim, returning the purchase to the shared queue. Requires an admin session; reviewers get 403. Returns 204, 404 for a purchase without an open claim, and 409 for one already decided |
+| `POST /admin/accounts` | Creates a reviewer or admin account with a password of 12 to 72 bytes. Requires an admin session; reviewers get 403. Returns 201, 400 naming the invalid field, and 409 for a taken username |
+| `GET /admin/accounts` | Lists every account with its username, role, disabled flag, and creation time, never the password hash. Same authentication |
+| `POST /admin/accounts/{username}/disable` | Disables an account and ends all its sessions at once. Same authentication. Returns 404 for an unknown username and 409 for your own account |
+| `GET /admin/assignments` | Lists each active reviewer, and any other account still holding an open claim, with its open claims (purchase ID, amount, rule score, model score, claim time) and the number of purchases it decided. Requires an admin session; reviewers get 403 and keys 401 |
+| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. A session must hold the claim on the purchase; an analyst key decides without one. Returns 409 for a purchase that was already decided or that the session has not claimed |
 
 `make test` defaults `TEST_DATABASE_URL` to the local database owner connection for test fixtures. The backend runs as the restricted `antifraud_api` role. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set. With it set, pass `-p 1`: test packages share one database, and packages running in parallel can deadlock on each other's rows.
 
