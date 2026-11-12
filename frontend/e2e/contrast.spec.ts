@@ -12,6 +12,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(page.locator('.decision-legend-label').first()).toBeVisible()
     const period = page.getByRole('button', { name: '24 hours', exact: true })
     await period.focus()
+    // Reduced motion still runs a 0.01ms transition, so read the colors after it has finished.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     const samples = ['.tile-label', '.tile-note', '.outcome-allow', '.outcome-review', '.outcome-block',
       '.console-navigation a[aria-current]', '.console-navigation a:not([aria-current])', '.periods button[aria-pressed=true]',
       '.periods button[aria-pressed=false]', '.theme-toggle', '.theme-track', '.theme-thumb', '.quality-run-picker select', '.quality-sources label', '.decision-legend-label']
