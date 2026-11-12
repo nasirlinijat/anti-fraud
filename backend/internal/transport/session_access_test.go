@@ -20,8 +20,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
-// sessionTestServer serves the review and blocklist routes against the test
-// transaction, to sessions and to the test analyst keys.
+// sessionTestServer serves the review, blocklist, and account routes against
+// the test transaction, to sessions and to the test analyst keys.
 type sessionTestServer struct {
 	mux      *http.ServeMux
 	accounts *account.Service
@@ -35,7 +35,9 @@ func newSessionTestServer(t *testing.T, tx pgx.Tx) *sessionTestServer {
 	mux := http.NewServeMux()
 	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), access)
 	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), access)
-	return &sessionTestServer{mux: mux, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
+	accounts := account.NewService(storage.NewAccountStore(tx))
+	RegisterAccountRoutes(mux, NewAccountHandler(accounts), access)
+	return &sessionTestServer{mux: mux, accounts: accounts, sessions: sessions}
 }
 
 // signIn creates an account and returns a session token for it.

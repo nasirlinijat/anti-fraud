@@ -14,6 +14,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
@@ -44,6 +45,7 @@ func main() {
 	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
 	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
 	access := platform.Access{ServiceKey: cfg.APIKey, Analysts: cfg.AnalystKeys, Operators: cfg.OperatorKeys, Sessions: authService}
+	transport.RegisterAccountRoutes(mux, transport.NewAccountHandler(account.NewService(storage.NewAccountStore(pool))), access)
 	rulesetStore := storage.NewRulesetStore(pool)
 	rulesetService := ruleset.NewService(rulesetStore)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), access)

@@ -11,8 +11,18 @@ import (
 )
 
 type fakeStore struct {
-	saved []models.NewAccount
-	err   error
+	saved    []models.NewAccount
+	err      error
+	disabled []string
+}
+
+func (f *fakeStore) List(context.Context) ([]models.Account, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) Disable(_ context.Context, username string) (models.Account, error) {
+	f.disabled = append(f.disabled, username)
+	return models.Account{Username: username}, nil
 }
 
 func (f *fakeStore) Create(_ context.Context, account models.NewAccount) (models.Account, error) {
@@ -85,5 +95,30 @@ func TestCreateReturnsTakenUsername(t *testing.T) {
 
 	if !errors.Is(err, models.ErrUsernameTaken) {
 		t.Fatalf("err = %v, want ErrUsernameTaken", err)
+	}
+}
+
+func TestDisableNormalizesTheUsername(t *testing.T) {
+	store := &fakeStore{}
+
+	if _, err := NewService(store).Disable(context.Background(), " Rita ", "ada"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	if len(store.disabled) != 1 || store.disabled[0] != "rita" {
+		t.Fatalf("disabled = %v, want [rita]", store.disabled)
+	}
+}
+
+func TestAdminCannotDisableTheirOwnAccount(t *testing.T) {
+	store := &fakeStore{}
+
+	_, err := NewService(store).Disable(context.Background(), "ADA", "ada")
+
+	if !errors.Is(err, ErrDisableSelf) {
+		t.Fatalf("err = %v, want ErrDisableSelf", err)
+	}
+	if len(store.disabled) != 0 {
+		t.Fatal("the account was disabled")
 	}
 }

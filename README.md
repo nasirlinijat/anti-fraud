@@ -269,7 +269,7 @@ printf '%s\n' "$ADMIN_PASSWORD" | go run ./cmd/create-account -username alice
 | `-role` | `admin` | `admin` or `reviewer` |
 | `-database` | `DATABASE_URL` | Database connection |
 
-The command exits with an error when the username is already taken.
+The command exits with an error when the username is already taken. After the first admin exists, admins manage accounts through the API: `POST /admin/accounts` creates a reviewer or admin, `GET /admin/accounts` lists them, and `POST /admin/accounts/{username}/disable` disables one and signs it out at once. An admin cannot disable their own account, so the last admin cannot lock everyone out.
 
 Sign in with `POST /auth/login` and send the returned token as `Authorization: Bearer <token>`. A session lasts 12 hours, and `POST /auth/logout` ends it. After 5 sign-in attempts for a username within 15 minutes, further attempts are rejected until the 15 minutes have passed. The attempt count is kept in memory, so a restart clears it and each backend process counts on its own.
 

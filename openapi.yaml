@@ -981,6 +981,143 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /admin/accounts:
+    post:
+      tags: [Admin]
+      operationId: createAccount
+      summary: Create a reviewer or admin account
+      description: The username is saved in lowercase. Only admins can create accounts.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewAccount"
+      responses:
+        "201":
+          description: The account was created and can sign in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetails"
+        "400":
+          description: >-
+            The body is not a single account object, or a field is invalid.
+            fields names the invalid field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "409":
+          description: The username is already taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The body is larger than 1024 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The account could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [Admin]
+      operationId: listAccounts
+      summary: List every account
+      description: Lists every account, disabled ones included, ordered by username. Password hashes are never returned.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The accounts.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AccountDetails"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The accounts could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/accounts/{username}/disable:
+    post:
+      tags: [Admin]
+      operationId: disableAccount
+      summary: Disable an account and sign it out
+      description: >-
+        The account can no longer sign in, and all its sessions end at once.
+        Its open claims stay until an admin releases them. Disabling an account
+        that is already disabled returns it again. An admin cannot disable
+        their own account.
+      security:
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema:
+            type: string
+          description: The username of the account. It is not case-sensitive.
+      responses:
+        "200":
+          description: The account is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetails"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No account has the username.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The username is your own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The account could not be disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/assignments:
     get:
       tags: [Admin]
@@ -1536,6 +1673,36 @@ components:
           format: date-time
           nullable: true
           description: When the claim was made, in UTC, or null while the purchase is unclaimed.
+
+    NewAccount:
+      type: object
+      additionalProperties: false
+      required: [username, password, role]
+      properties:
+        username:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$'
+          description: Saved in lowercase.
+          example: alice
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: 12 to 72 bytes.
+        role: {type: string, enum: [reviewer, admin]}
+
+    AccountDetails:
+      type: object
+      required: [username, role, disabled, created_at]
+      properties:
+        username: {type: string, example: alice}
+        role: {type: string, enum: [reviewer, admin]}
+        disabled: {type: boolean}
+        created_at:
+          type: string
+          format: date-time
+          description: When the account was created, in UTC.
 
     Assignments:
       type: object
