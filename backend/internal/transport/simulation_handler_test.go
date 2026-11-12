@@ -1,8 +1,6 @@
 package transport
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,56 +9,16 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/simulation"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/transport/mocks"
+	"go.uber.org/mock/gomock"
 )
 
-type fakeSimulations struct {
-	run      models.SimulationRun
-	created  bool
-	err      error
-	started  *models.SimulationSettings
-	operator string
-	limit    int
-	before   string
-}
-
-func (f *fakeSimulations) Start(_ context.Context, operatorID string, s models.SimulationSettings) (models.SimulationRun, bool, error) {
-	f.started, f.operator = &s, operatorID
-	return f.run, f.created, f.err
-}
-
-func (f *fakeSimulations) Get(context.Context, string) (models.SimulationRun, error) {
-	return f.run, f.err
-}
-
-func (f *fakeSimulations) List(_ context.Context, before string, limit int) ([]models.SimulationRun, string, error) {
-	f.before, f.limit = before, limit
-	return []models.SimulationRun{}, "", f.err
-}
-
-func (f *fakeSimulations) Stop(_ context.Context, _, operatorID string) (models.SimulationRun, error) {
-	f.operator = operatorID
-	return f.run, f.err
-}
-
-func simulationMux(t *testing.T, service SimulationService) *http.ServeMux {
+func simulationMux(t *testing.T) (*http.ServeMux, *mocks.MockSimulationService) {
 	t.Helper()
-	ops, err := platform.ParseOperatorKeys(`[{"operator_id":"op","key":"operator"}]`, "service", platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	service := mocks.NewMockSimulationService(gomock.NewController(t))
 	mux := http.NewServeMux()
-	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, "service", ops)
-	return mux
-}
-
-func callSimulations(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	if key != "" {
-		r.Header.Set("X-API-Key", key)
-	}
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, r)
-	return w
+	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, mockServiceKey, mockOperators(t))
+	return mux, service
 }
 
 func TestSimulationRoutesDisabled(t *testing.T) {
@@ -76,48 +34,36 @@ func TestSimulationRoutesDisabled(t *testing.T) {
 }
 
 func TestSimulationRoutesNeedTheRightKey(t *testing.T) {
-	mux := simulationMux(t, &fakeSimulations{created: true})
+	mux, _ := simulationMux(t)
 	body := `{"request_id":"one","mode":"live","rate":50}`
-	for _, key := range []string{"", "service", "bad"} {
-		if w := callSimulations(mux, "POST", "/simulations", key, body); w.Code != 401 {
-			t.Fatal(key, w.Code)
-		}
-		if w := callSimulations(mux, "POST", "/simulations/sim-1/stop", key, ""); w.Code != 401 {
-			t.Fatal(key, w.Code)
-		}
+	for _, key := range []string{"", mockServiceKey, "bad"} {
+		wantResponse(t, send(mux, "POST", "/simulations", key, body), http.StatusUnauthorized)
+		wantResponse(t, send(mux, "POST", "/simulations/sim-1/stop", key, ""), http.StatusUnauthorized)
 	}
-	for _, key := range []string{"operator", "bad", ""} {
-		if w := callSimulations(mux, "GET", "/simulations/sim-1", key, ""); w.Code != 401 {
-			t.Fatal(key, w.Code)
-		}
-		if w := callSimulations(mux, "GET", "/simulations", key, ""); w.Code != 401 {
-			t.Fatal(key, w.Code)
-		}
+	for _, key := range []string{mockOperatorKey, "bad", ""} {
+		wantResponse(t, send(mux, "GET", "/simulations/sim-1", key, ""), http.StatusUnauthorized)
+		wantResponse(t, send(mux, "GET", "/simulations", key, ""), http.StatusUnauthorized)
 	}
 }
 
 func TestSimulationStartDecodesOverTheDefaults(t *testing.T) {
-	fake := &fakeSimulations{run: models.SimulationRun{ID: "sim-1"}, created: true}
-	w := callSimulations(simulationMux(t, fake), "POST", "/simulations", "operator", `{"request_id":"one","mode":"live","rate":50}`)
-	if w.Code != 202 || w.Header().Get("Location") != "/simulations/sim-1" {
-		t.Fatal(w.Code, w.Header().Get("Location"), w.Body.String())
-	}
+	mux, service := simulationMux(t)
 	want := simulation.DefaultSettings()
-	if fake.operator != "op" || fake.started.Rate != 50 || fake.started.Seed != want.Seed || len(fake.started.Scenarios) != len(want.Scenarios) {
-		t.Fatalf("operator %q, settings %+v", fake.operator, fake.started)
+	want.RequestID, want.Mode, want.Rate = "one", "live", 50
+	service.EXPECT().Start(gomock.Any(), "op-1", want).Return(models.SimulationRun{ID: "sim-1"}, true, nil)
+
+	rec := send(mux, "POST", "/simulations", mockOperatorKey, `{"request_id":"one","mode":"live","rate":50}`)
+	wantResponse(t, rec, http.StatusAccepted, `"id":"sim-1"`)
+	if rec.Header().Get("Location") != "/simulations/sim-1" {
+		t.Fatalf("Location = %q", rec.Header().Get("Location"))
 	}
 }
 
 func TestSimulationStartRejectsBadBodies(t *testing.T) {
-	fake := &fakeSimulations{}
-	mux := simulationMux(t, fake)
+	mux, service := simulationMux(t)
+	service.EXPECT().Start(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	for _, body := range []string{`{`, `{"mode":"live","request_id":"bad","unknown":1}`, `{"mode":"live","request_id":"bad"} {}`} {
-		if w := callSimulations(mux, "POST", "/simulations", "operator", body); w.Code != 400 {
-			t.Fatal(body, w.Code, w.Body.String())
-		}
-	}
-	if fake.started != nil {
-		t.Fatal("a bad body reached the service")
+		wantResponse(t, send(mux, "POST", "/simulations", mockOperatorKey, body), http.StatusBadRequest)
 	}
 }
 
@@ -139,48 +85,51 @@ func TestSimulationStartStatusCodes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := &fakeSimulations{run: models.SimulationRun{ID: "sim-1"}, created: tt.created, err: tt.err}
-			w := callSimulations(simulationMux(t, fake), "POST", "/simulations", "operator", `{"request_id":"one","mode":"live"}`)
-			if w.Code != tt.want || !bytes.Contains(w.Body.Bytes(), []byte(tt.body)) {
-				t.Fatalf("status %d, body %s; want %d with %s", w.Code, w.Body.String(), tt.want, tt.body)
-			}
+			mux, service := simulationMux(t)
+			service.EXPECT().Start(gomock.Any(), "op-1", gomock.Any()).Return(models.SimulationRun{ID: "sim-1"}, tt.created, tt.err)
+			wantResponse(t, send(mux, "POST", "/simulations", mockOperatorKey, `{"request_id":"one","mode":"live"}`), tt.want, tt.body)
 		})
 	}
 }
 
-func TestSimulationReadListAndStop(t *testing.T) {
-	notFound := &fakeSimulations{err: models.ErrSimulationNotFound}
-	if w := callSimulations(simulationMux(t, notFound), "GET", "/simulations/unknown", "service", ""); w.Code != 404 {
-		t.Fatal(w.Code)
-	}
-	if w := callSimulations(simulationMux(t, notFound), "POST", "/simulations/unknown/stop", "operator", ""); w.Code != 404 {
-		t.Fatal(w.Code)
-	}
+func TestSimulationRead(t *testing.T) {
+	mux, service := simulationMux(t)
+	service.EXPECT().Get(gomock.Any(), "sim-1").Return(models.SimulationRun{ID: "sim-1", Status: "running"}, nil)
+	service.EXPECT().Get(gomock.Any(), "unknown").Return(models.SimulationRun{}, models.ErrSimulationNotFound)
+	wantResponse(t, send(mux, "GET", "/simulations/sim-1", mockServiceKey, ""), http.StatusOK, `"status":"running"`)
+	wantResponse(t, send(mux, "GET", "/simulations/unknown", mockServiceKey, ""), http.StatusNotFound)
+}
 
-	fake := &fakeSimulations{}
-	mux := simulationMux(t, fake)
-	if w := callSimulations(mux, "GET", "/simulations", "service", ""); w.Code != 200 || fake.limit != 20 || !bytes.Contains(w.Body.Bytes(), []byte(`"available_scenarios"`)) {
-		t.Fatal(w.Code, fake.limit, w.Body.String())
-	}
-	if w := callSimulations(mux, "GET", "/simulations?limit=1&before=sim-9", "service", ""); w.Code != 200 || fake.limit != 1 || fake.before != "sim-9" {
-		t.Fatal(w.Code, fake.limit, fake.before)
-	}
+func TestSimulationList(t *testing.T) {
+	mux, service := simulationMux(t)
+	service.EXPECT().List(gomock.Any(), "", 20).Return([]models.SimulationRun{}, "sim-3", nil)
+	service.EXPECT().List(gomock.Any(), "sim-9", 1).Return([]models.SimulationRun{}, "", nil)
+	service.EXPECT().List(gomock.Any(), "unknown", 20).Return(nil, "", models.ErrInvalidSimulationCursor)
+
+	wantResponse(t, send(mux, "GET", "/simulations", mockServiceKey, ""), http.StatusOK, `"next_cursor":"sim-3"`, `"available_scenarios"`)
+	wantResponse(t, send(mux, "GET", "/simulations?limit=1&before=sim-9", mockServiceKey, ""), http.StatusOK)
+	wantResponse(t, send(mux, "GET", "/simulations?before=unknown", mockServiceKey, ""), http.StatusBadRequest)
 	for _, path := range []string{"/simulations?limit=0", "/simulations?limit=101", "/simulations?limit=x"} {
-		if w := callSimulations(mux, "GET", path, "service", ""); w.Code != 400 {
-			t.Fatal(path, w.Code)
-		}
+		wantResponse(t, send(mux, "GET", path, mockServiceKey, ""), http.StatusBadRequest)
 	}
-	badCursor := &fakeSimulations{err: models.ErrInvalidSimulationCursor}
-	if w := callSimulations(simulationMux(t, badCursor), "GET", "/simulations?before=unknown", "service", ""); w.Code != 400 {
-		t.Fatal(w.Code)
-	}
+}
 
-	stopping := &fakeSimulations{run: models.SimulationRun{ID: "sim-1", Status: "stopping"}}
-	if w := callSimulations(simulationMux(t, stopping), "POST", "/simulations/sim-1/stop", "operator", ""); w.Code != 202 || stopping.operator != "op" {
-		t.Fatal(w.Code, stopping.operator)
+func TestSimulationStop(t *testing.T) {
+	tests := []struct {
+		status string
+		err    error
+		want   int
+	}{
+		{"stopping", nil, http.StatusAccepted},
+		{"stopped", nil, http.StatusOK},
+		{"", models.ErrSimulationNotFound, http.StatusNotFound},
+		{"", errors.New("connection refused"), http.StatusServiceUnavailable},
 	}
-	stopped := &fakeSimulations{run: models.SimulationRun{ID: "sim-1", Status: "stopped"}}
-	if w := callSimulations(simulationMux(t, stopped), "POST", "/simulations/sim-1/stop", "operator", ""); w.Code != 200 {
-		t.Fatal(w.Code)
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.want), func(t *testing.T) {
+			mux, service := simulationMux(t)
+			service.EXPECT().Stop(gomock.Any(), "sim-1", "op-1").Return(models.SimulationRun{ID: "sim-1", Status: tt.status}, tt.err)
+			wantResponse(t, send(mux, "POST", "/simulations/sim-1/stop", mockOperatorKey, ""), tt.want)
+		})
 	}
 }

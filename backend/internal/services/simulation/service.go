@@ -17,6 +17,9 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
 
+//go:generate mockgen -destination=mocks/mock_store.go -package=mocks . Store
+//go:generate mockgen -destination=mocks/mock_controller.go -package=mocks github.com/nasirlinijat/anti-fraud/backend/internal/models SimulationController
+
 const defaultBackfillCount = 500
 
 var (

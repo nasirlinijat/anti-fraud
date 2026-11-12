@@ -12,6 +12,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
+//go:generate mockgen -destination=mocks/mock_stores.go -package=mocks . Rulesets,Blocklist,Purchases,Model
+
 // Rulesets provides the active ruleset.
 type Rulesets interface {
 	Active(ctx context.Context) (scoring.Ruleset, error)

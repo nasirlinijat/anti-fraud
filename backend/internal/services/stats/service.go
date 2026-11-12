@@ -8,6 +8,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
 
+//go:generate mockgen -destination=mocks/mock_store.go -package=mocks . Store
+
 var periods = map[string]struct{ length, bucketWidth time.Duration }{
 	"15m": {15 * time.Minute, time.Minute},
 	"1h":  {time.Hour, 5 * time.Minute},

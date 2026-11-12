@@ -18,6 +18,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
+//go:generate mockgen -destination=mocks/mock_services.go -package=mocks . ScoreService,ReviewService,RulesetService,BlocklistService,StatsService,SimulationService
+
 const maxBodyBytes = 64 << 10
 
 // maxClockSkew is how far in the future an event time may be. It allows for

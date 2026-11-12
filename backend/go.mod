@@ -2,7 +2,10 @@ module github.com/nasirlinijat/anti-fraud/backend
 
 go 1.26.5
 
-require github.com/jackc/pgx/v5 v5.12.0
+require (
+	github.com/jackc/pgx/v5 v5.12.0
+	go.uber.org/mock v0.6.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
