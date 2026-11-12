@@ -8,6 +8,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
 
+//go:generate mockgen -destination=mocks/mock_store.go -package=mocks . Store
+
 const PageSize = 100
 
 var (

@@ -12,6 +12,8 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
+//go:generate mockgen -destination=mocks/mock_store.go -package=mocks . Store
+
 const (
 	maxDeviceSpikeWindowDays = 3650
 	maxNoteRunes             = 500
