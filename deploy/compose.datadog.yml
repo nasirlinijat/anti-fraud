@@ -1,0 +1,49 @@
+services:
+  datadog:
+    image: gcr.io/datadoghq/agent:7
+    restart: unless-stopped
+    pid: host
+    environment:
+      DD_API_KEY: ${DD_API_KEY:?set DD_API_KEY in .env}
+      DD_SITE: ${DD_SITE:-datadoghq.eu}
+      DD_HOSTNAME: ${DD_HOSTNAME:-anti-fraud-prod}
+      DD_ENV: production
+      DD_TAGS: project:anti-fraud
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_CONTAINER_EXCLUDE: "image:gcr.io/datadoghq/agent"
+      DD_PROCESS_CONFIG_PROCESS_COLLECTION_ENABLED: "true"
+      DD_APM_ENABLED: "false"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./deploy/datadog/conf.d:/conf.d:ro
+      - datadog-run:/opt/datadog-agent/run
+
+  db:
+    labels:
+      com.datadoghq.tags.service: anti-fraud-db
+      com.datadoghq.ad.logs: '[{"source": "postgresql", "service": "anti-fraud-db"}]'
+
+  backend:
+    labels:
+      com.datadoghq.tags.service: anti-fraud-backend
+      com.datadoghq.ad.logs: '[{"source": "go", "service": "anti-fraud-backend"}]'
+
+  frontend:
+    labels:
+      com.datadoghq.tags.service: anti-fraud-console
+      com.datadoghq.ad.logs: '[{"source": "caddy", "service": "anti-fraud-console"}]'
+
+  edge:
+    labels:
+      com.datadoghq.tags.service: anti-fraud-gateway
+      com.datadoghq.ad.logs: '[{"source": "caddy", "service": "anti-fraud-gateway"}]'
+
+volumes:
+  datadog-run:

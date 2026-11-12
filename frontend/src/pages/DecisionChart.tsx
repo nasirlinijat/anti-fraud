@@ -1,3 +1,5 @@
+import { useId } from 'react'
+import { Typography } from '@xsolla/xui-typography'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DecisionSeries } from '../api'
 import { outcomeLabels } from '../displayFormat'
@@ -16,6 +18,7 @@ function bucketSize(seconds: number): string {
 }
 
 export default function DecisionChart({ series, since, until }: { series: DecisionSeries; since: string; until: string }) {
+  const patternId = useId().replaceAll(':', '')
   const first = Date.parse(since)
   const last = Date.parse(until)
   const width = series.bucket_seconds * 1000
@@ -32,11 +35,19 @@ export default function DecisionChart({ series, since, until }: { series: Decisi
 
   return (
     <section className="panel decision-panel">
-      <h3>Decisions over time</h3>
+      <Typography as="h2" variant="h5" marginBottom={16}>Decisions over time</Typography>
       <figure className="decision-figure">
         <figcaption className="muted small">One bar per {bucketSize(series.bucket_seconds)}. Times are UTC.</figcaption>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={series.buckets} title="Decisions over time" margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
+            <defs>
+              <pattern id={`${patternId}-review`} width="6" height="6" patternUnits="userSpaceOnUse">
+                <rect width="6" height="6" fill="var(--chart-review)" /><path d="M0 6L6 0" stroke="var(--surface)" strokeWidth="1" />
+              </pattern>
+              <pattern id={`${patternId}-block`} width="6" height="6" patternUnits="userSpaceOnUse">
+                <rect width="6" height="6" fill="var(--chart-block)" /><circle cx="3" cy="3" r="1" fill="var(--surface)" />
+              </pattern>
+            </defs>
             <CartesianGrid stroke="var(--border)" vertical={false} />
             <XAxis dataKey="start" tickFormatter={tickLabel} minTickGap={18} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} width={48} />
@@ -49,9 +60,9 @@ export default function DecisionChart({ series, since, until }: { series: Decisi
               cursor={{ fill: 'var(--border)', opacity: 0.45 }}
             />
             <Legend itemSorter={null} formatter={(value: string) => <span className="decision-legend-label">{value}</span>} />
-            <Bar dataKey="allow" name={outcomeLabels.allow} stackId="outcomes" fill="var(--allow)" isAnimationActive={false} />
-            <Bar dataKey="review" name={outcomeLabels.review} stackId="outcomes" fill="var(--review)" isAnimationActive={false} />
-            <Bar dataKey="block" name={outcomeLabels.block} stackId="outcomes" fill="var(--block)" isAnimationActive={false} />
+            <Bar dataKey="allow" name={outcomeLabels.allow} stackId="outcomes" fill="var(--chart-allow)" stroke="var(--surface)" strokeWidth={1} isAnimationActive={false} />
+            <Bar dataKey="review" name={outcomeLabels.review} stackId="outcomes" fill={`url(#${patternId}-review)`} stroke="var(--surface)" strokeWidth={1} isAnimationActive={false} />
+            <Bar dataKey="block" name={outcomeLabels.block} stackId="outcomes" fill={`url(#${patternId}-block)`} stroke="var(--surface)" strokeWidth={1} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </figure>
