@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -25,4 +26,18 @@ func WriteJSON(w http.ResponseWriter, code int, v any) {
 // WriteError writes an error response with the given status code and message.
 func WriteError(w http.ResponseWriter, code int, message string) {
 	WriteJSON(w, code, ErrorResponse{Error: message})
+}
+
+const DatabaseUnavailableMessage = "the database is unavailable; retry later"
+
+func WriteServerError(ctx context.Context, w http.ResponseWriter, msg string, err error, attrs ...any) {
+	args := append(attrs, "error", err)
+	if DatabaseUnavailable(err) {
+		slog.WarnContext(ctx, msg+": database unavailable", args...)
+		w.Header().Set("Retry-After", "1")
+		WriteError(w, http.StatusServiceUnavailable, DatabaseUnavailableMessage)
+		return
+	}
+	slog.ErrorContext(ctx, msg, args...)
+	WriteError(w, http.StatusInternalServerError, "internal error")
 }

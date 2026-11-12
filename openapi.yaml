@@ -113,6 +113,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /auth/me:
     get:
@@ -141,6 +143,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /auth/logout:
     post:
@@ -161,6 +165,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /simulations:
     post:
@@ -471,6 +477,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /account-events:
     post:
@@ -863,6 +871,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /blocklist:
     get:
@@ -905,6 +915,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: internal error
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
     post:
       tags: [Blocklist]
       operationId: addBlocklistEntry
@@ -1244,6 +1256,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /admin/accounts:
     post:
@@ -1296,6 +1310,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
     get:
       tags: [Admin]
@@ -1332,6 +1348,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /admin/accounts/{username}/disable:
     post:
@@ -1381,6 +1399,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /admin/assignments:
     get:
@@ -1415,6 +1435,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /reviews/{purchase_id}/decision:
     post:
@@ -1669,6 +1691,8 @@ paths:
           $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The ruleset history could not be read.
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
     post:
       tags: [Rulesets]
       operationId: publishRuleset
@@ -1738,6 +1762,8 @@ paths:
           $ref: "#/components/responses/RoleNotAllowed"
         "500":
           description: The ruleset could not be read.
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
   /rulesets/{version}:
     get:
@@ -1781,6 +1807,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: The ruleset could not be read.
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
 
 components:
   securitySchemes:
@@ -1837,15 +1865,46 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
 
+    DatabaseUnavailable:
+      description: >-
+        The database cannot be reached right now. Nothing was changed; retry
+        after the number of seconds in Retry-After.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            example: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: the database is unavailable; retry later
+
     OperatorAccessUnavailable:
-      description: No operator keys are configured.
+      description: >-
+        No operator keys are configured, or the database is unavailable. When
+        the database is unavailable, nothing was changed and Retry-After is set.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying; set only when the database is unavailable.
+          schema:
+            type: integer
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
 
     ReviewAccessUnavailable:
-      description: No analyst keys are configured.
+      description: >-
+        No analyst keys are configured, or the database is unavailable. When
+        the database is unavailable, nothing was changed and Retry-After is set.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying; set only when the database is unavailable.
+          schema:
+            type: integer
       content:
         application/json:
           schema:

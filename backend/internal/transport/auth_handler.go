@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -58,8 +57,7 @@ func RequireSession(service AuthService, next func(http.ResponseWriter, *http.Re
 			return
 		}
 		if err != nil {
-			log.Printf("authenticate session: %v", err)
-			platform.WriteError(w, http.StatusInternalServerError, "internal error")
+			platform.WriteServerError(r.Context(), w, "authenticate session", err)
 			return
 		}
 		next(w, r, account)
@@ -97,8 +95,7 @@ func (h *AuthHandler) serveLogin(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		platform.WriteError(w, http.StatusUnauthorized, err.Error())
 	case err != nil:
-		log.Printf("sign in: %v", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "sign in", err)
 	default:
 		platform.WriteJSON(w, http.StatusOK, loginResponse{
 			Token:     session.Token,
@@ -139,8 +136,7 @@ func (h *AuthHandler) serveMe(w http.ResponseWriter, _ *http.Request, account mo
 func (h *AuthHandler) serveLogout(w http.ResponseWriter, r *http.Request, _ models.Account) {
 	token, _ := platform.BearerToken(r)
 	if err := h.service.Logout(r.Context(), token); err != nil {
-		log.Printf("sign out: %v", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "sign out", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

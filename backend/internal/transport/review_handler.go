@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -206,8 +205,7 @@ func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor
 	}
 	page, err := h.service.Queue(r.Context(), order, after, claimedBy)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "read review queue", "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "read review queue", err)
 		return
 	}
 
@@ -235,8 +233,7 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.ErrorContext(r.Context(), "read review case", "purchase_id", purchaseID, "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "read review case", err, "purchase_id", purchaseID)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, newCaseResponse(item))
@@ -300,8 +297,7 @@ func (h *ReviewHandler) serveNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.ErrorContext(r.Context(), "read review network", "purchase_id", purchaseID, "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "read review network", err, "purchase_id", purchaseID)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, newNetworkResponse(network))
@@ -375,8 +371,7 @@ func (h *ReviewHandler) serveRelease(w http.ResponseWriter, r *http.Request, _ s
 func (h *ReviewHandler) serveAssignments(w http.ResponseWriter, r *http.Request, _ string) {
 	work, err := h.service.Assignments(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "read assignments", "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "read assignments", err)
 		return
 	}
 	reviewers := make([]reviewerWorkResponse, 0, len(work))
@@ -458,8 +453,7 @@ func writeReviewError(ctx context.Context, w http.ResponseWriter, purchaseID int
 		errors.Is(err, review.ErrNotClaimed), errors.Is(err, review.ErrClaimedByOther):
 		platform.WriteError(w, http.StatusConflict, err.Error())
 	default:
-		slog.ErrorContext(ctx, action, "purchase_id", purchaseID, "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(ctx, w, action, err, "purchase_id", purchaseID)
 	}
 }
 

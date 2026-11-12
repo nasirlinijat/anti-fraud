@@ -3,7 +3,6 @@ package platform
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -123,8 +122,7 @@ func (a Access) requireRole(w http.ResponseWriter, r *http.Request, roles []stri
 		return
 	}
 	if err != nil {
-		log.Printf("identify session: %v", err)
-		WriteError(w, http.StatusInternalServerError, "internal error")
+		WriteServerError(r.Context(), w, "identify session", err)
 		return
 	}
 	if !slices.Contains(roles, identity.Role) {

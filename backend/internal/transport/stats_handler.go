@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -56,8 +55,7 @@ func (h *StatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sum, err := h.service.Summary(r.Context(), window)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "read stats", "period", period, "error", err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(r.Context(), w, "read stats", err, "period", period)
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, statsResponse{Period: period, Since: window.Since, GeneratedAt: now, StatsSummary: sum})
