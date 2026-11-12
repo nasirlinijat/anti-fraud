@@ -1,0 +1,8 @@
+init_config:
+
+instances:
+  - name: backend-ready
+    url: http://backend:8080/ready
+    timeout: 5
+    tags:
+      - service:anti-fraud-backend

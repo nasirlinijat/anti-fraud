@@ -63,7 +63,7 @@ function BlocklistPage() {
 
   return (
     <div className="blocklist">
-      <h2>Blocklist</h2>
+      <h1>Blocklist</h1>
       <p className="muted">
         A purchase whose card, device, player or IP address is on the blocklist is blocked before the rules run. A new
         entry applies to the next scored purchase.
@@ -82,7 +82,7 @@ function BlocklistPage() {
       </p>
 
       <section>
-        <h3>Entries{entries ? ` (${entries.length})` : ''}</h3>
+        <h2>Entries{entries ? ` (${entries.length})` : ''}</h2>
         {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
         {removeError && (
           <ErrorState onRetry={refreshEntries} retryLabel="Refresh entries" pending={pending}>
@@ -134,7 +134,7 @@ function AddEntryForm({ operatorKey, pending, onRefresh, onNotice, onAdded }: {
 
   return (
     <form className="panel blocklist-form" onSubmit={add} noValidate>
-      <h3>Add an entry</h3>
+      <h2>Add an entry</h2>
       <div className="fields">
         <div className={fields.type ? 'field invalid' : 'field'}>
           <label htmlFor="entry-type">Type</label>
@@ -207,7 +207,7 @@ function EntriesTable({ entries, time, disabled, onRemove }: {
   onRemove: (entry: BlocklistEntry) => void
 }) {
   return (
-    <table>
+    <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Blocklist data"><table>
       <thead>
         <tr>
           <th scope="col">Type</th>
@@ -242,7 +242,7 @@ function EntriesTable({ entries, time, disabled, onRemove }: {
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   )
 }
 

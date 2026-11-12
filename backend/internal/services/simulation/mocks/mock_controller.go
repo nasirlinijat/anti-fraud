@@ -170,3 +170,17 @@ func (mr *MockSimulationControllerMockRecorder) Recover(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recover", reflect.TypeOf((*MockSimulationController)(nil).Recover), ctx)
 }
+
+// RejectLabel mocks base method.
+func (m *MockSimulationController) RejectLabel(ctx context.Context, transactionID string, err error) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RejectLabel", ctx, transactionID, err)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// RejectLabel indicates an expected call of RejectLabel.
+func (mr *MockSimulationControllerMockRecorder) RejectLabel(ctx, transactionID, err any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RejectLabel", reflect.TypeOf((*MockSimulationController)(nil).RejectLabel), ctx, transactionID, err)
+}

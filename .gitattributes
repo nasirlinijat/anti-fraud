@@ -1,0 +1,6 @@
+*.sh text eol=lf
+deploy/Caddyfile text eol=lf
+deploy/**/*.yml text eol=lf
+deploy/**/*.yaml text eol=lf
+deploy/**/*.json text eol=lf
+backend/runtime-role.sql text eol=lf

@@ -43,6 +43,14 @@ type FatalError struct{ Err error }
 func (e FatalError) Error() string { return e.Err.Error() }
 func (e FatalError) Unwrap() error { return e.Err }
 
+// HTTPError distinguishes a rejected request from an uncertain transport failure.
+type HTTPError struct {
+	Status  int
+	Message string
+}
+
+func (e *HTTPError) Error() string { return e.Message }
+
 // Client calls POST /score on a running backend.
 type Client struct {
 	BaseURL string
@@ -79,7 +87,7 @@ func (c *Client) Score(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("score %s: status %d: %s", req.TransactionID, resp.StatusCode, strings.TrimSpace(string(data)))
+		return Result{}, &HTTPError{Status: resp.StatusCode, Message: fmt.Sprintf("score %s: status %d: %s", req.TransactionID, resp.StatusCode, strings.TrimSpace(string(data)))}
 	}
 	var res Result
 	if err := json.Unmarshal(data, &res); err != nil {

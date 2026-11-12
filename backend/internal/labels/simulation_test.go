@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
@@ -29,7 +30,8 @@ func TestLabeledSimulationCheckpoint(t *testing.T) {
 	if running, e := c.MarkPending(t.Context(), run, id); e != nil || !running {
 		t.Fatal(running, e)
 	}
-	p := simulator.Purchase{Pattern: "normal", Request: simulator.Request{TransactionID: id}}
+	// The request must match the purchase saved above, which Checkpoint verifies.
+	p := simulator.Purchase{Pattern: "normal", Request: simulator.Request{TransactionID: id, PlayerID: id, CardToken: id, AmountMinor: 100, EventTime: time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)}}
 	if e = c.PrepareLabel(t.Context(), run, p); e != nil {
 		t.Fatal(e)
 	}
