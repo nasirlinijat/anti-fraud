@@ -308,8 +308,8 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 			}
 		}
 	}
-	if len(simulator.Patterns) != 18 || len(want) != 18 {
-		t.Fatalf("expected all 18 patterns, got registry %v and outcomes %v", simulator.Patterns, want)
+	if len(simulator.Patterns) != 19 || len(want) != 19 {
+		t.Fatalf("expected all 19 patterns, got registry %v and outcomes %v", simulator.Patterns, want)
 	}
 	for _, pattern := range simulator.Patterns {
 		if len(want[pattern]) == 0 {
@@ -318,6 +318,10 @@ func TestMixedRunReportsActualRulesOnlyOutcomes(t *testing.T) {
 	}
 	if want[simulator.PatternCardTesting]["block"] == 0 {
 		t.Error("mixed run did not complete a card-testing burst through its block phase")
+	}
+	farm := want[simulator.PatternDeviceFarm]
+	if farm["review"] == 0 || farm["allow"] == 0 || farm["block"] != 0 {
+		t.Errorf("device farm outcomes %v, want some review and allow and no block", farm)
 	}
 	if !reflect.DeepEqual(sum.Outcomes, want) {
 		t.Errorf("summary outcomes %v, want %v", sum.Outcomes, want)

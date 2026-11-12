@@ -159,6 +159,21 @@ func (mr *MockReviewServiceMockRecorder) DecideClaimed(ctx, purchaseID, decision
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideClaimed), ctx, purchaseID, decision, username, blockDevice)
 }
 
+// Network mocks base method.
+func (m *MockReviewService) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Network", ctx, purchaseID)
+	ret0, _ := ret[0].(models.CaseNetwork)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Network indicates an expected call of Network.
+func (mr *MockReviewServiceMockRecorder) Network(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Network", reflect.TypeOf((*MockReviewService)(nil).Network), ctx, purchaseID)
+}
+
 // Queue mocks base method.
 func (m *MockReviewService) Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error) {
 	m.ctrl.T.Helper()

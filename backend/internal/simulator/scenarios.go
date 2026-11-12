@@ -23,6 +23,7 @@ var specialScenarios = [...]struct {
 	{PatternSessionShopper, (*generator).sessionShopper},
 	{PatternSlowCardTesting, (*generator).slowCardTesting},
 	{PatternQuietTakeover, (*generator).quietTakeover},
+	{PatternDeviceFarm, (*generator).deviceFarm},
 }
 
 func (g *generator) traveler(at time.Time) {
@@ -148,6 +149,26 @@ func (g *generator) quietTakeover(at time.Time) {
 	p.deviceID = g.id("device")
 	p.ipAddress = g.otherIP(p.ipAddress)
 	g.add(PatternQuietTakeover, g.request(p, at, g.amount(3000, 30000)))
+}
+
+// deviceFarm is 4 to 6 accounts created hours earlier on one emulator and one
+// connection, each with its own card. An account makes up to two small
+// purchases and ends with a larger one, so under the default ruleset the large
+// purchases reach review and the small ones pass.
+func (g *generator) deviceFarm(at time.Time) {
+	deviceID, ip, country := g.id("device"), g.ipAddress(), g.pick(countries)
+	for range 4 + g.rng.IntN(3) {
+		p := g.newScenarioPlayer(at, g.minutes(10, 600))
+		p.deviceType, p.deviceName, p.deviceID = "mobile", "Android Emulator", deviceID
+		p.country, p.ipAddress = country, ip
+		p.card = g.newCard(g.pick(countries))
+		for range g.rng.IntN(3) {
+			g.add(PatternDeviceFarm, g.request(p, at, g.amount(199, 1999)))
+			at = at.Add(g.minutes(2, 8))
+		}
+		g.add(PatternDeviceFarm, g.request(p, at, g.amount(50000, 70000)))
+		at = at.Add(g.minutes(2, 8))
+	}
 }
 
 func (g *generator) establishedPlayer(minDays int) player {

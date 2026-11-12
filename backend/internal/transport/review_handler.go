@@ -25,6 +25,7 @@ const maxDecisionBytes = 1024
 type ReviewService interface {
 	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
 	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
@@ -48,6 +49,9 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
 	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveCase(w, r)
+	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/network", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveNetwork(w, r)
 	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
@@ -89,6 +93,26 @@ type caseResponse struct {
 	RulesetVersion  int                      `json:"ruleset_version"`
 	PlayerPurchases []playerPurchaseResponse `json:"player_purchases"`
 	DeviceActivity  *deviceActivityResponse  `json:"device_activity"`
+}
+
+type networkResponse struct {
+	WindowDays int                     `json:"window_days"`
+	Anchors    []networkAnchorResponse `json:"anchors"`
+}
+
+type networkAnchorResponse struct {
+	Type        models.BlocklistType   `json:"type"`
+	Value       string                 `json:"value"`
+	Blocklisted bool                   `json:"blocklisted"`
+	LinkedTotal int64                  `json:"linked_total"`
+	Linked      []linkedEntityResponse `json:"linked"`
+}
+
+type linkedEntityResponse struct {
+	Type      models.BlocklistType `json:"type"`
+	Value     string               `json:"value"`
+	Purchases int64                `json:"purchases"`
+	Status    models.NetworkStatus `json:"status"`
 }
 
 type queueResponse struct {
@@ -220,6 +244,39 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 		PlayerPurchases: playerPurchases,
 		DeviceActivity:  deviceActivity,
 	})
+}
+
+func (h *ReviewHandler) serveNetwork(w http.ResponseWriter, r *http.Request) {
+	purchaseID, ok := parsePurchaseID(r.PathValue("purchase_id"))
+	if !ok {
+		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
+		return
+	}
+	network, err := h.service.Network(r.Context(), purchaseID)
+	if errors.Is(err, models.ErrReviewNotFound) {
+		platform.WriteError(w, http.StatusNotFound, "review case not found")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "read review network", "purchase_id", purchaseID, "error", err)
+		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, newNetworkResponse(network))
+}
+
+func newNetworkResponse(network models.CaseNetwork) networkResponse {
+	anchors := make([]networkAnchorResponse, 0, len(network.Anchors))
+	for _, a := range network.Anchors {
+		linked := make([]linkedEntityResponse, 0, len(a.Linked))
+		for _, e := range a.Linked {
+			linked = append(linked, linkedEntityResponse{Type: e.Type, Value: e.Value, Purchases: e.Purchases, Status: e.Status})
+		}
+		anchors = append(anchors, networkAnchorResponse{
+			Type: a.Type, Value: a.Value, Blocklisted: a.Blocklisted, LinkedTotal: a.LinkedTotal, Linked: linked,
+		})
+	}
+	return networkResponse{WindowDays: network.WindowDays, Anchors: anchors}
 }
 
 // claimFilter reads the claimed query parameter. The only value is "mine",

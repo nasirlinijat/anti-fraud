@@ -33,6 +33,12 @@ func (fn caseFunc) Case(ctx context.Context, id int64) (models.CaseItem, error) 
 	return fn(ctx, id)
 }
 
+type networkFunc func(context.Context, int64) (models.CaseNetwork, error)
+
+func (fn networkFunc) Network(ctx context.Context, id int64) (models.CaseNetwork, error) {
+	return fn(ctx, id)
+}
+
 // Tests provide only the read method the request is expected to call.
 type queueReader interface {
 	Queue(context.Context, int, models.QueueOrder, *models.QueueCursor, *string) ([]models.QueueItem, error)
@@ -42,9 +48,14 @@ type caseReader interface {
 	Case(context.Context, int64) (models.CaseItem, error)
 }
 
+type networkReader interface {
+	Network(context.Context, int64) (models.CaseNetwork, error)
+}
+
 type fakeReviewReads struct {
 	queueReader
 	caseReader
+	networkReader
 }
 
 func (fakeReviewReads) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
@@ -83,6 +94,11 @@ func requestQueue(t *testing.T, store queueReader, target, key string) *httptest
 func requestCase(t *testing.T, store caseReader, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	return requestReviewRead(t, fakeReviewReads{caseReader: store}, target, key)
+}
+
+func requestNetwork(t *testing.T, store networkReader, target, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	return requestReviewRead(t, fakeReviewReads{networkReader: store}, target, key)
 }
 
 func requestReviewRead(t *testing.T, store review.Store, target, key string) *httptest.ResponseRecorder {
@@ -327,6 +343,78 @@ func TestCaseNotFoundAndStoreErrors(t *testing.T) {
 		return models.CaseItem{}, errors.New("private database details")
 	})
 	w = requestCase(t, failing, "/reviews/5", queueTestKey)
+	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+}
+
+func TestNetworkRejectsUnauthorizedAndInvalidIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		target string
+		key    string
+		status int
+	}{
+		{"missing key", "/reviews/1/network", "", http.StatusUnauthorized},
+		{"wrong key", "/reviews/1/network", "wrong", http.StatusUnauthorized},
+		{"service key", "/reviews/1/network", serviceTestKey, http.StatusUnauthorized},
+		{"not a number", "/reviews/abc/network", queueTestKey, http.StatusBadRequest},
+		{"zero", "/reviews/0/network", queueTestKey, http.StatusBadRequest},
+		{"negative", "/reviews/-5/network", queueTestKey, http.StatusBadRequest},
+		{"too large", "/reviews/9223372036854775808/network", queueTestKey, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := networkFunc(func(context.Context, int64) (models.CaseNetwork, error) {
+				t.Fatal("rejected request queried the store")
+				return models.CaseNetwork{}, nil
+			})
+			w := requestNetwork(t, store, tc.target, tc.key)
+			if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status = %d, headers = %v, body = %s", w.Code, w.Header(), w.Body)
+			}
+		})
+	}
+}
+
+func TestNetworkSerializesAnchorsAndLinks(t *testing.T) {
+	store := networkFunc(func(_ context.Context, id int64) (models.CaseNetwork, error) {
+		if id != 9007199254740993 {
+			t.Fatalf("store ID = %d", id)
+		}
+		return models.CaseNetwork{WindowDays: 30, Anchors: []models.NetworkAnchor{
+			{Type: models.BlocklistDevice, Value: "device-1", Blocklisted: true, LinkedTotal: 31, Linked: []models.LinkedEntity{
+				{Type: models.BlocklistPlayer, Value: "player-2", Purchases: 3, Status: models.NetworkRejected},
+			}},
+			{Type: models.BlocklistCard, Value: "card-1"},
+		}}, nil
+	})
+
+	w := requestNetwork(t, store, "/reviews/9007199254740993/network", queueTestKey)
+
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status = %d, headers = %v, body = %s", w.Code, w.Header(), w.Body)
+	}
+	want := `{"window_days":30,"anchors":[` +
+		`{"type":"device","value":"device-1","blocklisted":true,"linked_total":31,"linked":[{"type":"player","value":"player-2","purchases":3,"status":"rejected"}]},` +
+		`{"type":"card","value":"card-1","blocklisted":false,"linked_total":0,"linked":[]}]}`
+	if got := strings.TrimSpace(w.Body.String()); got != want {
+		t.Fatalf("body =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestNetworkNotFoundAndStoreErrors(t *testing.T) {
+	notFound := networkFunc(func(context.Context, int64) (models.CaseNetwork, error) {
+		return models.CaseNetwork{}, models.ErrReviewNotFound
+	})
+	w := requestNetwork(t, notFound, "/reviews/5/network", queueTestKey)
+	if w.Code != http.StatusNotFound || strings.TrimSpace(w.Body.String()) != `{"error":"review case not found"}` {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+
+	failing := networkFunc(func(context.Context, int64) (models.CaseNetwork, error) {
+		return models.CaseNetwork{}, errors.New("private database details")
+	})
+	w = requestNetwork(t, failing, "/reviews/5/network", queueTestKey)
 	if w.Code != http.StatusInternalServerError || strings.TrimSpace(w.Body.String()) != `{"error":"internal error"}` {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
 	}

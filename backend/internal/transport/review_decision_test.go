@@ -28,6 +28,10 @@ func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (models.CaseIte
 	panic("unexpected case read")
 }
 
+func (rejectUnexpectedReviewAccess) Network(context.Context, int64) (models.CaseNetwork, error) {
+	panic("unexpected network read")
+}
+
 func (rejectUnexpectedReviewAccess) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected models.Resolution write")
 }
@@ -60,6 +64,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
+		{http.MethodGet, "/reviews/1/network"},
 		{http.MethodPost, "/reviews/1/decision"},
 	} {
 		rec := reviewRequest(mux, route.method, route.path, queueTestKey, `{"decision":"approve"}`)

@@ -36,6 +36,8 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 	at := pgtype.Timestamptz{Time: time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC), Valid: true}
 	until := pgtype.Timestamptz{Time: at.Time.Add(time.Hour), Valid: true}
 	width := pgtype.Interval{Microseconds: (5 * time.Minute).Microseconds(), Valid: true}
+	monthBefore := pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -30), Valid: true}
+	monthAfter := pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, 30), Valid: true}
 	device := pgtype.Text{String: "Windows", Valid: true}
 	deviceID := pgtype.Text{String: "device-1", Valid: true}
 	client := pgtype.Text{String: "Windows 10", Valid: true}
@@ -63,6 +65,9 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CountDeviceDistinctCardsLastHour", storage.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
 		{"AssignmentReviewers", storage.AssignmentReviewersSQL, nil},
 		{"OpenClaims", storage.OpenClaimsSQL, nil},
+		{"NetworkDevicePlayers", storage.NetworkDevicePlayersSQL, []any{"device-1", monthBefore, monthAfter, "player-1", "player", int32(30)}},
+		{"NetworkCardPlayers", storage.NetworkCardPlayersSQL, []any{"card-1", monthBefore, monthAfter, "player-1", "player", int32(30)}},
+		{"NetworkPlayerCards", storage.NetworkPlayerCardsSQL, []any{"player-1", monthBefore, monthAfter, "card-1", "card", int32(30)}},
 		{"GetTrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",
 		}},

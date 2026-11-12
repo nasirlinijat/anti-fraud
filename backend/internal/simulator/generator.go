@@ -56,6 +56,9 @@ const (
 	// PatternQuietTakeover is an existing account used from a new phone in
 	// the player's own country for an amount below the high-amount rule.
 	PatternQuietTakeover Pattern = "quiet_takeover"
+	// PatternDeviceFarm is a ring of new accounts on one emulator and one
+	// connection, each paying with its own card.
+	PatternDeviceFarm Pattern = "device_farm"
 )
 
 // Patterns lists every pattern in a fixed order.
