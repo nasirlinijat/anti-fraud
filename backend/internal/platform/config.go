@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -31,6 +34,9 @@ type Config struct {
 	DatabaseURL       string
 	// ModelPath is the fraud model file. When it is empty, scoring uses rules only.
 	ModelPath string
+	// RedisURL is the optional Redis connection string for the blocklist cache.
+	// When empty, the cache is disabled and scoring queries PostgreSQL directly.
+	RedisURL string
 	// APIKey authenticates requests to the score endpoint.
 	APIKey       string
 	AnalystKeys  AnalystKeys
@@ -69,6 +75,12 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.SimulationEnabled && cfg.LabelsDatabaseURL == "" {
 		return Config{}, fmt.Errorf("SIMULATION_ENABLED requires LABELS_DATABASE_URL")
+	}
+	if raw := os.Getenv("REDIS_URL"); raw != "" {
+		if _, err := redis.ParseURL(raw); err != nil {
+			return Config{}, errors.New("REDIS_URL is invalid")
+		}
+		cfg.RedisURL = raw
 	}
 	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
 	if err != nil {

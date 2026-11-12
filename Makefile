@@ -2,6 +2,7 @@
 export
 
 TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+TEST_REDIS_URL ?= redis://localhost:$(REDIS_PORT)/0
 
 .PHONY: up down db run test test-integration lint migrate docs simulate
 
@@ -15,11 +16,13 @@ db:
 	docker compose up -d --wait db
 
 run: migrate
+	docker compose up -d --wait redis
 	cd backend && go run ./cmd/api
 
 # Packages share one test database, so their tests run one package at a time.
 test: migrate
-	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -p 1 ./...
+	docker compose up -d --wait redis
+	cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)" go test -p 1 ./...
 
 test-integration:
 	cd backend && TEST_DATABASE_URL= go test -p 1 -tags=integration ./test/...

@@ -124,3 +124,49 @@ func TestLookupUsesIndex(t *testing.T) {
 		t.Errorf("plan does not use an index:\n%s", plan)
 	}
 }
+
+func TestFind(t *testing.T) {
+	tx := blocklistTx(t)
+	store := NewBlocklistStore(tx)
+	ctx := context.Background()
+
+	id, reason, found, err := store.Find(ctx, models.BlocklistCard, "bad-card")
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if !found || id <= 0 || reason != "stolen card" {
+		t.Errorf("Find = (%d, %q, %v), want found with reason stolen card", id, reason, found)
+	}
+
+	_, _, found, err = store.Find(ctx, models.BlocklistCard, "clean-card")
+	if err != nil {
+		t.Fatalf("Find non-existent: %v", err)
+	}
+	if found {
+		t.Error("Find returned found = true for non-existent card")
+	}
+}
+
+func TestRemove(t *testing.T) {
+	tx := blocklistTx(t)
+	store := NewBlocklistStore(tx)
+	ctx := context.Background()
+
+	id, _, found, err := store.Find(ctx, models.BlocklistCard, "bad-card")
+	if err != nil || !found {
+		t.Fatalf("Find: %v, found=%v", err, found)
+	}
+
+	entry, err := store.remove(ctx, id, "operator-1")
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if entry.Type != models.BlocklistCard || entry.Value != "bad-card" {
+		t.Errorf("removed entry = %+v, want card/bad-card", entry)
+	}
+
+	err = store.Remove(ctx, id, "operator-1")
+	if err != models.ErrBlocklistEntryNotFound {
+		t.Errorf("Remove already deleted = %v, want ErrBlocklistEntryNotFound", err)
+	}
+}

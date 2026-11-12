@@ -12,6 +12,7 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 const (
@@ -79,4 +80,37 @@ func withUser(dsn, user, password string) (string, error) {
 	}
 	u.User = url.UserPassword(user, password)
 	return u.String(), nil
+}
+
+type Redis struct {
+	URL       string
+	container *tcredis.RedisContainer
+}
+
+func StartRedis(ctx context.Context) (*Redis, error) {
+	container, err := tcredis.Run(ctx, "redis:8-alpine")
+	if err != nil {
+		if container != nil {
+			_ = testcontainers.TerminateContainer(container)
+		}
+		return nil, err
+	}
+	connStr, err := container.ConnectionString(ctx)
+	if err != nil {
+		_ = testcontainers.TerminateContainer(container)
+		return nil, err
+	}
+	return &Redis{URL: connStr, container: container}, nil
+}
+
+func (r *Redis) Stop() error {
+	return testcontainers.TerminateContainer(r.container)
+}
+
+func (r *Redis) StopContainer(ctx context.Context) error {
+	return r.container.Stop(ctx, nil)
+}
+
+func (r *Redis) StartContainer(ctx context.Context) error {
+	return r.container.Start(ctx)
 }
