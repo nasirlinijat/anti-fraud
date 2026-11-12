@@ -249,6 +249,28 @@ REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"
 
 Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. Enter the individual key on **Review queue**. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
+### Console accounts
+
+Reviewers and admins sign in with their own account. Create the first admin from `backend` after the database is migrated, with `DATABASE_URL` from `.env`:
+
+```bash
+go run ./cmd/create-account -username alice
+```
+
+The command asks for the password twice without showing it. A password is 12 to 72 bytes long. In a setup script, pipe the password on standard input instead, so that it never appears in the shell history or process list:
+
+```bash
+printf '%s\n' "$ADMIN_PASSWORD" | go run ./cmd/create-account -username alice
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-username` | none | 3 to 64 letters, digits, dots, hyphens or underscores, starting with a letter or digit. Saved in lowercase |
+| `-role` | `admin` | `admin` or `reviewer` |
+| `-database` | `DATABASE_URL` | Database connection |
+
+The command exits with an error when the username is already taken.
+
 ## Security
 
 Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.

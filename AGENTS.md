@@ -66,11 +66,12 @@ backend/
     ├── services/
     │   ├── score/      Score flow: saved decision, blocklist, model inputs, model, rules, save
     │   ├── review/     Review rules: queue pages, one decision per purchase, reject can blocklist the device
+    │   ├── account/    Accounts: username and password checks, bcrypt hashing
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
     │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
-    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs
+    ├── storage/        All SQL: purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts
     ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── labels/         Private fraud labels, kept apart from everything scoring uses
