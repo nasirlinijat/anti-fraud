@@ -15,9 +15,9 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/reviews"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
@@ -147,7 +147,7 @@ func newSpikeServer(t *testing.T) spikeServer {
 		t.Fatal(err)
 	}
 	rulesets.RegisterRoutes(srv.mux, srv.rules, testKey, testOperators(t))
-	reviews.RegisterRoutes(srv.mux, reviews.NewStore(tx), keys, false)
+	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), keys)
 	registerScore(srv.mux, newHandler(srv.rules, blocklist.NewStore(tx), srv.purchases), testKey)
 	return srv
 }

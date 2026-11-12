@@ -64,11 +64,11 @@ backend/
 └── internal/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/score/ Score flow: saved decision, blocklist, model inputs, model, rules, save
-    ├── storage/        SQL for purchases and decisions
-    ├── models/         Domain types shared by the layers (Purchase, Decision)
+    ├── services/review/ Review rules: queue pages, one decision per purchase, reject can blocklist the device
+    ├── storage/        SQL for purchases, decisions and reviews
+    ├── models/         Domain types shared by the layers (Purchase, Decision, review queue and case)
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── rulesets/       Rule configuration
-    ├── reviews/        Review queue and decisions
     ├── blocklist/      Blocklist entries
     ├── stats/          Dashboard queries
     ├── simulator/      Demo traffic generator
@@ -80,7 +80,7 @@ backend/
 
 Each feature registers its own routes, so `main.go` contains only wiring.
 
-Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Scoring follows this layout; the other features move to it one at a time.
+Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Scoring and reviews follow this layout; the other features move to it one at a time.
 
 ### 3.3 Model Data Pipeline
 
