@@ -49,6 +49,7 @@ type Config struct {
 	IPIntel                 IPIntelConfig
 	Tracing                 TracingConfig
 	MetricsAddr             string
+	DBMaxConns              int32
 }
 
 // IPIntelMock selects the mock IP intelligence provider.
@@ -137,7 +138,23 @@ func LoadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("DOGSTATSD_ADDR must be host:port, for example datadog:8125")
 		}
 	}
+	cfg.DBMaxConns, err = loadDBMaxConns()
+	if err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+func loadDBMaxConns() (int32, error) {
+	raw := strings.TrimSpace(os.Getenv("DB_MAX_CONNS"))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("DB_MAX_CONNS must be a whole number of connections, 1 or more")
+	}
+	return int32(n), nil
 }
 
 // loadIPIntel reads IP_INTEL_PROVIDER, where empty, off, and none turn the

@@ -454,6 +454,22 @@ Traces then appear in Datadog APM under the service `anti-fraud-backend`.
 
 Over the limit the API answers `429 Too Many Requests` with a `Retry-After` header in seconds. Only requests with a valid key count, so wrong keys cannot use up the limit. When the deadline passes, the API answers `503 Service Unavailable` with `Retry-After: 1`, and nothing is saved: the purchase, its decision and its feature counts are written in one transaction that is rolled back. A retry with the same transaction ID then scores normally.
 
+## Database pool
+
+The backend keeps a pool of PostgreSQL connections for `DATABASE_URL` and logs its size at startup (`"msg":"database pool","max_conns":4`).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DB_MAX_CONNS` | empty | Most connections the pool opens. Empty uses pgx's default, the larger of 4 and the number of CPUs (4 on the t3.small). It must be a whole number, 1 or more, or the backend does not start. It replaces `pool_max_conns` in `DATABASE_URL` when both are set |
+
+PostgreSQL accepts at most `max_connections` connections (100 by default, 3 of them kept for superusers). Every backend replica opens up to `DB_MAX_CONNS` connections, plus the small pool for `LABELS_DATABASE_URL` when simulations or quality reports are on, so keep
+
+```
+replicas × (DB_MAX_CONNS + labels pool) + other clients < max_connections − 3
+```
+
+where other clients are the Datadog agent's PostgreSQL check, migrations, backups and command-line tools. A bigger pool only helps while the database has CPU to spare: in the load test (LOAD_TEST.md) the limit was database CPU, not the number of connections.
+
 ## Blocklist cache
 
 Stage 1 of scoring matches cards, player IDs, devices, and IP addresses against a mirror of `blocklist_entries` kept in Redis.

@@ -47,11 +47,12 @@ func main() {
 		slog.Info("tracing enabled", "endpoint", cfg.Tracing.Endpoint, "sample_ratio", cfg.Tracing.SampleRatio)
 	}
 
-	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
+	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		fatal("create database pool", err)
 	}
 	defer pool.Close()
+	slog.Info("database pool", "max_conns", pool.Config().MaxConns)
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
@@ -221,7 +222,7 @@ func openEvaluationPool(cfg platform.Config) (*pgxpool.Pool, error) {
 	}
 	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	evaluation, err := platform.NewPool(setupCtx, cfg.LabelsDatabaseURL)
+	evaluation, err := platform.NewPool(setupCtx, cfg.LabelsDatabaseURL, 0)
 	if err != nil {
 		if cfg.SimulationEnabled {
 			return nil, errors.New("invalid labels database configuration")

@@ -30,7 +30,7 @@ func TestOneScoreRequestIsOneTraceWithItsQueries(t *testing.T) {
 	platform.UseTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
 	t.Cleanup(platform.StopUsingTracing)
 
-	pool, err := platform.NewPool(ctx, appDatabaseURL)
+	pool, err := platform.NewPool(ctx, appDatabaseURL, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

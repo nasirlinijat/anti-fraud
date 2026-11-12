@@ -19,10 +19,13 @@ type DBTX interface {
 // NewPool creates a PostgreSQL connection pool. It returns an error only if the
 // URL is invalid. Connections are opened in the background, so the service can
 // start while the database is unreachable and report that through GET /ready.
-func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+func NewPool(ctx context.Context, databaseURL string, maxConns int32) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
+	}
+	if maxConns > 0 {
+		config.MaxConns = maxConns
 	}
 	if TracingEnabled() {
 		config.ConnConfig.Tracer = queryTracer{}
