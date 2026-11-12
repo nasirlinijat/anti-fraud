@@ -2,7 +2,7 @@
   {
     "name": "Anti-fraud backend or database is down",
     "type": "service check",
-    "query": "\"http.can_connect\".over(\"instance:backend-ready\").by(\"host\").last(3).count_by_status()",
+    "query": "\"http.can_connect\".over(\"instance:backend_ready\").by(\"host\").last(3).count_by_status()",
     "message": "The backend's /ready check failed 2 times in a row. The API cannot score purchases or the database is unreachable. Check `dc ps` and `dc logs backend` on the server.",
     "tags": ["project:anti-fraud"],
     "options": {
