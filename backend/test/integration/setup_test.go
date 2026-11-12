@@ -110,10 +110,11 @@ func newApp(t *testing.T) app {
 	rulesets := storage.NewRulesetStore(tx)
 	blocklistStore := storage.NewBlocklistStore(tx)
 	mux := http.NewServeMux()
+	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, blocklistStore, storage.NewPurchaseStore(tx))), serviceKey)
-	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), serviceKey, operators)
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), analysts)
-	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStore)), serviceKey, operators)
+	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), access)
+	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStore)), access)
 	return app{mux: mux, tx: tx}
 }
 
