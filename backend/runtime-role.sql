@@ -22,6 +22,11 @@ GRANT INSERT ON purchases, decisions, feature_counts, rulesets, ruleset_rules,
 GRANT UPDATE (purchases, players) ON feature_counts TO antifraud_api;
 GRANT UPDATE (is_active) ON rulesets TO antifraud_api;
 GRANT DELETE ON blocklist_entries TO antifraud_api;
+-- Passwords are set only when an account is created, so the service cannot
+-- rewrite a password hash or extend an existing session.
+GRANT SELECT, INSERT ON accounts, sessions TO antifraud_api;
+GRANT UPDATE (disabled_at) ON accounts TO antifraud_api;
+GRANT DELETE ON sessions TO antifraud_api;
 
 COMMIT;
 

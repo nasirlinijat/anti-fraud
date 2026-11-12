@@ -32,6 +32,10 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		"SELECT actor_id FROM configuration_audit_events",
 		"UPDATE configuration_audit_events SET actor_id = 'changed'",
 		"DELETE FROM configuration_audit_events",
+		"UPDATE accounts SET password_hash = 'changed'",
+		"UPDATE accounts SET role = 'admin'",
+		"UPDATE sessions SET expires_at = now() + interval '1 year'",
+		"DELETE FROM accounts",
 	} {
 		tx, err := conn.Begin(ctx)
 		if err != nil {
@@ -71,5 +75,15 @@ func TestRuntimeRolePermissions(t *testing.T) {
 	}
 	if err := blocks.Remove(ctx, entry.ID, "test-operator"); err != nil {
 		t.Fatalf("remove with restricted role: %v", err)
+	}
+	for _, statement := range []string{
+		"INSERT INTO accounts (username, password_hash, role) VALUES ('runtime-role-test', 'hash', 'reviewer')",
+		"INSERT INTO sessions (token_hash, account_id, expires_at) SELECT sha256('runtime-role-test'), id, now() + interval '1 hour' FROM accounts WHERE username = 'runtime-role-test'",
+		"UPDATE accounts SET disabled_at = now() WHERE username = 'runtime-role-test'",
+		"DELETE FROM sessions WHERE token_hash = sha256('runtime-role-test')",
+	} {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
 	}
 }
