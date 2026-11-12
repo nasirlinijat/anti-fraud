@@ -151,12 +151,16 @@ func (m *Manager) recover(ctx context.Context, c *pgx.Conn) error {
 		var conn platform.DBTX = tx
 		// A single sequential worker writes its pending ID before sending. Recover the
 		// commit/checkpoint gap by exact transaction lookup, never by a prefix scan.
-		_, err := conn.Exec(ctx, `UPDATE simulation_runs r SET
+		recoverySQL := `UPDATE simulation_runs r SET
  sent=r.sent+1, allowed=r.allowed+(d.outcome='allow')::int,
  reviewed=r.reviewed+(d.outcome='review')::int, blocked=r.blocked+(d.outcome='block')::int,
  pending_transaction_id=NULL, failed=GREATEST(r.failed-1,0)
  FROM purchases p JOIN decisions d ON d.purchase_id=p.id
- WHERE p.transaction_id=r.pending_transaction_id`)
+ WHERE p.transaction_id=r.pending_transaction_id AND NOT EXISTS (SELECT 1 FROM pending_purchase_labels l WHERE l.transaction_id=r.pending_transaction_id AND (l.rejection_reason IS NOT NULL OR l.request_json IS NULL))`
+		if m.evaluation == nil {
+			recoverySQL = strings.Split(recoverySQL, " AND NOT EXISTS")[0]
+		}
+		_, err := conn.Exec(ctx, recoverySQL)
 		if err != nil {
 			return err
 		}
@@ -486,6 +490,11 @@ func (t *trackedScorer) Score(ctx context.Context, req simulator.Request) (simul
 	}
 	result, err := t.m.client.Score(callCtx, req)
 	if err != nil {
+		if t.m.evaluation != nil && labels.Reject(callCtx, t.m.evaluation, req.TransactionID, err) {
+			t.fatal = err
+			t.cancel()
+			return simulator.Result{}, simulator.FatalError{Err: err}
+		}
 		// Transport errors can follow a committed decision. Reconcile by exact ID.
 		lookupCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()

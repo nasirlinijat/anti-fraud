@@ -345,3 +345,9 @@ and remain unlabelled. No historical answers are guessed.
 
 Raw and replay-derived label files stay in ignored `ml/data/` or `ml/output/` and
 must never be committed. The public API and model inputs do not expose labels.
+
+Pending simulator answers now include a private purchase snapshot, normalized to
+scoring's string, IP and timestamp conventions. Recovery requires the saved
+purchase to match that snapshot, not just its ID. Definitive HTTP rejections and
+snapshot mismatches are quarantined. Legacy intents without snapshots are not
+automatically labelled; verify their source before any explicit CSV import.

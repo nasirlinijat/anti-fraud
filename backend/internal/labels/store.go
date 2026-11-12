@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type Label struct {
 	TransactionID, RunID, Source string
 	Scenario                     *string
 	Fraud                        bool
+	RequestJSON                  []byte
 }
 
 func (l Label) Validate() error {
@@ -43,14 +45,27 @@ func same(ctx context.Context, c platform.DBTX, table string, l Label) error {
 	return nil
 }
 func Prepare(ctx context.Context, c platform.DBTX, l Label) error {
+	if len(l.RequestJSON) == 0 {
+		return errors.New("pending label requires a purchase snapshot")
+	}
 	if err := l.Validate(); err != nil {
 		return err
 	}
-	_, err := c.Exec(ctx, `INSERT INTO pending_purchase_labels(transaction_id,run_id,source,scenario,is_fraud) VALUES($1,$2,$3,$4,$5) ON CONFLICT(transaction_id) DO NOTHING`, l.TransactionID, l.RunID, l.Source, l.Scenario, l.Fraud)
+	_, err := c.Exec(ctx, `INSERT INTO pending_purchase_labels(transaction_id,run_id,source,scenario,is_fraud,request_json) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(transaction_id) DO NOTHING`, l.TransactionID, l.RunID, l.Source, l.Scenario, l.Fraud, l.RequestJSON)
 	if err != nil {
 		return err
 	}
-	return same(ctx, c, "pending_purchase_labels", l)
+	if err := same(ctx, c, "pending_purchase_labels", l); err != nil {
+		return err
+	}
+	var matches bool
+	if err := c.QueryRow(ctx, `SELECT request_json IS NOT DISTINCT FROM $2::jsonb AND rejection_reason IS NULL FROM pending_purchase_labels WHERE transaction_id=$1`, l.TransactionID, l.RequestJSON).Scan(&matches); err != nil {
+		return err
+	}
+	if !matches {
+		return ErrPurchaseMismatch
+	}
+	return nil
 }
 
 // Put inserts only for a saved decision. Existing truth is immutable.
@@ -73,6 +88,11 @@ func Put(ctx context.Context, c platform.DBTX, l Label) error {
 }
 func Finalize(ctx context.Context, pool *pgxpool.Pool, l Label, checkpoint func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if len(l.RequestJSON) > 0 {
+			if err := verifyPurchase(ctx, tx, l); err != nil {
+				return err
+			}
+		}
 		if err := Put(ctx, tx, l); err != nil {
 			return err
 		}
@@ -88,14 +108,14 @@ func Finalize(ctx context.Context, pool *pgxpool.Pool, l Label, checkpoint func(
 
 // RecoverTx finalizes saved pending purchases without sending any score requests.
 func RecoverTx(ctx context.Context, tx pgx.Tx, run string) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT l.transaction_id,l.run_id,l.source,l.scenario,l.is_fraud FROM pending_purchase_labels l JOIN purchases p USING(transaction_id) JOIN decisions d ON d.purchase_id=p.id WHERE $1='' OR l.run_id=$1`, run)
+	rows, err := tx.Query(ctx, `SELECT l.transaction_id,l.run_id,l.source,l.scenario,l.is_fraud,l.request_json FROM pending_purchase_labels l JOIN purchases p USING(transaction_id) JOIN decisions d ON d.purchase_id=p.id WHERE ($1='' OR l.run_id=$1) AND l.rejection_reason IS NULL AND l.request_json IS NOT NULL`, run)
 	if err != nil {
 		return 0, err
 	}
 	var pending []Label
 	for rows.Next() {
 		var l Label
-		if err := rows.Scan(&l.TransactionID, &l.RunID, &l.Source, &l.Scenario, &l.Fraud); err != nil {
+		if err := rows.Scan(&l.TransactionID, &l.RunID, &l.Source, &l.Scenario, &l.Fraud, &l.RequestJSON); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -106,15 +126,26 @@ func RecoverTx(ctx context.Context, tx pgx.Tx, run string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	recovered := 0
 	for _, l := range pending {
+		if err := verifyPurchase(ctx, tx, l); err != nil {
+			if errors.Is(err, ErrPurchaseMismatch) {
+				if _, e := tx.Exec(ctx, `UPDATE pending_purchase_labels SET rejection_reason='purchase snapshot mismatch' WHERE transaction_id=$1`, l.TransactionID); e != nil {
+					return 0, e
+				}
+				continue
+			}
+			return 0, err
+		}
 		if err := Put(ctx, tx, l); err != nil {
 			return 0, err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM pending_purchase_labels WHERE transaction_id=$1`, l.TransactionID); err != nil {
 			return 0, err
 		}
+		recovered++
 	}
-	return len(pending), nil
+	return recovered, nil
 }
 func Recover(ctx context.Context, pool *pgxpool.Pool, run string) (int, error) {
 	n := 0
@@ -150,6 +181,7 @@ func (s *Scorer) ScorePurchase(ctx context.Context, p simulator.Purchase) (simul
 	defer cancel()
 	result, err := s.Client.Score(call, p.Request)
 	if err != nil {
+		Reject(call, s.Pool, l.TransactionID, err)
 		return result, simulator.FatalError{Err: err}
 	}
 	if err := Finalize(call, s.Pool, l, nil); err != nil {
@@ -159,5 +191,5 @@ func (s *Scorer) ScorePurchase(ctx context.Context, p simulator.Purchase) (simul
 }
 func FromPurchase(run string, p simulator.Purchase) Label {
 	scenario := string(p.Pattern)
-	return Label{TransactionID: p.Request.TransactionID, RunID: run, Source: "simulator", Scenario: &scenario, Fraud: p.Pattern.Fraud()}
+	return Label{TransactionID: strings.TrimSpace(p.Request.TransactionID), RunID: run, Source: "simulator", Scenario: &scenario, Fraud: p.Pattern.Fraud(), RequestJSON: requestSnapshot(p.Request)}
 }
