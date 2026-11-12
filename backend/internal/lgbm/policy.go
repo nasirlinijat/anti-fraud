@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -18,7 +19,7 @@ func ReportPath(modelPath string) string {
 // LoadPolicy reads the model thresholds from the policy section of a training
 // report written by ml/train.py.
 func LoadPolicy(reportPath string) (scoring.ModelPolicy, error) {
-	data, err := os.ReadFile(reportPath)
+	data, err := os.ReadFile(filepath.Clean(reportPath))
 	if err != nil {
 		return scoring.ModelPolicy{}, fmt.Errorf("read model report %s: %w", reportPath, err)
 	}

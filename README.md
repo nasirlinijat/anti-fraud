@@ -34,7 +34,7 @@ The production setup runs on one AWS EC2 server with Docker Compose and HTTPS. S
 
 ## Development commands
 
-The Make targets require GNU Make. Install Go 1.26.5 or newer to run the backend, tests, or simulator on the host.
+The Make targets require GNU Make. Install Go 1.26.11 or newer to run the backend, tests, or simulator on the host.
 
 To develop the backend on the host, run `make migrate` to prepare the database, then `make run`. The API is available at `http://127.0.0.1:8080` by default.
 
