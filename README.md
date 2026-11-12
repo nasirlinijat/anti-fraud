@@ -464,6 +464,22 @@ Stage 1 of scoring matches cards, player IDs, devices, and IP addresses against 
 - **Cache flush and reload.** If the Redis cache is flushed (`redis-cli flushdb`), the missing `ready` key triggers an asynchronous reload from PostgreSQL on the next score request.
 - **Configuration.** Set `REDIS_URL` to enable the cache (e.g. `redis://localhost:6379/0`). When unset or empty, the cache is disabled and scoring queries PostgreSQL directly.
 
+## Scoring metrics
+
+When `DOGSTATSD_ADDR` is set (`host:port`, for example `datadog:8125`), the backend sends DogStatsD metrics to the Datadog agent for every decision it saves. Retries that return an already saved decision are not counted again. `deploy/compose.datadog.yml` sets the address and lets the agent accept metrics from other containers, so production sends them whenever Datadog is deployed. Empty turns them off.
+
+| Metric | Type | Tags |
+|---|---|---|
+| `antifraud.score.decisions` | count | `outcome`, `ruleset_version`, `model_version` (`none` without a model) |
+| `antifraud.score.fired_rules` | count, one per fired rule | `rule`, `outcome`, `ruleset_version` |
+| `antifraud.score.points` | histogram of rule points | `outcome`, `ruleset_version`, `model_version` |
+| `antifraud.score.model_score` | histogram, only when a model scored | `outcome`, `ruleset_version`, `model_version` |
+| `antifraud.score.latency_ms` | histogram | `outcome`, `ruleset_version`, `model_version` |
+
+Every metric also has `service:anti-fraud-backend`. The agent turns each histogram into `.avg`, `.median`, `.max`, `.95percentile` and `.count`. Metrics go over UDP through a client that drops them when its buffer is full, so sending never slows down or fails a score request, and the backend works the same without an agent.
+
+The "Fraud decisions" section of `deploy/datadog/dashboard.json` shows them: review rate, top fired rules, model score by outcome, p95 scoring latency by model version, and decisions by ruleset and model version. After deploying, run `deploy/datadog/setup.sh` on the server to update the dashboard.
+
 ## Logs
 
 The backend writes one JSON object per line to standard output with `log/slog`, so Datadog reads every field as an attribute. Every line has `time`, `level`, `msg` and `service` (`anti-fraud-backend`). Each HTTP request is logged once:

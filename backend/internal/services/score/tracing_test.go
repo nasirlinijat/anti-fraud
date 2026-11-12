@@ -46,7 +46,7 @@ func TestScoreRecordsModelAndRulesSpans(t *testing.T) {
 	attrs := func(s sdktrace.ReadOnlySpan) map[string]string {
 		m := map[string]string{}
 		for _, kv := range s.Attributes() {
-			m[string(kv.Key)] = kv.Value.Emit()
+			m[string(kv.Key)] = kv.Value.String()
 		}
 		return m
 	}

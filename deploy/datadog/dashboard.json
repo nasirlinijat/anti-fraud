@@ -56,6 +56,64 @@
                 { "q": "max:antifraud.model.score.avg{*}", "display_type": "line" }
               ]
             }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Review rate (%)",
+              "show_legend": true,
+              "requests": [
+                {
+                  "response_format": "timeseries",
+                  "display_type": "line",
+                  "queries": [
+                    { "data_source": "metrics", "name": "review", "query": "sum:antifraud.score.decisions{outcome:review}.as_count()" },
+                    { "data_source": "metrics", "name": "total", "query": "sum:antifraud.score.decisions{*}.as_count()" }
+                  ],
+                  "formulas": [{ "formula": "100 * review / total" }]
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "toplist",
+              "title": "Top fired rules (selected time range)",
+              "requests": [
+                { "q": "top(sum:antifraud.score.fired_rules{*} by {rule}.as_count(), 10, 'sum', 'desc')" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Model score by outcome (median and p95)",
+              "show_legend": true,
+              "requests": [
+                { "q": "avg:antifraud.score.model_score.median{*} by {outcome}", "display_type": "line" },
+                { "q": "avg:antifraud.score.model_score.95percentile{*} by {outcome}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "p95 scoring latency by model version (ms)",
+              "show_legend": true,
+              "requests": [
+                { "q": "max:antifraud.score.latency_ms.95percentile{*} by {model_version}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Decisions by ruleset and model version",
+              "show_legend": true,
+              "requests": [
+                { "q": "sum:antifraud.score.decisions{*} by {ruleset_version,model_version}.as_count()", "display_type": "bars" }
+              ]
+            }
           }
         ]
       }

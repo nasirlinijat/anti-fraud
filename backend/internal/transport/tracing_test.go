@@ -40,7 +40,7 @@ func tracedScoreHandler(t testing.TB, recorder sdktrace.SpanProcessor) http.Hand
 func attributesOf(kvs []attribute.KeyValue) map[string]string {
 	attrs := map[string]string{}
 	for _, kv := range kvs {
-		attrs[string(kv.Key)] = kv.Value.Emit()
+		attrs[string(kv.Key)] = kv.Value.String()
 	}
 	return attrs
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/metrics"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/accountevent"
@@ -72,6 +73,15 @@ func main() {
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	if err := useIPIntel(cfg.IPIntel, scoreService); err != nil {
 		fatal("load IP intelligence ranges", err)
+	}
+	if cfg.MetricsAddr != "" {
+		decisionMetrics, err := metrics.New(cfg.MetricsAddr)
+		if err != nil {
+			fatal("start scoring metrics", err)
+		}
+		defer decisionMetrics.Close()
+		scoreService.UseMetrics(decisionMetrics)
+		slog.Info("scoring metrics enabled", "dogstatsd", cfg.MetricsAddr)
 	}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
 	transport.RegisterAccountEventRoutes(mux,
