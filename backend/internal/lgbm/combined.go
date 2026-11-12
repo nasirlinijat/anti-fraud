@@ -46,7 +46,7 @@ type rawCombined struct {
 // LoadCombined reads a combination written by ml/export.py. The model files it
 // names are loaded from the same folder.
 func LoadCombined(path string) (*Combined, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read combined model %s: %w", path, err)
 	}
@@ -133,7 +133,7 @@ func (c *Combined) Trees() int {
 
 // LoadScorer loads a single model or a combination, depending on the file.
 func LoadScorer(path string) (Scorer, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read model %s: %w", path, err)
 	}

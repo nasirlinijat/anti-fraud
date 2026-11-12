@@ -77,7 +77,25 @@ jobs:
           TEST_RUNTIME_DATABASE_URL: postgres://antifraud_api:ci-runtime-password@localhost:5432/antifraud?sslmode=disable
           TEST_LABELS_DATABASE_URL: postgres://antifraud_labels:ci-labels-password@localhost:5432/antifraud?sslmode=disable
         # Packages share one test database, so their tests run one package at a time.
-        run: go test -race -p 1 ./...
+        run: go test -race -p 1 -coverprofile=coverage.out ./...
+
+      - name: Coverage
+        run: |
+          grep -v "/mocks/" coverage.out > coverage.txt
+          go tool cover -func=coverage.txt > coverage-by-function.txt
+          go tool cover -html=coverage.txt -o coverage.html
+          total="$(tail -1 coverage-by-function.txt | awk '{print $NF}')"
+          echo "Backend unit test coverage: $total"
+          echo "### Backend coverage: $total" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.txt
+            backend/coverage-by-function.txt
+            backend/coverage.html
 
       - name: Integration and concurrency tests
         env:
@@ -89,6 +107,51 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Scan the code and history for secrets
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.0 git /repo --redact --verbose
+
+  go-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Known vulnerabilities in Go and modules
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+      - name: Code security checks
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 -exclude=G101,G115,G118,G404 ./...
+
+  image-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the backend image
+        run: docker build -t anti-fraud-backend:ci backend
+
+      - name: Scan the image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache aquasec/trivy:0.76.1 image --severity HIGH,CRITICAL --no-progress anti-fraud-backend:ci
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache aquasec/trivy:0.76.1 image --severity CRITICAL --exit-code 1 --no-progress anti-fraud-backend:ci
 
   frontend:
     runs-on: ubuntu-latest

@@ -29,7 +29,33 @@ This review covers the Docker Compose stack, its AWS gateway, and the Vite devel
 ## Operational follow-ups
 
 - Limit administrator and log access, and define retention for purchase, device, and audit history.
-- Add gateway rate limits and workload monitoring before serving untrusted traffic. Body size and connection limits bound individual requests.
+- `POST /score` has a per-key token bucket and a deadline (`SCORE_RATE_LIMIT`, `SCORE_RATE_BURST`, `SCORE_TIMEOUT`). Add gateway-wide rate limits for the other routes before serving untrusted traffic. Body size and connection limits bound individual requests.
+
+## Automated security checks
+
+CI runs these on every pull request and push to `main`. A finding fails the build.
+
+| Check | Tool | What it looks at |
+|---|---|---|
+| Secrets | gitleaks 8.30.0 | The whole Git history, not only the current files |
+| Go vulnerabilities | govulncheck 1.1.4 | Known vulnerabilities in the Go standard library and modules that the backend's code actually calls |
+| Code issues | gosec 2.30.0 | Risky patterns in the backend source |
+| Image | Trivy 0.76.1 | The built backend image (Debian packages and the Go binary); critical findings fail, high findings are printed |
+
+The first run found 23 vulnerabilities in the Go 1.26.5 standard library (HTTP, TLS, X.509, XML, URL parsing). The backend now builds with Go 1.26.11, which fixes all of them, and govulncheck and Trivy report none. gosec findings about file paths and unchecked errors were fixed in the code.
+
+### Accepted findings
+
+These gosec rules are excluded in CI. Each one was reviewed; the reason is why it does not apply to this code.
+
+| Rule | Where | Why it is accepted |
+|---|---|---|
+| G101 hardcoded credentials | `platform.APIKeyHeader = "X-API-Key"` | It matches the name of a constant, not a secret: the value is the header name. Real secrets are found by gitleaks, which checks values and the whole history. |
+| G115 integer conversion overflow | `int` to `int32` when writing rulesets, decisions, the review page size and statistics limits | Every converted value is either read from an `int32` database column or validated before: thresholds and weights arrive as `int32`, the sum of enabled weights is limited to `MaxInt32`, page sizes and limits are small constants. |
+| G118 goroutine with `context.Background` | the simulation worker and the shutdown in `cmd/api/main.go` | Deliberate. A simulation run must outlive the HTTP request that started it and is stopped through its own cancel function. Shutdown needs a fresh deadline after the signal context has ended. |
+| G404 weak random numbers | `internal/simulator` | The simulator must produce the same purchases for the same seed, so it uses seeded `math/rand/v2`. It generates demo traffic, never keys or tokens; request IDs and simulation IDs use `crypto/rand`. |
+
+gitleaks ignores two fingerprints in `.gitleaksignore`: the documented local development key `local-dev-key` in an old README example, and a made-up key in a logging test that checks keys never reach the logs. Neither is a real credential.
 
 ## Simulation control
 

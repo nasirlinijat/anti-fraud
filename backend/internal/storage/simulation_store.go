@@ -69,7 +69,7 @@ func (s *SimulationStore) Lock(ctx context.Context) (models.SimulationController
 	var ok bool
 	err = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(27149,77)`).Scan(&ok)
 	if err != nil || !ok {
-		c.Close(ctx)
+		_ = c.Close(ctx)
 		return nil, false, err
 	}
 	return &SimulationController{conn: c}, true, nil
@@ -164,7 +164,7 @@ type SimulationController struct {
 }
 
 func (c *SimulationController) Close() {
-	c.conn.Close(context.Background())
+	_ = c.conn.Close(context.Background())
 }
 
 // Recover settles the runs a previous controller left behind in one

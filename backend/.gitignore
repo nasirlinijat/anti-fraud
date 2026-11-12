@@ -3,6 +3,9 @@
 *.exe
 *.test
 *.out
+coverage.txt
+coverage-by-function.txt
+coverage.html
 
 # Local env
 .env

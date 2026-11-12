@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -186,12 +187,12 @@ func (o options) openLabels(ctx context.Context) *pgxpool.Pool {
 }
 
 func writeDump(path string, purchases []simulator.Purchase) error {
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
 	if err := simulator.WriteJSONL(f, purchases); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	return f.Close()
@@ -204,7 +205,7 @@ func printSummary(sum simulator.Summary) {
 		o := sum.Outcomes[p]
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t\n", p, o["allow"], o["review"], o["block"])
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func fatalf(format string, args ...any) {

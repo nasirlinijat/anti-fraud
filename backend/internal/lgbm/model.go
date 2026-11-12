@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -48,7 +49,7 @@ type rawModel struct {
 // not support: a non-binary objective, categorical splits or missing-value
 // handling.
 func Load(path string) (*Model, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read model %s: %w", path, err)
 	}
