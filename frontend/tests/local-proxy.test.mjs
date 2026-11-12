@@ -55,6 +55,9 @@ test('local console proxy checks origin before forwarding credentials', async t 
   assert.equal(await call(port, '/simulations/run-1', 'GET', { origin }), 204)
   assert.equal(await call(port, '/simulations/run-1/stop', 'POST', { origin, 'x-api-key': 'operator-key' }), 204)
   assert.equal(await call(port, '/simulations', 'POST', { origin: 'https://example.invalid' }), 403)
+  assert.equal(await call(port, '/stats/quality?source=simulator&run_id=demo', 'GET', { origin }), 204)
+  assert.equal(await call(port, '/stats/quality/runs?source=ieee-cis', 'GET', { origin }), 204)
+  assert.equal(await call(port, '/stats/quality?run_id=demo', 'GET', { origin: 'https://example.invalid' }), 403)
   assert.deepEqual(forwarded, [
     ['/score', 'proxy-test-service-key'],
     ['/reviews?sort=model_score', 'analyst-key'],
@@ -65,5 +68,7 @@ test('local console proxy checks origin before forwarding credentials', async t 
     ['/simulations', 'operator-key'],
     ['/simulations/run-1', 'proxy-test-service-key'],
     ['/simulations/run-1/stop', 'operator-key'],
+    ['/stats/quality?source=simulator&run_id=demo', 'proxy-test-service-key'],
+    ['/stats/quality/runs?source=ieee-cis', 'proxy-test-service-key'],
   ])
 })

@@ -60,7 +60,7 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 				v := record[i]
 				scenario = &v
 			}
-			l := Label{record[indexes["transaction_id"]], run, source, scenario, flag == "1"}
+			l := Label{TransactionID: record[indexes["transaction_id"]], RunID: run, Source: source, Scenario: scenario, Fraud: flag == "1"}
 			if err := l.Validate(); err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
 			}

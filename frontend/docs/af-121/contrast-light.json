@@ -1,0 +1,156 @@
+[
+  {
+    "selector": ".tile-label",
+    "foreground": "rgba(0, 0, 0, 0.75)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 10.408809649857735,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".tile-note",
+    "foreground": "rgba(0, 0, 0, 0.75)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 10.408809649857735,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".outcome-allow",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      191,
+      255,
+      178
+    ],
+    "contrast": 18.162143702146345,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".outcome-review",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      255,
+      219,
+      178
+    ],
+    "contrast": 16.027477680452122,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".outcome-block",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      255,
+      191,
+      178
+    ],
+    "contrast": 13.347191203996518,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".console-navigation a[aria-current]",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      245,
+      246,
+      244
+    ],
+    "contrast": 19.37113307543686,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".console-navigation a:not([aria-current])",
+    "foreground": "rgba(0, 0, 0, 0.55)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 4.758776792764207,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".periods button[aria-pressed=true]",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      128,
+      234,
+      255
+    ],
+    "contrast": 15.13096627736874,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".periods button[aria-pressed=true] focus",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      245,
+      246,
+      244
+    ],
+    "contrast": 19.37113307543686,
+    "minimum": 3
+  },
+  {
+    "selector": ".periods button[aria-pressed=false]",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      225.4,
+      226.32000000000002,
+      224.48000000000002
+    ],
+    "contrast": 16.20934681333866,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".quality-run-picker select",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 21,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".quality-run-picker select boundary",
+    "foreground": "rgba(0, 0, 0, 0.55)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 4.758776792764207,
+    "minimum": 3
+  },
+  {
+    "selector": ".quality-sources label",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      245,
+      246,
+      244
+    ],
+    "contrast": 19.37113307543686,
+    "minimum": 4.5
+  },
+  {
+    "selector": ".decision-legend-label",
+    "foreground": "rgb(0, 0, 0)",
+    "background": [
+      255,
+      255,
+      255
+    ],
+    "contrast": 21,
+    "minimum": 4.5
+  }
+]

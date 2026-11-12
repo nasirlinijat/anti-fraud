@@ -285,6 +285,11 @@ func (t *trackedScorer) Score(ctx context.Context, req simulator.Request) (simul
 	}
 	result, err := t.client.Score(callCtx, req)
 	if err != nil {
+		if t.c.RejectLabel(callCtx, req.TransactionID, err) {
+			t.fatal = err
+			t.cancel()
+			return simulator.Result{}, simulator.FatalError{Err: err}
+		}
 		// Transport errors can follow a committed decision. Reconcile by exact ID.
 		lookupCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()

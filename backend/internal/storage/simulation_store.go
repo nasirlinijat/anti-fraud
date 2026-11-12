@@ -137,12 +137,23 @@ func (s *SimulationStore) RequestStop(ctx context.Context, id, operatorID string
 // and checkpoint gap is recovered by exact transaction lookup, never by a
 // prefix scan. Unfinished runs become interrupted.
 func RecoverSimulationRuns(ctx context.Context, conn platform.DBTX) error {
-	_, err := conn.Exec(ctx, `UPDATE simulation_runs r SET
+	return RecoverSimulationRunsWith(ctx, conn, RecoverRunsSQL)
+}
+
+// RecoverRunsSQL counts the pending purchase of each run from its saved
+// decision. A caller that keeps more state per purchase can narrow it with an
+// extra condition and pass the result to RecoverSimulationRunsWith.
+const RecoverRunsSQL = `UPDATE simulation_runs r SET
  sent=r.sent+1, allowed=r.allowed+(d.outcome='allow')::int,
  reviewed=r.reviewed+(d.outcome='review')::int, blocked=r.blocked+(d.outcome='block')::int,
  pending_transaction_id=NULL, failed=GREATEST(r.failed-1,0)
  FROM purchases p JOIN decisions d ON d.purchase_id=p.id
- WHERE p.transaction_id=r.pending_transaction_id`)
+ WHERE p.transaction_id=r.pending_transaction_id`
+
+// RecoverSimulationRunsWith settles the runs like RecoverSimulationRuns, with
+// countSQL in place of RecoverRunsSQL to count each run's pending purchase.
+func RecoverSimulationRunsWith(ctx context.Context, conn platform.DBTX, countSQL string) error {
+	_, err := conn.Exec(ctx, countSQL)
 	if err != nil {
 		return err
 	}
@@ -200,6 +211,11 @@ func (c *SimulationController) MarkPending(ctx context.Context, runID, transacti
 // PrepareLabel does nothing: this controller keeps no labels.
 func (c *SimulationController) PrepareLabel(context.Context, string, simulator.Purchase) error {
 	return nil
+}
+
+// RejectLabel does nothing: this controller keeps no labels.
+func (c *SimulationController) RejectLabel(context.Context, string, error) bool {
+	return false
 }
 
 // OutcomeOf returns the saved decision of a transaction.

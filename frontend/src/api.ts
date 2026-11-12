@@ -297,3 +297,43 @@ export function stopSimulation(id: string, operatorKey: string, signal?: AbortSi
   return request(`/simulations/${encodeURIComponent(id)}/stop`, { method: 'POST', auth: 'operator', signal,
     headers: { 'X-API-Key': operatorKey } })
 }
+
+export type QualitySource = 'simulator' | 'ieee-cis'
+
+export interface QualityReport {
+  source: QualitySource
+  run_id: string
+  generated_at: string
+  labelled_decisions: number
+  true_positives: number
+  false_positives: number
+  true_negatives: number
+  false_negatives: number
+  precision: number | null
+  recall: number | null
+  false_positive_rate: number | null
+  fraud_value_flagged_minor: string
+  fraud_value_allowed_minor: string
+  coverage: {
+    pending: number
+    quarantined: number
+    scored_decisions: number | null
+    run_status: SimulationStatus | null
+  }
+}
+
+export interface QualityRuns {
+  source: QualitySource
+  run_ids: string[]
+  next_cursor?: string
+}
+
+export function getQuality(source: QualitySource, runId: string, signal?: AbortSignal): Promise<QualityReport> {
+  return request(`/stats/quality?${new URLSearchParams({ source, run_id: runId })}`, { signal })
+}
+
+export function listQualityRuns(source: QualitySource, after: string, signal?: AbortSignal): Promise<QualityRuns> {
+  const params = new URLSearchParams({ source, limit: '20' })
+  if (after) params.set('after', after)
+  return request(`/stats/quality/runs?${params}`, { signal })
+}
