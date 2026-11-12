@@ -6,10 +6,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func setup(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
@@ -35,7 +37,7 @@ func setup(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 }
 func purchase(t *testing.T, a *pgxpool.Pool, id string) {
 	t.Helper()
-	_, e := a.Exec(t.Context(), `WITH p AS (INSERT INTO purchases(transaction_id,event_time,amount_minor,player_id,card_token) VALUES($1,now(),100,$1,$1) RETURNING id) INSERT INTO decisions(purchase_id,ruleset_version,outcome,rule_score,fired_rules,model_inputs) SELECT id,(SELECT version FROM rulesets WHERE is_active),'allow',0,'[]','{}' FROM p`, id)
+	_, e := a.Exec(t.Context(), `WITH p AS (INSERT INTO purchases(transaction_id,event_time,amount_minor,player_id,card_token) VALUES($1,'2026-11-10T10:00:00Z',100,$1,$1) RETURNING id) INSERT INTO decisions(purchase_id,ruleset_version,outcome,rule_score,fired_rules,model_inputs) SELECT id,(SELECT version FROM rulesets WHERE is_active),'allow',0,'[]','{}' FROM p`, id)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -54,6 +56,7 @@ func TestLabelIntegrityAndRecovery(t *testing.T) {
 	id := "af74-integrity"
 	scenario := "normal"
 	l := labels.Label{TransactionID: id, RunID: "af74-run", Source: "simulator", Scenario: &scenario}
+	l.RequestJSON = testSnapshot(id)
 	if e := labels.Prepare(t.Context(), b, l); e != nil {
 		t.Fatal(e)
 	}
@@ -133,7 +136,10 @@ func TestCheckpointRollsBackWithLabel(t *testing.T) {
 	id := "af74-rollback"
 	purchase(t, a, id)
 	l := labels.Label{TransactionID: id, RunID: id, Source: "ieee-cis"}
-	labels.Prepare(t.Context(), b, l)
+	l.RequestJSON = testSnapshot(id)
+	if err := labels.Prepare(t.Context(), b, l); err != nil {
+		t.Fatal(err)
+	}
 	e := labels.Finalize(t.Context(), b, l, func(pgx.Tx) error { return fmt.Errorf("checkpoint unavailable") })
 	if e == nil {
 		t.Fatal("expected rollback")
@@ -170,4 +176,8 @@ func TestScoringBoundary(t *testing.T) {
 	if strings.Contains(string(s), "is_fraud") || strings.Contains(string(s), "purchase_labels") {
 		t.Fatal("private answers in API specification")
 	}
+}
+
+func testSnapshot(id string) []byte {
+	return labels.FromPurchase("run", simulator.Purchase{Pattern: simulator.PatternNormal, Request: simulator.Request{TransactionID: id, PlayerID: id, CardToken: id, AmountMinor: 100, EventTime: time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)}}).RequestJSON
 }
