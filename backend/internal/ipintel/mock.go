@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 )
 
 // MockName is the provider name the mock saves with its results.
@@ -97,7 +98,7 @@ type rangeEntry struct {
 // LoadRanges reads a JSON array of {"cidr": "...", "kind": "..."} entries,
 // which replace the default ranges.
 func LoadRanges(path string) ([]Range, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read IP ranges: %w", err)
 	}
