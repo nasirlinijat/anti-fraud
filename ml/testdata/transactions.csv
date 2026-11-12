@@ -10,3 +10,4 @@ TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,c
 9,0,3650000,45.00,W,1001,111,150,visa,226,debit,300,87,,gmail.com,,5,mobile,iOS Device,,,,185,dev-a
 10,0,3660000,12.00,W,1001,111,150,visa,226,debit,,87,,gmail.com,,5,desktop,Windows,,,,150,dev-a
 11,0,3661000,13.00,W,1001,111,150,visa,226,debit,,87,,gmail.com,,5,desktop,Windows,,,,150,dev-a
+12,0,3700000,25.00,W,4004,444,150,visa,INF,debit,400,87,,gmail.com,,5,,,,,,,
