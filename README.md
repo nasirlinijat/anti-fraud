@@ -132,7 +132,7 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 | `-suspicious` | 0.1 | Share of events that start a special scenario, including legitimate edge cases and fraud. Use 0 for normal purchases only or 1 for special scenarios only |
 | `-players` | 300 | Number of regular players |
 | `-gap` | 20s | Mean gap on the simulated timeline used to order purchases. The send rate controls live pacing |
-| `-missing` | 0.25 | Share of players whose client leaves out each group of optional fields: IP, device ID, device, account creation time, billing, card details, and email. A player misses the same groups on every purchase, whatever the scenario. Use 0 to send every field |
+| `-missing` | 0.25 | Share of players whose client leaves out each group of optional fields: IP, device ID, device, account creation time, billing, card details, email, and payment verification results. A player misses the same groups on every purchase, whatever the scenario. Use 0 to send every field |
 | `-run` | seed and start for backfill, unique for live | Prefix of all generated IDs |
 | `-url` | `http://localhost:$PORT` | Base URL of the backend |
 | `-dump` | none | Write the purchases with their scenario and fraud label to this JSON Lines file instead of sending them. Needs a positive count and no API key. Used to train the game model, see `ml/README.md` |
@@ -140,6 +140,8 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
 The scenario descriptions below are for a player whose client sends every field. A rule that needs a missing field does not fire.
+
+Every purchase also carries the payment gateway's verification results: `cvv_result`, `avs_result`, and `three_ds_result`. Legitimate patterns almost always pass, sometimes report a check as `not_checked` or `not_enrolled`, and fail each check in only 1 to 2% of purchases. Card testing fails the CVV check in about 45% of purchases and the address check in about half. Stolen cards usually pass the CVV check, because the details were stolen with the card, but fail 3-D Secure in about 40%. Account takeovers pay with the owner's saved card, so the stored details still match. The results are drawn from the seed and the transaction ID, outside the main random sequence, so a seed generates the same purchases as before apart from these fields.
 
 Each special scenario is equally likely when an event starts one. Some scenarios generate several purchases, so the share of special purchases can differ from the share of special events.
 
@@ -205,6 +207,41 @@ Device card count starts off. To enable it, publish a new ruleset with `device_c
 
 New device spike also starts off. The Rulesets page suggests at least 3 trusted purchases in 90 days, a minimum amount of 1,000 minor units, a minimum of 3 times the trusted average, and a weight of 50 points. Trusted history includes allowed purchases and approvals recorded by the time of scoring. Before rolling back to a service version that predates this rule, publish a new ruleset that omits `new_device_spike` and keep the migration that stores its settings for historical versions.
 
+### Payment verification rules
+
+A payment gateway checks the card during authorization and reports the results, which the caller passes in the score request as `cvv_result`, `avs_result`, and `three_ds_result`. Three rules read them, and like `country_mismatch` they take no limit:
+
+| Rule | Fires when | Suggested weight | Why |
+|---|---|---:|---|
+| `cvv_mismatch` | `cvv_result` is `mismatch` | 35 | The buyer does not know the security code printed on the card, but a genuine cardholder can mistype it, so it needs one more signal to reach review |
+| `avs_mismatch` | `avs_result` is `mismatch` | 15 | A weak signal: many issuers outside a few countries do not support the check, and a recent move gives a genuine mismatch. `partial` does not fire, because a differently written street or postcode is common |
+| `three_ds_failed` | `three_ds_result` is `failed` | 50 | The card issuer could not authenticate the cardholder, which is strong evidence on its own, so it reaches the review threshold alone |
+
+Before rolling back to a service version that predates these rules, publish a new ruleset that omits `cvv_mismatch`, `avs_mismatch`, and `three_ds_failed`: an older version returns an error for a rule name it does not know, so it cannot load the active ruleset.
+
+A result the request leaves out never fires its rule. The results are saved with the purchase, take part in the retry comparison, and are shown as evidence on the review case. They are not model inputs.
+
+The rules start off, so existing rulesets keep their behaviour. To enable them with the suggested weights, publish the seeded settings plus the three rules (the Rulesets page offers the same weights):
+
+```json
+{
+  "review_threshold": 50,
+  "block_threshold": 80,
+  "note": "Enable payment verification rules",
+  "rules": {
+    "high_amount": { "enabled": true, "weight": 30, "limit": 50000 },
+    "card_velocity": { "enabled": true, "weight": 40, "limit": 5 },
+    "new_account": { "enabled": true, "weight": 20, "limit": 24 },
+    "country_mismatch": { "enabled": true, "weight": 25 },
+    "cvv_mismatch": { "enabled": true, "weight": 35 },
+    "avs_mismatch": { "enabled": true, "weight": 15 },
+    "three_ds_failed": { "enabled": true, "weight": 50 }
+  }
+}
+```
+
+With these weights, a failed 3-D Secure check or a CVV mismatch from a foreign IP address sends the purchase to review, and a CVV mismatch together with a failed 3-D Secure check blocks it.
+
 ## API Documentation
 
 The scoring, dashboard, blocklist, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.
@@ -257,7 +294,7 @@ The console opens on a sign-in screen. Reviewers see only the review queue; admi
 |---|---|
 | Dashboard (`#/dashboard`) | Shows counts and rates by outcome, p95 scoring latency, blocked value in minor units, and a stacked decision timeline with a table view. Choose the last 15 minutes, hour, day, week, or all time. The dashboard also shows the current review queue, most fired rules, and model effects. It reads `GET /stats` every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
-| Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
+| Tester (`#/tester`) | A form with every score request field, including the payment verification results. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
 | Simulator (`#/simulator`) | Starts live or backfill simulation runs, follows decisions every three seconds and shows recent runs. Runs continue across navigation, and history survives backend restarts. |
 | Review queue (`#/reviews`) | Claim a purchase awaiting review, then approve or reject it, or open a case to inspect its evidence. **My claims** lists only the purchases you hold. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
 | Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version with an optional note and shows its version number. Selecting an earlier version in the history shows its settings read-only. |

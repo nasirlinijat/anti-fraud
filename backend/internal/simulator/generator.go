@@ -94,6 +94,9 @@ type Request struct {
 	IPAddress            *string    `json:"ip_address,omitempty"`
 	IPCountry            *string    `json:"ip_country,omitempty"`
 	AccountCreatedAt     *time.Time `json:"account_created_at,omitempty"`
+	CVVResult            *string    `json:"cvv_result,omitempty"`
+	AVSResult            *string    `json:"avs_result,omitempty"`
+	ThreeDSResult        *string    `json:"three_ds_result,omitempty"`
 }
 
 // Purchase is one generated request and the pattern it belongs to.
@@ -432,6 +435,7 @@ func (g *generator) add(pattern Pattern, req Request) {
 		g.usesLastHour(req.CardToken, req.EventTime)
 		g.recent[req.CardToken] = append(g.recent[req.CardToken], req.EventTime)
 	}
+	req = g.withVerification(pattern, req)
 	g.pending = append(g.pending, Purchase{Pattern: pattern, Request: g.withoutMissingFields(req)})
 }
 
@@ -449,6 +453,7 @@ var fieldGroups = []struct {
 		r.CardIssuer, r.CardNetwork, r.CardType, r.CardCountry, r.CardCategory = nil, nil, nil, nil, nil
 	}},
 	{"email", func(r *Request) { r.EmailDomain, r.RecipientEmailDomain = nil, nil }},
+	{"verification", func(r *Request) { r.CVVResult, r.AVSResult, r.ThreeDSResult = nil, nil, nil }},
 }
 
 // withoutMissingFields removes the field groups the player's client does not
@@ -467,9 +472,15 @@ func (g *generator) withoutMissingFields(req Request) Request {
 // random sequence: the purchases are the same for every MissingFieldShare,
 // apart from the removed fields.
 func (g *generator) clientOmits(playerID, group string) bool {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d|%s|%s", g.cfg.Seed, playerID, group))
-	draw := float64(binary.BigEndian.Uint64(sum[:8])>>11) / (1 << 53)
-	return draw < g.cfg.MissingFieldShare
+	return g.seededDraw(playerID, group) < g.cfg.MissingFieldShare
+}
+
+// seededDraw returns a number from 0 up to 1 that depends only on the seed and
+// the key. It does not advance the random sequence, so adding a draw changes
+// no other generated value.
+func (g *generator) seededDraw(key, purpose string) float64 {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d|%s|%s", g.cfg.Seed, key, purpose))
+	return float64(binary.BigEndian.Uint64(sum[:8])>>11) / (1 << 53)
 }
 
 func (g *generator) usesLastHour(cardToken string, at time.Time) int {

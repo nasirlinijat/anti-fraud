@@ -171,12 +171,22 @@ func (rule *DraftRule) config(name scoring.RuleName, field string, fields map[st
 	return config
 }
 
+// rulesWithoutLimit compare values of the purchase itself, so they have no
+// threshold. They may leave the limit out; a limit sent for them must still be
+// a non-negative integer and is saved but not used.
+var rulesWithoutLimit = map[scoring.RuleName]bool{
+	scoring.RuleCountryMismatch: true,
+	scoring.RuleCVVMismatch:     true,
+	scoring.RuleAVSMismatch:     true,
+	scoring.RuleThreeDSFailed:   true,
+}
+
 // limit returns the rule's limit, or zero with a problem added to fields.
-// Only country_mismatch may leave the limit out.
+// Only the rulesWithoutLimit may leave the limit out.
 func (rule *DraftRule) limit(name scoring.RuleName, field string, fields map[string]string) int64 {
 	switch {
 	case rule.Limit == nil:
-		if name != scoring.RuleCountryMismatch {
+		if !rulesWithoutLimit[name] {
 			fields[field+".limit"] = "is required"
 		}
 	case (name == scoring.RuleDeviceCardCount || name == scoring.RuleNewDeviceSpike) && *rule.Limit <= 0:

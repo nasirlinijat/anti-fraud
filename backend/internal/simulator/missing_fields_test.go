@@ -10,8 +10,8 @@ import (
 // sentGroups reports, for each group of optional fields that the simulator
 // always fills, whether the request carries it. A group arrives or is left out
 // as a whole, so one field stands for its group.
-func sentGroups(req simulator.Request) [7]bool {
-	return [7]bool{
+func sentGroups(req simulator.Request) [8]bool {
+	return [8]bool{
 		req.IPCountry != nil,
 		req.DeviceID != nil,
 		req.DeviceName != nil,
@@ -19,6 +19,7 @@ func sentGroups(req simulator.Request) [7]bool {
 		req.BillingRegion != nil,
 		req.CardIssuer != nil,
 		req.EmailDomain != nil,
+		req.CVVResult != nil,
 	}
 }
 
@@ -32,14 +33,14 @@ func mixedTraffic(t *testing.T, missingFieldShare float64) []simulator.Purchase 
 
 func TestNoFieldIsMissingWithShareZero(t *testing.T) {
 	for _, p := range mixedTraffic(t, 0) {
-		if sentGroups(p.Request) != [7]bool{true, true, true, true, true, true, true} {
+		if sentGroups(p.Request) != [8]bool{true, true, true, true, true, true, true, true} {
 			t.Fatalf("purchase %s misses a field group: %+v", p.Request.TransactionID, p.Request)
 		}
 	}
 }
 
 func TestPlayerMissesTheSameFieldGroupsOnEveryPurchase(t *testing.T) {
-	groups := map[string][7]bool{}
+	groups := map[string][8]bool{}
 	for _, p := range mixedTraffic(t, 0.5) {
 		got := sentGroups(p.Request)
 		if earlier, seen := groups[p.Request.PlayerID]; seen && earlier != got {
@@ -50,11 +51,11 @@ func TestPlayerMissesTheSameFieldGroupsOnEveryPurchase(t *testing.T) {
 }
 
 func TestEachFieldGroupIsMissingForAboutTheShareOfPlayers(t *testing.T) {
-	players := map[string][7]bool{}
+	players := map[string][8]bool{}
 	for _, p := range mixedTraffic(t, 0.25) {
 		players[p.Request.PlayerID] = sentGroups(p.Request)
 	}
-	for group := range 7 {
+	for group := range 8 {
 		missing := 0
 		for _, sent := range players {
 			if !sent[group] {

@@ -68,6 +68,14 @@ const groups: Group[] = [
       { name: 'screen_resolution', label: 'Screen resolution', kind: 'text', hint: 'WIDTHxHEIGHT, for example 1920x1080' },
     ],
   },
+  {
+    title: 'Payment verification',
+    fields: [
+      { name: 'cvv_result', label: 'CVV result', kind: 'text', options: ['match', 'mismatch', 'not_checked'] },
+      { name: 'avs_result', label: 'AVS result', kind: 'text', options: ['match', 'partial', 'mismatch', 'not_checked'] },
+      { name: 'three_ds_result', label: '3-D Secure result', kind: 'text', options: ['authenticated', 'attempted', 'failed', 'not_enrolled'] },
+    ],
+  },
 ]
 
 const fields = groups.flatMap((g) => g.fields)
@@ -106,6 +114,9 @@ const presets: Record<string, () => Values> = {
     client_os: 'Windows 10',
     client_browser: 'chrome 63.0',
     screen_resolution: '1920x1080',
+    cvv_result: 'match',
+    avs_result: 'match',
+    three_ds_result: 'authenticated',
   }),
   'New account, foreign IP, large amount': () => ({
     amount_minor: '75000',

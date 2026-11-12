@@ -1,6 +1,6 @@
 import { ChevronLeft } from '@xsolla/xui-icons-base'
 import { useCallback, useState } from 'react'
-import { getReviewCase, type ReviewCase } from '../api'
+import { getReviewCase, type AvsResult, type CvvResult, type ReviewCase, type ThreeDsResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
 import { ApiError } from '../request'
@@ -83,6 +83,10 @@ function CaseDetails({ review, time, handlers }: { review: ReviewCase; time: Tim
           <ScoringFacts review={review} />
         </section>
       </div>
+      <section className="panel" aria-labelledby="case-verification">
+        <h3 id="case-verification">Payment verification</h3>
+        <VerificationFacts review={review} />
+      </section>
       <section className="panel" aria-labelledby="case-rules">
         <h3 id="case-rules">Fired rules</h3>
         <FiredRules review={review} />
@@ -130,6 +134,34 @@ function ScoringFacts({ review }: { review: ReviewCase }) {
       <dd><ModelRiskBadge value={review.model_score} /></dd>
       <dt>Model version</dt>
       <dd>{review.model_version ?? 'None'}</dd>
+    </dl>
+  )
+}
+
+const verificationLabels: Record<CvvResult | AvsResult | ThreeDsResult, string> = {
+  match: 'Match',
+  partial: 'Partial match',
+  mismatch: 'Mismatch',
+  not_checked: 'Not checked',
+  authenticated: 'Authenticated',
+  attempted: 'Attempted',
+  failed: 'Failed',
+  not_enrolled: 'Not enrolled',
+}
+
+function verificationLabel(result: CvvResult | AvsResult | ThreeDsResult | null): string {
+  return result ? verificationLabels[result] : 'Not sent'
+}
+
+function VerificationFacts({ review }: { review: ReviewCase }) {
+  return (
+    <dl className="facts">
+      <dt>Card security code (CVV)</dt>
+      <dd>{verificationLabel(review.cvv_result)}</dd>
+      <dt>Billing address (AVS)</dt>
+      <dd>{verificationLabel(review.avs_result)}</dd>
+      <dt>3-D Secure</dt>
+      <dd>{verificationLabel(review.three_ds_result)}</dd>
     </dl>
   )
 }

@@ -333,6 +333,9 @@ paths:
                   client_os: Windows 10
                   client_browser: chrome 63.0
                   screen_resolution: 1920x1080
+                  cvv_result: match
+                  avs_result: partial
+                  three_ds_result: authenticated
       responses:
         "200":
           description: The decision was saved for this purchase or returned from a matching earlier request.
@@ -1254,7 +1257,8 @@ paths:
         Returns one purchase marked for review with its rule score, fired rules
         and points, the version of the ruleset that scored it, the model
         score when one was recorded, the player's recent purchases before this
-        one, and activity on the same device.
+        one, activity on the same device, and the payment gateway's CVV, AVS,
+        and 3-D Secure results when the score request sent them.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -1841,7 +1845,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version, player_purchases, device_activity]
+          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result]
           properties:
             ruleset_version:
               type: integer
@@ -1856,6 +1860,21 @@ components:
                 $ref: "#/components/schemas/CasePlayerPurchase"
             device_activity:
               $ref: "#/components/schemas/CaseDeviceActivity"
+            cvv_result:
+              type: string
+              nullable: true
+              enum: [match, mismatch, not_checked, null]
+              description: The CVV result sent with the purchase, or null when the score request did not send it.
+            avs_result:
+              type: string
+              nullable: true
+              enum: [match, partial, mismatch, not_checked, null]
+              description: The AVS result sent with the purchase, or null when the score request did not send it.
+            three_ds_result:
+              type: string
+              nullable: true
+              enum: [authenticated, attempted, failed, not_enrolled, null]
+              description: The 3-D Secure result sent with the purchase, or null when the score request did not send it.
 
     CasePlayerPurchase:
       type: object
@@ -2019,7 +2038,8 @@ components:
           type: object
           description: |
             Settings keyed by `high_amount`, `card_velocity`, `new_account`,
-            `country_mismatch`, `device_card_count`, or `new_device_spike`.
+            `country_mismatch`, `device_card_count`, `new_device_spike`,
+            `cvv_mismatch`, `avs_mismatch`, or `three_ds_failed`.
             An omitted rule is disabled. An empty object disables all weighted rules.
             Enabled rule weights must add up to at most 2147483647.
           additionalProperties:
@@ -2042,7 +2062,9 @@ components:
                   `new_account`, or distinct cards on one device in 60 minutes
                   for `device_card_count`, or minimum trusted purchase count
                   for `new_device_spike`. Both count limits must be at least 1.
-                  Required except for `country_mismatch`.
+                  Required except for `country_mismatch`, `cvv_mismatch`,
+                  `avs_mismatch`, and `three_ds_failed`, which have no
+                  threshold; a limit sent for them is saved but not used.
               window_days:
                 type: integer
                 format: int32
@@ -2261,6 +2283,31 @@ components:
             Screen resolution as WIDTHxHEIGHT, for example "1920x1080". Used
             by the fraud model.
           example: 1920x1080
+        cvv_result:
+          type: string
+          enum: [match, mismatch, not_checked]
+          description: >-
+            The payment gateway's check of the card security code during
+            authorization. The cvv_mismatch rule fires on `mismatch`. Not used
+            by the fraud model.
+          example: match
+        avs_result:
+          type: string
+          enum: [match, partial, mismatch, not_checked]
+          description: >-
+            The payment gateway's check of the billing address against the
+            card issuer's records. The avs_mismatch rule fires on `mismatch`
+            only; `partial` is common for genuine cardholders and adds no
+            points. Not used by the fraud model.
+          example: partial
+        three_ds_result:
+          type: string
+          enum: [authenticated, attempted, failed, not_enrolled]
+          description: >-
+            The outcome of 3-D Secure cardholder authentication. The
+            three_ds_failed rule fires on `failed`. Not used by the fraud
+            model.
+          example: authenticated
 
     ScoreResponse:
       type: object
@@ -2337,7 +2384,7 @@ components:
       properties:
         name:
           type: string
-          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike, blocklist]
+          enum: [high_amount, card_velocity, new_account, country_mismatch, device_card_count, new_device_spike, cvv_mismatch, avs_mismatch, three_ds_failed, blocklist]
           description: >-
             Name of the rule. high_amount fires when the amount reaches its
             limit. card_velocity fires when the card has enough purchases in
@@ -2347,7 +2394,10 @@ components:
             device reaches the distinct-card limit in 60 minutes, including
             the current card. new_device_spike fires when a purchase on a
             device absent from the player's trusted history reaches the
-            configured purchase count and both amount thresholds. blocklist is the entry of a purchase
+            configured purchase count and both amount thresholds.
+            cvv_mismatch, avs_mismatch, and three_ds_failed fire when the
+            request reports a CVV `mismatch`, an AVS `mismatch`, or a `failed`
+            3-D Secure authentication. blocklist is the entry of a purchase
             blocked because its card, device, player or IP address is on the
             blocklist. It adds no points.
           example: card_velocity

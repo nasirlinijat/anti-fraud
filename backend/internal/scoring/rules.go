@@ -16,6 +16,9 @@ const (
 	RuleCountryMismatch RuleName = "country_mismatch"
 	RuleDeviceCardCount RuleName = "device_card_count"
 	RuleNewDeviceSpike  RuleName = "new_device_spike"
+	RuleCVVMismatch     RuleName = "cvv_mismatch"
+	RuleAVSMismatch     RuleName = "avs_mismatch"
+	RuleThreeDSFailed   RuleName = "three_ds_failed"
 
 	// RuleBlocklist names the entry of a purchase that matched the blocklist.
 	// It is not a configurable rule, so Known does not report it.
@@ -35,6 +38,9 @@ var rules = []struct {
 	{RuleCountryMismatch, countryMismatch, countryMismatchMessage},
 	{RuleDeviceCardCount, deviceCardCount, deviceCardCountMessage},
 	{RuleNewDeviceSpike, newDeviceSpike, newDeviceSpikeMessage},
+	{RuleCVVMismatch, cvvMismatch, cvvMismatchMessage},
+	{RuleAVSMismatch, avsMismatch, avsMismatchMessage},
+	{RuleThreeDSFailed, threeDSFailed, threeDSFailedMessage},
 }
 
 // Known reports whether the scoring core implements a rule with this name.
