@@ -47,7 +47,7 @@ func TestReadyWhenDatabaseUnreachable(t *testing.T) {
 }
 
 func TestReadyWithUnreachablePool(t *testing.T) {
-	pool, err := NewPool(context.Background(), "postgres://user:pass@127.0.0.1:1/none?connect_timeout=1")
+	pool, err := NewPool(context.Background(), "postgres://user:pass@127.0.0.1:1/none?connect_timeout=1", 0)
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestReadyWithPostgres(t *testing.T) {
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
-	pool, err := NewPool(context.Background(), url)
+	pool, err := NewPool(context.Background(), url, 0)
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
