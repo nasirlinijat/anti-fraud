@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -66,7 +65,7 @@ func (h *AccountHandler) serveCreate(w http.ResponseWriter, r *http.Request, _ s
 	}
 	created, err := h.service.Create(r.Context(), account.NewAccount{Username: req.Username, Password: req.Password, Role: req.Role})
 	if err != nil {
-		writeAccountError(w, err, "create account")
+		writeAccountError(r.Context(), w, err, "create account")
 		return
 	}
 	platform.WriteJSON(w, http.StatusCreated, newAccountDetailsResponse(created))
@@ -97,7 +96,7 @@ func readCreateAccount(w http.ResponseWriter, r *http.Request) (createAccountReq
 func (h *AccountHandler) serveList(w http.ResponseWriter, r *http.Request, _ string) {
 	accounts, err := h.service.List(r.Context())
 	if err != nil {
-		writeAccountError(w, err, "list accounts")
+		writeAccountError(r.Context(), w, err, "list accounts")
 		return
 	}
 	list := make([]accountDetailsResponse, 0, len(accounts))
@@ -110,7 +109,7 @@ func (h *AccountHandler) serveList(w http.ResponseWriter, r *http.Request, _ str
 func (h *AccountHandler) serveDisable(w http.ResponseWriter, r *http.Request, admin string) {
 	disabled, err := h.service.Disable(r.Context(), r.PathValue("username"), admin)
 	if err != nil {
-		writeAccountError(w, err, "disable account")
+		writeAccountError(r.Context(), w, err, "disable account")
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, newAccountDetailsResponse(disabled))
@@ -119,7 +118,7 @@ func (h *AccountHandler) serveDisable(w http.ResponseWriter, r *http.Request, ad
 // writeAccountError maps the account service errors to status codes. A
 // validation error names the request field it is about. Any other error is
 // logged with the action that failed and answered with 500.
-func writeAccountError(w http.ResponseWriter, err error, action string) {
+func writeAccountError(ctx context.Context, w http.ResponseWriter, err error, action string) {
 	field := map[error]string{
 		account.ErrInvalidUsername: "username",
 		account.ErrInvalidRole:     "role",
@@ -137,8 +136,7 @@ func writeAccountError(w http.ResponseWriter, err error, action string) {
 	case errors.Is(err, models.ErrUsernameTaken), errors.Is(err, account.ErrDisableSelf):
 		platform.WriteError(w, http.StatusConflict, err.Error())
 	default:
-		log.Printf("%s: %v", action, err)
-		platform.WriteError(w, http.StatusInternalServerError, "internal error")
+		platform.WriteServerError(ctx, w, action, err)
 	}
 }
 

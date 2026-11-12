@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -120,6 +119,5 @@ func (h *BlocklistHandler) remove(w http.ResponseWriter, r *http.Request, operat
 }
 
 func blocklistError(w http.ResponseWriter, r *http.Request, err error) {
-	slog.ErrorContext(r.Context(), "blocklist", "error", err)
-	platform.WriteError(w, http.StatusInternalServerError, "internal error")
+	platform.WriteServerError(r.Context(), w, "blocklist", err)
 }
