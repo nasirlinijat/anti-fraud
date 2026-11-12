@@ -42,6 +42,9 @@ type Config struct {
 	AnalystKeys  AnalystKeys
 	OperatorKeys OperatorKeys
 	ScoreLimits  ScoreLimits
+	// ChargebackWebhookSecret signs chargeback webhook deliveries. While it
+	// is empty, the chargeback endpoint returns 503.
+	ChargebackWebhookSecret string
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -92,6 +95,10 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.ScoreLimits, err = loadScoreLimits()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ChargebackWebhookSecret, err = loadChargebackWebhookSecret(cfg.APIKey, cfg.AnalystKeys, cfg.OperatorKeys)
 	if err != nil {
 		return Config{}, err
 	}

@@ -39,6 +39,8 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		"UPDATE review_claims SET account_id = 1",
 		"UPDATE account_events SET player_id = 'changed'",
 		"DELETE FROM account_events",
+		"UPDATE chargebacks SET reason_code = 'other'",
+		"DELETE FROM chargebacks",
 	} {
 		tx, err := conn.Begin(ctx)
 		if err != nil {
@@ -87,6 +89,8 @@ func TestRuntimeRolePermissions(t *testing.T) {
 		"DELETE FROM review_claims WHERE purchase_id = -1",
 		"INSERT INTO account_events (event_id, player_id, event_type, event_time) VALUES ('runtime-role-test', 'player', 'login', now())",
 		"SELECT count(*) FROM account_events WHERE player_id = 'player'",
+		"SELECT count(*) FROM chargebacks",
+		"INSERT INTO chargebacks (chargeback_id, purchase_id, reason_code, amount_minor, received_at) SELECT 'runtime-role-test', id, 'other', 1, now() FROM purchases WHERE false",
 	} {
 		if _, err := tx.Exec(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

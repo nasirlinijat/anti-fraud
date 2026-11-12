@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/chargeback"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
@@ -32,6 +33,7 @@ const (
 	firstAnalyst   = "concurrency-analyst-1"
 	secondAnalyst  = "concurrency-analyst-2"
 	operatorID     = "concurrency-operator"
+	webhookSecret  = "concurrency-webhook-secret-of-32-bytes"
 	highAmountRule = `{
 	"review_threshold": 50,
 	"block_threshold": 80,
@@ -98,6 +100,7 @@ func newMux(pool *pgxpool.Pool) (*http.ServeMux, error) {
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))), serviceKey)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), false), access)
+	transport.RegisterChargebackRoutes(mux, transport.NewChargebackHandler(chargeback.NewService(storage.NewChargebackStore(pool)), webhookSecret))
 	return mux, nil
 }
 

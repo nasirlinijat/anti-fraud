@@ -31,6 +31,9 @@ GRANT DELETE ON sessions TO antifraud_api;
 GRANT SELECT, INSERT, DELETE ON review_claims TO antifraud_api;
 -- Account events are evidence, so the service can add them but never change them.
 GRANT SELECT, INSERT ON account_events TO antifraud_api;
+-- The chargeback webhook records a chargeback and reads it back to answer a
+-- repeated delivery. A recorded chargeback is never changed or removed.
+GRANT SELECT, INSERT ON chargebacks TO antifraud_api;
 
 COMMIT;
 
@@ -55,5 +58,7 @@ GRANT SELECT, INSERT, DELETE ON pending_purchase_labels TO antifraud_labels;
 -- Full purchase reads are needed to verify pending snapshots; scoring writes remain forbidden.
 GRANT SELECT ON purchases TO antifraud_labels;
 GRANT SELECT(purchase_id,outcome) ON decisions TO antifraud_labels;
+-- The mock bank charges back only purchases that were allowed or approved.
+GRANT SELECT(purchase_id,decision) ON review_resolutions TO antifraud_labels;
 GRANT SELECT, UPDATE ON simulation_runs TO antifraud_labels;
 COMMIT;
