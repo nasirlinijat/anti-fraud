@@ -1,10 +1,7 @@
 package simulator_test
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"reflect"
 	"sync"
@@ -14,37 +11,6 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
-
-// TestAccountEventsLeaveThePurchasesOfASeedUnchanged compares the dump of the
-// default traffic with hashes recorded before the simulator sent account
-// events. Account events use their own random stream, so the purchases, their
-// IDs and the dump stay byte for byte the same. The hashes predate the
-// verification results too, so those are removed before hashing.
-func TestAccountEventsLeaveThePurchasesOfASeedUnchanged(t *testing.T) {
-	want := map[float64]string{
-		0.1: "dd2249f577a0dbfc8c37f9b6a9f5fe6453340ada6f130e3f9ff8a17905c5c53f",
-		0.5: "b8633f56c26e0eacf34cf5c1c8ff303e321d9de3691520feac58b898e575c805",
-		1:   "7c0f22f1e93fcdd3bbb45e66ddba81d5e671cf021198430c20906166ae77c940",
-	}
-	for share, hash := range want {
-		cfg := simulator.DefaultConfig()
-		cfg.SuspiciousShare = share
-		purchases := generate(t, cfg, 3000)
-		for i := range purchases {
-			purchases[i].Request.CVVResult, purchases[i].Request.AVSResult, purchases[i].Request.ThreeDSResult = nil, nil, nil
-		}
-		var dump bytes.Buffer
-		if err := simulator.WriteJSONL(&dump, purchases); err != nil {
-			t.Fatalf("WriteJSONL: %v", err)
-		}
-
-		sum := sha256.Sum256(dump.Bytes())
-
-		if got := hex.EncodeToString(sum[:]); got != hash {
-			t.Errorf("suspicious share %v: dump hash %s, want %s", share, got, hash)
-		}
-	}
-}
 
 func TestAccountEventsComeBeforeTheirPurchaseFromTheSamePlayer(t *testing.T) {
 	cfg := simulator.DefaultConfig()

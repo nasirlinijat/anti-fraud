@@ -19,6 +19,8 @@ const (
 	RuleCVVMismatch     RuleName = "cvv_mismatch"
 	RuleAVSMismatch     RuleName = "avs_mismatch"
 	RuleThreeDSFailed   RuleName = "three_ds_failed"
+	RuleDatacenterIP    RuleName = "datacenter_ip"
+	RuleAnonymousIP     RuleName = "anonymous_ip"
 
 	// These rules read the player's account events. They exist only in the
 	// rulesets that an operator publishes with them.
@@ -50,6 +52,8 @@ var rules = []struct {
 	{RuleRecentPasswordReset, recentPasswordReset, recentPasswordResetMessage},
 	{RuleNewDeviceLogin, newDeviceLogin, newDeviceLoginMessage},
 	{RuleNewCountryLogin, newCountryLogin, newCountryLoginMessage},
+	{RuleDatacenterIP, datacenterIP, datacenterIPMessage},
+	{RuleAnonymousIP, anonymousIP, anonymousIPMessage},
 }
 
 // Known reports whether the scoring core implements a rule with this name.

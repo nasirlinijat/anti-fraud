@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -111,6 +112,17 @@ type caseResponse struct {
 	AVSResult       *scoring.AVSResult         `json:"avs_result"`
 	ThreeDSResult   *scoring.ThreeDSResult     `json:"three_ds_result"`
 	AccountEvents   []caseAccountEventResponse `json:"account_events"`
+	IPIntel         *ipIntelResponse           `json:"ip_intel"`
+}
+
+// ipIntelResponse is the IP intelligence lookup saved with the decision.
+type ipIntelResponse struct {
+	Provider  string `json:"provider"`
+	Available bool   `json:"available"`
+	Hosting   bool   `json:"hosting"`
+	VPN       bool   `json:"vpn"`
+	Proxy     bool   `json:"proxy"`
+	Tor       bool   `json:"tor"`
 }
 
 type networkResponse struct {
@@ -269,6 +281,7 @@ func newCaseResponse(item models.CaseItem) caseResponse {
 		AVSResult:       item.AVSResult,
 		ThreeDSResult:   item.ThreeDSResult,
 		AccountEvents:   newCaseAccountEvents(item.AccountEvents, item.DecidedAt),
+		IPIntel:         newIPIntelResponse(item.IPIntel),
 	}
 }
 
@@ -286,6 +299,13 @@ func newCaseAccountEvents(events []models.AccountEvent, decidedAt time.Time) []c
 		})
 	}
 	return resp
+}
+
+func newIPIntelResponse(r *ipintel.Result) *ipIntelResponse {
+	if r == nil {
+		return nil
+	}
+	return &ipIntelResponse{Provider: r.Provider, Available: r.Available, Hosting: r.Hosting, VPN: r.VPN, Proxy: r.Proxy, Tor: r.Tor}
 }
 
 func (h *ReviewHandler) serveNetwork(w http.ResponseWriter, r *http.Request) {

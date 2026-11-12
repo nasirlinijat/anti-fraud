@@ -88,6 +88,18 @@ const ruleDetails = [
     limit: 'Window before the purchase (hours, 1 to 720)',
     preset: { enabled: false, weight: '20', limit: '24' },
   },
+  {
+    name: 'datacenter_ip',
+    label: 'Data-centre IP address',
+    description: 'Adds points when the IP address belongs to a hosting or data-centre network.',
+    preset: { enabled: false, weight: '30' },
+  },
+  {
+    name: 'anonymous_ip',
+    label: 'VPN, proxy, or Tor IP address',
+    description: 'Adds points when the IP address is a VPN, a public proxy, or a Tor exit.',
+    preset: { enabled: false, weight: '20' },
+  },
 ] as const
 
 // Rules that read the player's account events take a window of 1 to 720 hours.

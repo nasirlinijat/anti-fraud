@@ -210,6 +210,8 @@ func TestRuleNameKnown(t *testing.T) {
 		{RuleCVVMismatch, true},
 		{RuleAVSMismatch, true},
 		{RuleThreeDSFailed, true},
+		{RuleDatacenterIP, true},
+		{RuleAnonymousIP, true},
 		{"high_ammount", false},
 		{"", false},
 	}

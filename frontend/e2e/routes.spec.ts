@@ -49,7 +49,8 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   const lateLogin = { event_id: 'demo-login', event_type: 'login', event_time: now, device_id: 'demo-device', ip_country: 'TR',
     received_at: now, recorded_after_decision: true }
   await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null,
-    cvv_result: 'mismatch', avs_result: null, three_ds_result: 'authenticated', account_events: [lateLogin] } }))
+    cvv_result: 'mismatch', avs_result: null, three_ds_result: 'authenticated', account_events: [lateLogin],
+    ip_intel: { provider: 'mock', available: true, hosting: false, vpn: true, proxy: false, tor: true } } }))
   await page.route('**/reviews/demo-purchase/network', route => route.fulfill({ json: { window_days: 30, anchors: [
     { type: 'card', value: 'demo-card', blocklisted: false, linked_total: 0, linked: [] },
     { type: 'player', value: 'demo-player', blocklisted: false, linked_total: 0, linked: [] },
@@ -69,6 +70,7 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   await expect(verification).toContainText('Not sent')
   await expect(verification).toContainText('Authenticated')
   await expect(page.getByRole('region', { name: 'Recent account events' }).getByText('After the decision')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'IP intelligence' })).toContainText('VPN, Tor exit')
   await page.getByRole('button', { name: 'Back to the queue' }).click()
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()

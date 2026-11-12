@@ -27,6 +27,7 @@ type Input struct {
 	Verification          PaymentVerification
 	// AccountHistory is nil when no enabled rule reads account events.
 	AccountHistory *AccountHistory
+	IPReputation   IPReputation
 }
 
 // TrustedPurchaseHistory summarizes earlier allowed or approved purchases.

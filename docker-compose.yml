@@ -34,6 +34,8 @@ services:
       DATABASE_URL: postgres://antifraud_api:${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}?sslmode=disable
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MODEL_PATH: /models/lgbm-game-v5.json
+      IP_INTEL_PROVIDER: ${IP_INTEL_PROVIDER:-mock}
+      IP_INTEL_MOCK_RANGES: ${IP_INTEL_MOCK_RANGES:-}
     ports:
       - "127.0.0.1:${PORT:?set PORT in .env}:${PORT:?set PORT in .env}"
     depends_on:
