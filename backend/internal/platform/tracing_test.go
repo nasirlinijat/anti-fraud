@@ -49,7 +49,7 @@ func TestQuerySpanHasTheStatementButNoValues(t *testing.T) {
 	}
 	attrs := map[string]string{}
 	for _, kv := range spans[0].Attributes() {
-		attrs[string(kv.Key)] = kv.Value.Emit()
+		attrs[string(kv.Key)] = kv.Value.String()
 	}
 	if attrs["db.statement"] != "SELECT count(*) FROM purchases WHERE card_token = $1" || attrs["db.operation"] != "SELECT" || attrs["db.system"] != "postgresql" {
 		t.Fatalf("attributes %v", attrs)

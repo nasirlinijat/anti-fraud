@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ type Config struct {
 	ChargebackWebhookSecret string
 	IPIntel                 IPIntelConfig
 	Tracing                 TracingConfig
+	MetricsAddr             string
 }
 
 // IPIntelMock selects the mock IP intelligence provider.
@@ -128,6 +130,12 @@ func LoadConfig() (Config, error) {
 	cfg.Tracing, err = loadTracing()
 	if err != nil {
 		return Config{}, err
+	}
+	cfg.MetricsAddr = strings.TrimSpace(os.Getenv("DOGSTATSD_ADDR"))
+	if cfg.MetricsAddr != "" {
+		if _, port, err := net.SplitHostPort(cfg.MetricsAddr); err != nil || port == "" {
+			return Config{}, fmt.Errorf("DOGSTATSD_ADDR must be host:port, for example datadog:8125")
+		}
 	}
 	return cfg, nil
 }

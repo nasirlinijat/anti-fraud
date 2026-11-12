@@ -69,7 +69,7 @@ func TestOneScoreRequestIsOneTraceWithItsQueries(t *testing.T) {
 			t.Fatalf("query span %v belongs to another trace", q.Attributes())
 		}
 		for _, kv := range q.Attributes() {
-			value := kv.Value.Emit()
+			value := kv.Value.String()
 			if strings.Contains(value, "card-"+transactionID) || strings.Contains(value, "it-trace-device") {
 				t.Fatalf("a query span contains a request value: %s=%s", kv.Key, value)
 			}

@@ -31,6 +31,7 @@ services:
       SCORE_TIMEOUT: ${SCORE_TIMEOUT:-}
       TRACING_ENDPOINT: ${TRACING_ENDPOINT:-}
       TRACING_SAMPLE_RATIO: ${TRACING_SAMPLE_RATIO:-}
+      DOGSTATSD_ADDR: ${DOGSTATSD_ADDR:-}
       DATABASE_URL: postgres://antifraud_api:${RUNTIME_DB_PASSWORD:?set RUNTIME_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}?sslmode=disable
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MODEL_PATH: /models/lgbm-game-v5.json

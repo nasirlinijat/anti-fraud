@@ -14,6 +14,7 @@ services:
       DD_CONTAINER_EXCLUDE: "image:gcr.io/datadoghq/agent"
       DD_PROCESS_CONFIG_PROCESS_COLLECTION_ENABLED: "true"
       DD_APM_ENABLED: "false"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -31,6 +32,8 @@ services:
       com.datadoghq.ad.logs: '[{"source": "postgresql", "service": "anti-fraud-db"}]'
 
   backend:
+    environment:
+      DOGSTATSD_ADDR: datadog:8125
     labels:
       com.datadoghq.tags.service: anti-fraud-backend
       com.datadoghq.ad.logs: '[{"source": "go", "service": "anti-fraud-backend"}]'

@@ -53,6 +53,10 @@ type Model interface {
 	Version() string
 }
 
+type Metrics interface {
+	Decided(d models.Decision)
+}
+
 // combination is a model made of several models, such as *lgbm.Combined. The
 // player blend applies to its first model's score, before combining.
 type combination interface {
@@ -61,6 +65,7 @@ type combination interface {
 }
 
 type Service struct {
+	metrics   Metrics
 	rulesets  Rulesets
 	blocklist Blocklist
 	purchases Purchases
@@ -76,6 +81,11 @@ type Service struct {
 
 func NewService(rulesets Rulesets, blocklist Blocklist, purchases Purchases) *Service {
 	return &Service{rulesets: rulesets, blocklist: blocklist, purchases: purchases}
+}
+
+func (s *Service) UseMetrics(m Metrics) *Service {
+	s.metrics = m
+	return s
 }
 
 // UseAccountEvents gives the rules that read account events their history.
@@ -138,6 +148,9 @@ func (s *Service) save(ctx context.Context, p models.Purchase, decision models.D
 	}
 	if err != nil {
 		return models.Decision{}, err
+	}
+	if s.metrics != nil {
+		s.metrics.Decided(decision)
 	}
 	return decision, nil
 }
