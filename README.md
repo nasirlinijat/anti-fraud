@@ -351,3 +351,33 @@ scoring's string, IP and timestamp conventions. Recovery requires the saved
 purchase to match that snapshot, not just its ID. Definitive HTTP rejections and
 snapshot mismatches are quarantined. Legacy intents without snapshots are not
 automatically labelled; verify their source before any explicit CSV import.
+
+
+## Run decision quality
+
+The Dashboard's Decision quality panel reports saved scoring outcomes against
+finalized known answers. Choose **Simulator** for console, CLI or imported
+simulator runs, or **IEEE-CIS replay** for imported dataset runs, then select a
+run. The two sources remain separate even when they use the same run ID. The
+panel refreshes every five seconds independently of the dashboard period.
+
+Review and block count as flagged. Precision is the fraudulent share of flags,
+recall is the share of fraud flagged, and false-positive rate is the flagged
+share of legitimate purchases. A missing denominator is shown as Not applicable.
+Fraud value flagged includes reviews; it does not mean money recovered or saved.
+Analyst review decisions do not change these scoring-quality measurements.
+
+`GET /stats/quality?source=simulator&run_id=<id>` returns the aggregate report.
+`source=ieee-cis` selects replay labels. `GET /stats/quality/runs?source=simulator`
+lists run IDs, with a bounded `limit` and exclusive `after` cursor for more.
+Both use the service key and require a configured `LABELS_DATABASE_URL` with the
+restricted evaluation role. Quality reads work with `SIMULATION_ENABLED=false`;
+missing or unavailable evaluation access returns 503 without disabling scoring.
+The console proxy forwards these routes; the public production API host does not.
+
+Only finalized answers contribute to metrics. Pending and quarantined intents
+are counted separately and never treated as legitimate purchases. Console runs
+show their recorded progress; CLI and replay runs have unknown total coverage
+because ingestion does not store an expected run size. No historical answers
+are guessed. Labels finalized before purchase verification was introduced need
+independent source verification; use fresh runs for acceptance comparisons.

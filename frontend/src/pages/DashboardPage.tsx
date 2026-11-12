@@ -5,6 +5,7 @@ import { formatUsdMinor } from '../displayFormat'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { QualityPanel } from './QualityPanel'
 
 const DecisionChart = lazy(() => import('./DecisionChart'))
 
@@ -109,6 +110,7 @@ function DashboardPage() {
           )}
         </>
       )}
+      <QualityPanel />
     </div>
   )
 }
