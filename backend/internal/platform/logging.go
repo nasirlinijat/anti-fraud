@@ -31,6 +31,9 @@ func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if id := RequestID(ctx); id != "" {
 		r.AddAttrs(slog.String("request_id", id))
 	}
+	if attrs := traceAttrs(ctx); attrs != nil {
+		r.Add(attrs...)
+	}
 	return h.Handler.Handle(ctx, r)
 }
 

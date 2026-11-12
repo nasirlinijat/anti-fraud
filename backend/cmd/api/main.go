@@ -38,6 +38,13 @@ func main() {
 	if err != nil {
 		fatal("load config", err)
 	}
+	stopTracing, err := platform.StartTracing(context.Background(), cfg.Tracing.Endpoint, cfg.Tracing.SampleRatio)
+	if err != nil {
+		fatal("start tracing", err)
+	}
+	if cfg.Tracing.Endpoint != "" {
+		slog.Info("tracing enabled", "endpoint", cfg.Tracing.Endpoint, "sample_ratio", cfg.Tracing.SampleRatio)
+	}
 
 	pool, err := platform.NewPool(context.Background(), cfg.DatabaseURL)
 	if err != nil {
@@ -96,6 +103,11 @@ func main() {
 		stop()
 	}
 	<-done
+	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := stopTracing(flush); err != nil {
+		slog.Error("flush traces", "error", err)
+	}
+	cancel()
 	if !errors.Is(err, http.ErrServerClosed) {
 		fatal("serve", err)
 	}

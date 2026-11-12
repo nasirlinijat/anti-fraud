@@ -1,0 +1,10 @@
+services:
+  datadog:
+    environment:
+      DD_APM_ENABLED: "true"
+      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT: 0.0.0.0:4317
+
+  backend:
+    environment:
+      TRACING_ENDPOINT: datadog:4317
+      TRACING_SAMPLE_RATIO: ${TRACING_SAMPLE_RATIO:-1}

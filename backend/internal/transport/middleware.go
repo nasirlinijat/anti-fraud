@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -18,7 +21,14 @@ const (
 )
 
 func Middleware(next http.Handler) http.Handler {
-	return SecurityHeaders(RequestID(Logging(Recover(next))))
+	handler := RequestID(Logging(Recover(next)))
+	if platform.TracingEnabled() {
+		handler = otelhttp.NewHandler(handler, "http.server",
+			otelhttp.WithFilter(func(r *http.Request) bool { return r.URL.Path != "/health" && r.URL.Path != "/ready" }),
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return r.Method }),
+		)
+	}
+	return SecurityHeaders(handler)
 }
 
 func SecurityHeaders(next http.Handler) http.Handler {
@@ -87,6 +97,10 @@ func Logging(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		route := routeOf(r)
+		if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+			span.SetName(r.Method + " " + route)
+			span.SetAttributes(attribute.String("http.route", route), attribute.String("request_id", platform.RequestID(r.Context())))
+		}
 		if (route == "/health" || route == "/ready") && rec.status < http.StatusBadRequest {
 			return
 		}

@@ -423,6 +423,25 @@ When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASS
 
 The [STRIDE threat model](docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 
+## Tracing
+
+The backend can send OpenTelemetry traces to the Datadog agent over OTLP gRPC. Each `POST /score` is one trace with a span for the HTTP request (named after the route, with the request ID), one span per database query (`postgresql.query`, with the SQL text but never the query values), and spans for the model (`score.model`, with the model version and score) and the rules (`score.rules`, with the outcome and points). Every log line written during a traced request has `dd.trace_id` and `dd.span_id`, so Datadog links the log to its trace. `/health` and `/ready` are not traced.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRACING_ENDPOINT` | empty | `host:port` of the OTLP gRPC receiver, for example `datadog:4317`. Empty turns tracing off completely: no spans, no extra work per request |
+| `TRACING_SAMPLE_RATIO` | `1` | Share of requests traced, from `0` to `1` |
+
+Measured cost with tracing on: about 0.013 ms for the request span and 0.0015 ms per database query span, about 0.035 ms for a whole score request.
+
+On the server, `deploy/compose.tracing.yml` turns on the agent's APM and OTLP receiver and points the backend at it. It works together with the Datadog file from `deploy/compose.datadog.yml`:
+
+```bash
+docker compose -p antifraud --env-file ../.env -f docker-compose.yml -f deploy/compose.prod.yml -f deploy/compose.datadog.yml -f deploy/compose.tracing.yml up -d --wait
+```
+
+Traces then appear in Datadog APM under the service `anti-fraud-backend`.
+
 ## Score limits
 
 `POST /score` protects itself from overload in two ways:

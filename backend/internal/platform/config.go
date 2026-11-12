@@ -46,6 +46,7 @@ type Config struct {
 	// is empty, the chargeback endpoint returns 503.
 	ChargebackWebhookSecret string
 	IPIntel                 IPIntelConfig
+	Tracing                 TracingConfig
 }
 
 // IPIntelMock selects the mock IP intelligence provider.
@@ -58,6 +59,11 @@ type IPIntelConfig struct {
 	// MockRangesPath is an optional JSON file of ranges that replaces the
 	// mock's default ranges.
 	MockRangesPath string
+}
+
+type TracingConfig struct {
+	Endpoint    string
+	SampleRatio float64
 }
 
 // LoadConfig reads the configuration from environment variables. It returns an
@@ -119,6 +125,10 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.Tracing, err = loadTracing()
+	if err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -137,6 +147,18 @@ func loadIPIntel() (IPIntelConfig, error) {
 		return IPIntelConfig{}, fmt.Errorf("IP_INTEL_MOCK_RANGES requires IP_INTEL_PROVIDER=mock")
 	}
 	return cfg, nil
+}
+
+func loadTracing() (TracingConfig, error) {
+	tracing := TracingConfig{Endpoint: strings.TrimSpace(os.Getenv("TRACING_ENDPOINT")), SampleRatio: 1}
+	if raw := os.Getenv("TRACING_SAMPLE_RATIO"); raw != "" {
+		ratio, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(ratio) || ratio < 0 || ratio > 1 {
+			return TracingConfig{}, fmt.Errorf("TRACING_SAMPLE_RATIO must be a number from 0 to 1")
+		}
+		tracing.SampleRatio = ratio
+	}
+	return tracing, nil
 }
 
 func loadScoreLimits() (ScoreLimits, error) {

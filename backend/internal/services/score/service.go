@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"slices"
 	"time"
 
@@ -166,7 +170,12 @@ func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipinte
 	}
 	vector := features.Vector(in, history)
 	modelInputs := features.Map(vector)
-	model, err := s.runModel(ctx, p, rs, vector)
+	modelCtx, modelSpan := tracer().Start(ctx, "score.model")
+	model, err := s.runModel(modelCtx, p, rs, vector)
+	if model.version != nil {
+		modelSpan.SetAttributes(attribute.String("model.version", *model.version), attribute.Float64("model.score", *model.score))
+	}
+	endSpan(modelSpan, err)
 	if err != nil {
 		return models.Decision{}, err
 	}
@@ -175,7 +184,10 @@ func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipinte
 	if blocked {
 		result = scoring.Result{Outcome: scoring.OutcomeBlock, FiredRules: []scoring.FiredRule{scoring.BlocklistMatch(string(entry.Type))}}
 	} else {
-		result, err = s.evaluateRules(ctx, p, rs, ruleSignals{modelScore: model.score, ip: ipReputation(ipIntel)})
+		rulesCtx, rulesSpan := tracer().Start(ctx, "score.rules")
+		result, err = s.evaluateRules(rulesCtx, p, rs, ruleSignals{modelScore: model.score, ip: ipReputation(ipIntel)})
+		rulesSpan.SetAttributes(attribute.String("score.outcome", string(result.Outcome)), attribute.Int("score.points", result.Score))
+		endSpan(rulesSpan, err)
 		if err != nil {
 			return models.Decision{}, err
 		}
@@ -325,4 +337,16 @@ func (s *Service) modelScore(ctx context.Context, p models.Purchase, vector []fl
 		scores[0] = s.policy.Blend(own, sum, count)
 	}
 	return combined.Combine(scores), own, nil
+}
+
+func tracer() trace.Tracer {
+	return otel.Tracer("anti-fraud/score")
+}
+
+func endSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed")
+	}
+	span.End()
 }
