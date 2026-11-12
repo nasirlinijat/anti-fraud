@@ -106,11 +106,9 @@ def fit_lightgbm(seed, x_train, y_train, x_val, y_val, checkpoint=None):
     model = lightgbm_model()
     model.set_params(random_state=seed)
     key = fingerprint(seed, model.get_params(), x_train, y_train, x_val, y_val)
-    if checkpoint is not None and Path(checkpoint).exists():
-        saved = joblib.load(checkpoint)
-        if saved["fingerprint"] == key:
-            print(f"loaded the finished model from {checkpoint}")
-            return saved["model"]
+    saved = load_checkpoint(checkpoint, key)
+    if saved is not None:
+        return saved
     model.fit(
         x_train, y_train,
         eval_X=x_val,
@@ -118,14 +116,31 @@ def fit_lightgbm(seed, x_train, y_train, x_val, y_val, checkpoint=None):
         eval_metric="average_precision",
         callbacks=[lgb.early_stopping(200, verbose=False)],
     )
-    if checkpoint is not None:
-        checkpoint = Path(checkpoint)
-        checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        # Written to a second file first, so a crash never leaves half a checkpoint.
-        unfinished = checkpoint.with_name(checkpoint.name + ".tmp")
-        joblib.dump({"fingerprint": key, "model": model}, unfinished)
-        os.replace(unfinished, checkpoint)
+    save_checkpoint(checkpoint, key, model)
     return model
+
+
+def load_checkpoint(checkpoint, key):
+    """Returns the model saved at checkpoint when its fingerprint is key, and
+    None when there is no such file or it holds another training run."""
+    if checkpoint is None or not Path(checkpoint).exists():
+        return None
+    saved = joblib.load(checkpoint)
+    if saved["fingerprint"] != key:
+        return None
+    print(f"loaded the finished model from {checkpoint}")
+    return saved["model"]
+
+
+def save_checkpoint(checkpoint, key, model):
+    if checkpoint is None:
+        return
+    checkpoint = Path(checkpoint)
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    # Written to a second file first, so a crash never leaves half a checkpoint.
+    unfinished = checkpoint.with_name(checkpoint.name + ".tmp")
+    joblib.dump({"fingerprint": key, "model": model}, unfinished)
+    os.replace(unfinished, checkpoint)
 
 
 def at_false_positive_rate(y, score, rate, amount=None):

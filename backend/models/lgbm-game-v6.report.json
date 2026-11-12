@@ -1,0 +1,1371 @@
+{
+  "features": [
+    "amount",
+    "cents",
+    "product_code",
+    "card_network",
+    "card_type",
+    "player_txn_count",
+    "player_avg_amount",
+    "amount_to_avg",
+    "secs_since_last",
+    "secs_since_first",
+    "card_uses_1h",
+    "card_uses_24h",
+    "player_distinct_cards",
+    "email_is_new_for_player",
+    "card_country",
+    "card_category",
+    "billing_country",
+    "email_domain_share",
+    "has_recipient_email",
+    "recipient_email_differs",
+    "player_max_amount",
+    "player_uses_1h",
+    "player_uses_24h",
+    "player_same_amount_count",
+    "player_distinct_emails",
+    "email_players_share",
+    "has_device_info",
+    "device_type",
+    "device_info_share",
+    "device_players_share",
+    "device_is_new_for_player",
+    "player_distinct_devices",
+    "card_distinct_players",
+    "card1_distinct_players",
+    "card1_distinct_addresses",
+    "card1_distinct_emails",
+    "billing_distance",
+    "account_age_days",
+    "has_client_info",
+    "os_family",
+    "browser_family",
+    "os_share",
+    "browser_share",
+    "screen_share",
+    "screen_area",
+    "os_is_new_for_player",
+    "browser_is_new_for_player",
+    "player_distinct_browsers",
+    "card_issuer_code",
+    "billing_region_code",
+    "ip_country_differs_from_card",
+    "device_id_is_new_for_player",
+    "device_distinct_players",
+    "billing_region_is_new_for_card"
+  ],
+  "data": "simulated game traffic from several worlds",
+  "worlds": [
+    {
+      "file": "world1.jsonl",
+      "world": "world1",
+      "purchases": 600000,
+      "days": "0-125",
+      "fraud_rate": 0.0906,
+      "history_variants": [
+        {
+          "history_start": 0,
+          "days": "0-125",
+          "rows": 600000,
+          "fraud_rate": 0.0906
+        },
+        {
+          "history_start": 20,
+          "days": "20-33",
+          "rows": 66167,
+          "fraud_rate": 0.0906
+        },
+        {
+          "history_start": 40,
+          "days": "40-53",
+          "rows": 66612,
+          "fraud_rate": 0.0919
+        },
+        {
+          "history_start": 60,
+          "days": "60-73",
+          "rows": 66476,
+          "fraud_rate": 0.0907
+        },
+        {
+          "history_start": 80,
+          "days": "80-93",
+          "rows": 67192,
+          "fraud_rate": 0.095
+        },
+        {
+          "history_start": 100,
+          "days": "100-113",
+          "rows": 66396,
+          "fraud_rate": 0.0872
+        }
+      ],
+      "skipped_history_starts": []
+    },
+    {
+      "file": "worldB.jsonl",
+      "world": "worldB",
+      "purchases": 100000,
+      "days": "0-59",
+      "fraud_rate": 0.0525,
+      "history_variants": [
+        {
+          "history_start": 0,
+          "days": "0-59",
+          "rows": 100000,
+          "fraud_rate": 0.0525
+        },
+        {
+          "history_start": 20,
+          "days": "20-33",
+          "rows": 38885,
+          "fraud_rate": 0.0535
+        },
+        {
+          "history_start": 40,
+          "days": "40-53",
+          "rows": 18815,
+          "fraud_rate": 0.0715
+        }
+      ],
+      "skipped_history_starts": [
+        60,
+        80,
+        100
+      ]
+    },
+    {
+      "file": "worldC.jsonl",
+      "world": "worldC",
+      "purchases": 99377,
+      "days": "0-59",
+      "fraud_rate": 0.0559,
+      "history_variants": [
+        {
+          "history_start": 0,
+          "days": "0-59",
+          "rows": 99377,
+          "fraud_rate": 0.0559
+        },
+        {
+          "history_start": 20,
+          "days": "20-33",
+          "rows": 27705,
+          "fraud_rate": 0.0505
+        },
+        {
+          "history_start": 40,
+          "days": "40-53",
+          "rows": 23969,
+          "fraud_rate": 0.0511
+        }
+      ],
+      "skipped_history_starts": [
+        60,
+        80,
+        100
+      ]
+    }
+  ],
+  "history_starts": [
+    0,
+    20,
+    40,
+    60,
+    80,
+    100
+  ],
+  "history_window_days": 14,
+  "weighting": "every world has the same total row weight in the loss; its history variants share it",
+  "selection": {
+    "criterion": "worst held-out world PR-AUC, leaving one world out",
+    "caveat": "the held-out worlds choose the tree count and the candidate, so these numbers are optimistic and are not a test result",
+    "seed": 1234,
+    "max_trees": 1000,
+    "tree_step": 25,
+    "review_rate": 0.005,
+    "fits": 36,
+    "seconds": 630,
+    "candidates": [
+      {
+        "name": "none/v5",
+        "masked_inputs": [],
+        "params": {},
+        "trees": 300,
+        "worst_pr_auc": 0.5518,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.898,
+            "pr_auc": 0.5774,
+            "fraud_caught_at_review_rate": 0.2088,
+            "precision_at_review_rate": 0.8062
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8803,
+            "pr_auc": 0.5596,
+            "fraud_caught_at_review_rate": 0.3528,
+            "precision_at_review_rate": 0.7961
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.894,
+            "pr_auc": 0.5518,
+            "fraud_caught_at_review_rate": 0.2787,
+            "precision_at_review_rate": 0.7672
+          }
+        }
+      },
+      {
+        "name": "none/moderate",
+        "masked_inputs": [],
+        "params": {
+          "num_leaves": 15,
+          "min_child_samples": 400,
+          "colsample_bytree": 0.5
+        },
+        "trees": 200,
+        "worst_pr_auc": 0.5459,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8907,
+            "pr_auc": 0.6088,
+            "fraud_caught_at_review_rate": 0.2907,
+            "precision_at_review_rate": 0.8527
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.878,
+            "pr_auc": 0.5657,
+            "fraud_caught_at_review_rate": 0.3716,
+            "precision_at_review_rate": 0.8045
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8891,
+            "pr_auc": 0.5459,
+            "fraud_caught_at_review_rate": 0.2825,
+            "precision_at_review_rate": 0.7696
+          }
+        }
+      },
+      {
+        "name": "none/strong",
+        "masked_inputs": [],
+        "params": {
+          "num_leaves": 7,
+          "min_child_samples": 1500,
+          "colsample_bytree": 0.5
+        },
+        "trees": 300,
+        "worst_pr_auc": 0.5209,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.877,
+            "pr_auc": 0.6018,
+            "fraud_caught_at_review_rate": 0.3269,
+            "precision_at_review_rate": 0.8669
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8755,
+            "pr_auc": 0.5633,
+            "fraud_caught_at_review_rate": 0.3699,
+            "precision_at_review_rate": 0.8037
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.885,
+            "pr_auc": 0.5209,
+            "fraud_caught_at_review_rate": 0.2474,
+            "precision_at_review_rate": 0.7453
+          }
+        }
+      },
+      {
+        "name": "codes/v5",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country"
+        ],
+        "params": {},
+        "trees": 300,
+        "worst_pr_auc": 0.5512,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8919,
+            "pr_auc": 0.5624,
+            "fraud_caught_at_review_rate": 0.1973,
+            "precision_at_review_rate": 0.7971
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8769,
+            "pr_auc": 0.5551,
+            "fraud_caught_at_review_rate": 0.3499,
+            "precision_at_review_rate": 0.7948
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8955,
+            "pr_auc": 0.5512,
+            "fraud_caught_at_review_rate": 0.2906,
+            "precision_at_review_rate": 0.7746
+          }
+        }
+      },
+      {
+        "name": "codes/moderate",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country"
+        ],
+        "params": {
+          "num_leaves": 15,
+          "min_child_samples": 400,
+          "colsample_bytree": 0.5
+        },
+        "trees": 200,
+        "worst_pr_auc": 0.5387,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8771,
+            "pr_auc": 0.5561,
+            "fraud_caught_at_review_rate": 0.2222,
+            "precision_at_review_rate": 0.8157
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.877,
+            "pr_auc": 0.5556,
+            "fraud_caught_at_review_rate": 0.3541,
+            "precision_at_review_rate": 0.7967
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8938,
+            "pr_auc": 0.5387,
+            "fraud_caught_at_review_rate": 0.2719,
+            "precision_at_review_rate": 0.7627
+          }
+        }
+      },
+      {
+        "name": "codes/strong",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country"
+        ],
+        "params": {
+          "num_leaves": 7,
+          "min_child_samples": 1500,
+          "colsample_bytree": 0.5
+        },
+        "trees": 250,
+        "worst_pr_auc": 0.5263,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8772,
+            "pr_auc": 0.5987,
+            "fraud_caught_at_review_rate": 0.3066,
+            "precision_at_review_rate": 0.8593
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.876,
+            "pr_auc": 0.578,
+            "fraud_caught_at_review_rate": 0.3911,
+            "precision_at_review_rate": 0.8124
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8937,
+            "pr_auc": 0.5263,
+            "fraud_caught_at_review_rate": 0.2428,
+            "precision_at_review_rate": 0.7416
+          }
+        }
+      },
+      {
+        "name": "codes+history_age/v5",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first"
+        ],
+        "params": {},
+        "trees": 400,
+        "worst_pr_auc": 0.5095,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8882,
+            "pr_auc": 0.5098,
+            "fraud_caught_at_review_rate": 0.0988,
+            "precision_at_review_rate": 0.6631
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8781,
+            "pr_auc": 0.5429,
+            "fraud_caught_at_review_rate": 0.3375,
+            "precision_at_review_rate": 0.7889
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8916,
+            "pr_auc": 0.5095,
+            "fraud_caught_at_review_rate": 0.2523,
+            "precision_at_review_rate": 0.7489
+          }
+        }
+      },
+      {
+        "name": "codes+history_age/moderate",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first"
+        ],
+        "params": {
+          "num_leaves": 15,
+          "min_child_samples": 400,
+          "colsample_bytree": 0.5
+        },
+        "trees": 250,
+        "worst_pr_auc": 0.5167,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.8789,
+            "pr_auc": 0.5451,
+            "fraud_caught_at_review_rate": 0.2133,
+            "precision_at_review_rate": 0.8095
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8809,
+            "pr_auc": 0.5619,
+            "fraud_caught_at_review_rate": 0.3551,
+            "precision_at_review_rate": 0.7972
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8907,
+            "pr_auc": 0.5167,
+            "fraud_caught_at_review_rate": 0.2555,
+            "precision_at_review_rate": 0.7513
+          }
+        }
+      },
+      {
+        "name": "codes+history_age/strong",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first"
+        ],
+        "params": {
+          "num_leaves": 7,
+          "min_child_samples": 1500,
+          "colsample_bytree": 0.5
+        },
+        "trees": 250,
+        "worst_pr_auc": 0.5162,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.89,
+            "pr_auc": 0.6137,
+            "fraud_caught_at_review_rate": 0.2943,
+            "precision_at_review_rate": 0.8543
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8711,
+            "pr_auc": 0.5432,
+            "fraud_caught_at_review_rate": 0.3463,
+            "precision_at_review_rate": 0.7931
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8905,
+            "pr_auc": 0.5162,
+            "fraud_caught_at_review_rate": 0.2451,
+            "precision_at_review_rate": 0.7434
+          }
+        }
+      },
+      {
+        "name": "codes+history_age+amount_levels/v5",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first",
+          "amount",
+          "player_max_amount",
+          "player_avg_amount"
+        ],
+        "params": {},
+        "trees": 275,
+        "worst_pr_auc": 0.5291,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.9365,
+            "pr_auc": 0.6827,
+            "fraud_caught_at_review_rate": 0.3596,
+            "precision_at_review_rate": 0.8775
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8709,
+            "pr_auc": 0.5291,
+            "fraud_caught_at_review_rate": 0.3065,
+            "precision_at_review_rate": 0.7723
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8951,
+            "pr_auc": 0.5304,
+            "fraud_caught_at_review_rate": 0.2681,
+            "precision_at_review_rate": 0.7602
+          }
+        }
+      },
+      {
+        "name": "codes+history_age+amount_levels/moderate",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first",
+          "amount",
+          "player_max_amount",
+          "player_avg_amount"
+        ],
+        "params": {
+          "num_leaves": 15,
+          "min_child_samples": 400,
+          "colsample_bytree": 0.5
+        },
+        "trees": 275,
+        "worst_pr_auc": 0.5227,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.9397,
+            "pr_auc": 0.727,
+            "fraud_caught_at_review_rate": 0.4194,
+            "precision_at_review_rate": 0.8931
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8775,
+            "pr_auc": 0.5469,
+            "fraud_caught_at_review_rate": 0.3293,
+            "precision_at_review_rate": 0.7847
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8947,
+            "pr_auc": 0.5227,
+            "fraud_caught_at_review_rate": 0.2586,
+            "precision_at_review_rate": 0.7535
+          }
+        }
+      },
+      {
+        "name": "codes+history_age+amount_levels/strong",
+        "masked_inputs": [
+          "card_issuer_code",
+          "card_category",
+          "billing_region_code",
+          "billing_country",
+          "card_country",
+          "secs_since_first",
+          "amount",
+          "player_max_amount",
+          "player_avg_amount"
+        ],
+        "params": {
+          "num_leaves": 7,
+          "min_child_samples": 1500,
+          "colsample_bytree": 0.5
+        },
+        "trees": 275,
+        "worst_pr_auc": 0.5149,
+        "held_out": {
+          "world1": {
+            "purchases": 600000,
+            "fraud_rate": 0.0906,
+            "roc_auc": 0.9225,
+            "pr_auc": 0.7186,
+            "fraud_caught_at_review_rate": 0.4366,
+            "precision_at_review_rate": 0.8969
+          },
+          "worldB": {
+            "purchases": 100000,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.8778,
+            "pr_auc": 0.5591,
+            "fraud_caught_at_review_rate": 0.3497,
+            "precision_at_review_rate": 0.7947
+          },
+          "worldC": {
+            "purchases": 99377,
+            "fraud_rate": 0.0559,
+            "roc_auc": 0.8894,
+            "pr_auc": 0.5149,
+            "fraud_caught_at_review_rate": 0.2336,
+            "precision_at_review_rate": 0.7342
+          }
+        }
+      }
+    ],
+    "chosen": {
+      "name": "none/v5",
+      "masked_inputs": [],
+      "params": {},
+      "trees": 300,
+      "worst_pr_auc": 0.5518,
+      "held_out": {
+        "world1": {
+          "purchases": 600000,
+          "fraud_rate": 0.0906,
+          "roc_auc": 0.898,
+          "pr_auc": 0.5774,
+          "fraud_caught_at_review_rate": 0.2088,
+          "precision_at_review_rate": 0.8062
+        },
+        "worldB": {
+          "purchases": 100000,
+          "fraud_rate": 0.0525,
+          "roc_auc": 0.8803,
+          "pr_auc": 0.5596,
+          "fraud_caught_at_review_rate": 0.3528,
+          "precision_at_review_rate": 0.7961
+        },
+        "worldC": {
+          "purchases": 99377,
+          "fraud_rate": 0.0559,
+          "roc_auc": 0.894,
+          "pr_auc": 0.5518,
+          "fraud_caught_at_review_rate": 0.2787,
+          "precision_at_review_rate": 0.7672
+        }
+      }
+    }
+  },
+  "policy": {
+    "flag_at": 0.694982,
+    "clear_below": 0.004025,
+    "flag_by": "review_rate",
+    "review_rate": 0.005,
+    "review_cost": null,
+    "target_precision": null,
+    "max_missed_fraud": 0.02,
+    "chosen_on": "pooled out-of-world scores of none/v5 at 300 trees, one seed: each world scored by the model trained without it; the same number of rows is drawn from every world",
+    "out_of_world_effect": {
+      "flagged_fraud_money_caught": 0.0186,
+      "fraud_money_missed_by_clearing": 0.0011,
+      "flagged_share": 0.0068,
+      "flagged_precision": 0.7252,
+      "flagged_fraud_caught": 0.0604,
+      "cleared_share": 0.1707,
+      "cleared_fraud_rate": 0.0038,
+      "cleared_legit_share": 0.1852,
+      "fraud_missed_by_clearing": 0.0079
+    },
+    "out_of_world_effect_per_world": {
+      "world1": {
+        "flagged_fraud_money_caught": 0.0054,
+        "fraud_money_missed_by_clearing": 0.0005,
+        "flagged_share": 0.0007,
+        "flagged_precision": 0.7277,
+        "flagged_fraud_caught": 0.0054,
+        "cleared_share": 0.1232,
+        "cleared_fraud_rate": 0.0018,
+        "cleared_legit_share": 0.1352,
+        "fraud_missed_by_clearing": 0.0025
+      },
+      "worldB": {
+        "flagged_fraud_money_caught": 0.4836,
+        "fraud_money_missed_by_clearing": 0.0027,
+        "flagged_share": 0.0324,
+        "flagged_precision": 0.6892,
+        "flagged_fraud_caught": 0.426,
+        "cleared_share": 0.1844,
+        "cleared_fraud_rate": 0.003,
+        "cleared_legit_share": 0.1941,
+        "fraud_missed_by_clearing": 0.0105
+      },
+      "worldC": {
+        "flagged_fraud_money_caught": 0.3008,
+        "fraud_money_missed_by_clearing": 0.044,
+        "flagged_share": 0.0179,
+        "flagged_precision": 0.7905,
+        "flagged_fraud_caught": 0.2527,
+        "cleared_share": 0.4439,
+        "cleared_fraud_rate": 0.0073,
+        "cleared_legit_share": 0.4668,
+        "fraud_missed_by_clearing": 0.0578
+      }
+    }
+  },
+  "lightgbm": {
+    "models": 5,
+    "trees_per_model": 300,
+    "masked_inputs": [],
+    "params": {
+      "n_estimators": 300
+    },
+    "feature_importance_gain": {
+      "ip_country_differs_from_card": 1145428.9,
+      "secs_since_first": 612593.9,
+      "amount": 514073.8,
+      "player_distinct_cards": 489711.4,
+      "secs_since_last": 362739.0,
+      "account_age_days": 348887.8,
+      "billing_distance": 263365.4,
+      "device_distinct_players": 260963.8,
+      "os_share": 178744.1,
+      "card_issuer_code": 165237.9,
+      "card_distinct_players": 148043.1,
+      "player_uses_1h": 140532.6,
+      "device_id_is_new_for_player": 129306.6,
+      "player_txn_count": 113282.6,
+      "player_avg_amount": 106573.0,
+      "card_category": 98149.3,
+      "player_max_amount": 97391.7,
+      "has_recipient_email": 90074.5,
+      "has_client_info": 71652.5,
+      "screen_area": 70697.6,
+      "card1_distinct_emails": 67903.1,
+      "amount_to_avg": 67732.2,
+      "card_uses_24h": 64484.7,
+      "device_is_new_for_player": 61732.6,
+      "card_uses_1h": 52091.1,
+      "os_family": 48729.9,
+      "card_type": 45102.5,
+      "billing_country": 40733.3,
+      "card1_distinct_players": 40053.0,
+      "email_domain_share": 34395.8,
+      "card1_distinct_addresses": 32817.3,
+      "player_uses_24h": 32808.4,
+      "screen_share": 31166.4,
+      "billing_region_is_new_for_card": 29758.8,
+      "product_code": 29340.0,
+      "player_distinct_devices": 27505.8,
+      "device_players_share": 27147.4,
+      "email_players_share": 26029.4,
+      "browser_share": 18996.8,
+      "device_info_share": 16930.8,
+      "player_distinct_browsers": 15000.8,
+      "cents": 11368.8,
+      "billing_region_code": 8873.0,
+      "browser_family": 8335.1,
+      "player_distinct_emails": 5038.5,
+      "card_network": 4719.6,
+      "device_type": 4247.2,
+      "player_same_amount_count": 2619.2,
+      "recipient_email_differs": 1216.7,
+      "os_is_new_for_player": 832.7,
+      "email_is_new_for_player": 667.9,
+      "has_device_info": 216.5,
+      "browser_is_new_for_player": 28.6,
+      "card_country": 0.0
+    }
+  },
+  "development": [
+    {
+      "file": "dump.jsonl",
+      "purchases": 19873,
+      "days": "0-14",
+      "fraud_rate": 0.0664,
+      "models": {
+        "lgbm-game-v6": {
+          "flag_at": 0.694982,
+          "all_days": {
+            "purchases": 19873,
+            "fraud_rate": 0.0664,
+            "roc_auc": 0.8988,
+            "pr_auc": 0.67,
+            "review_rate": 0.0214,
+            "precision": 0.9435,
+            "fraud_caught": 0.3038,
+            "legit_flagged": 0.0013,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 108,
+                "roc_auc": 0.9695,
+                "pr_auc": 0.3494,
+                "fraud_caught": 0.287
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 156,
+                "roc_auc": 0.987,
+                "pr_auc": 0.5395,
+                "fraud_caught": 0.3462
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 156,
+                "roc_auc": 0.9877,
+                "pr_auc": 0.7336,
+                "fraud_caught": 0.5705
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 198,
+                "roc_auc": 0.5282,
+                "pr_auc": 0.0116,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 145,
+                "roc_auc": 0.9885,
+                "pr_auc": 0.6544,
+                "fraud_caught": 0.4966
+              },
+              {
+                "scheme": "holiday_gift_blend",
+                "purchases": 60,
+                "roc_auc": 0.962,
+                "pr_auc": 0.2358,
+                "fraud_caught": 0.2167
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 60,
+                "roc_auc": 0.9477,
+                "pr_auc": 0.077,
+                "fraud_caught": 0.0667
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 170,
+                "roc_auc": 0.8633,
+                "pr_auc": 0.0398,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 118,
+                "roc_auc": 0.9895,
+                "pr_auc": 0.6281,
+                "fraud_caught": 0.4915
+              },
+              {
+                "scheme": "synthetic_bustout",
+                "purchases": 83,
+                "roc_auc": 0.9842,
+                "pr_auc": 0.3104,
+                "fraud_caught": 0.241
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 66,
+                "roc_auc": 0.9991,
+                "pr_auc": 0.9276,
+                "fraud_caught": 0.9091
+              }
+            ]
+          },
+          "first_7_days": {
+            "purchases": 7847,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.9011,
+            "pr_auc": 0.6361,
+            "review_rate": 0.0199,
+            "precision": 0.9167,
+            "fraud_caught": 0.3471,
+            "legit_flagged": 0.0017,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 42,
+                "roc_auc": 0.9712,
+                "pr_auc": 0.2583,
+                "fraud_caught": 0.2381
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 67,
+                "roc_auc": 0.9764,
+                "pr_auc": 0.4797,
+                "fraud_caught": 0.3134
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 23,
+                "roc_auc": 0.9902,
+                "pr_auc": 0.6823,
+                "fraud_caught": 0.6522
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 37,
+                "roc_auc": 0.4347,
+                "pr_auc": 0.0042,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 69,
+                "roc_auc": 0.9889,
+                "pr_auc": 0.711,
+                "fraud_caught": 0.5652
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 23,
+                "roc_auc": 0.9103,
+                "pr_auc": 0.0506,
+                "fraud_caught": 0.1304
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 68,
+                "roc_auc": 0.8016,
+                "pr_auc": 0.024,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 51,
+                "roc_auc": 0.991,
+                "pr_auc": 0.6281,
+                "fraud_caught": 0.5294
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 32,
+                "roc_auc": 0.999,
+                "pr_auc": 0.9137,
+                "fraud_caught": 0.875
+              }
+            ]
+          },
+          "later_days": {
+            "purchases": 12026,
+            "fraud_rate": 0.0755,
+            "roc_auc": 0.9006,
+            "pr_auc": 0.696,
+            "review_rate": 0.0224,
+            "precision": 0.9591,
+            "fraud_caught": 0.2841,
+            "legit_flagged": 0.001,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 66,
+                "roc_auc": 0.9691,
+                "pr_auc": 0.4258,
+                "fraud_caught": 0.3182
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 89,
+                "roc_auc": 0.9936,
+                "pr_auc": 0.604,
+                "fraud_caught": 0.3708
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 133,
+                "roc_auc": 0.9884,
+                "pr_auc": 0.7856,
+                "fraud_caught": 0.5564
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 161,
+                "roc_auc": 0.5666,
+                "pr_auc": 0.0181,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 76,
+                "roc_auc": 0.9882,
+                "pr_auc": 0.6032,
+                "fraud_caught": 0.4342
+              },
+              {
+                "scheme": "holiday_gift_blend",
+                "purchases": 60,
+                "roc_auc": 0.9661,
+                "pr_auc": 0.3029,
+                "fraud_caught": 0.2167
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 37,
+                "roc_auc": 0.9679,
+                "pr_auc": 0.1041,
+                "fraud_caught": 0.027
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 102,
+                "roc_auc": 0.8997,
+                "pr_auc": 0.0598,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 67,
+                "roc_auc": 0.9888,
+                "pr_auc": 0.638,
+                "fraud_caught": 0.4627
+              },
+              {
+                "scheme": "synthetic_bustout",
+                "purchases": 83,
+                "roc_auc": 0.9862,
+                "pr_auc": 0.4363,
+                "fraud_caught": 0.241
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 34,
+                "roc_auc": 0.9992,
+                "pr_auc": 0.9436,
+                "fraud_caught": 0.9412
+              }
+            ]
+          }
+        },
+        "lgbm-game-v5": {
+          "flag_at": 0.538138,
+          "all_days": {
+            "purchases": 19873,
+            "fraud_rate": 0.0664,
+            "roc_auc": 0.5895,
+            "pr_auc": 0.1692,
+            "review_rate": 0.0323,
+            "precision": 0.2305,
+            "fraud_caught": 0.1121,
+            "legit_flagged": 0.0266,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 108,
+                "roc_auc": 0.6305,
+                "pr_auc": 0.0079,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 156,
+                "roc_auc": 0.3503,
+                "pr_auc": 0.0058,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 156,
+                "roc_auc": 0.9849,
+                "pr_auc": 0.7882,
+                "fraud_caught": 0.8782
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 198,
+                "roc_auc": 0.3535,
+                "pr_auc": 0.0074,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 145,
+                "roc_auc": 0.4752,
+                "pr_auc": 0.0068,
+                "fraud_caught": 0.0069
+              },
+              {
+                "scheme": "holiday_gift_blend",
+                "purchases": 60,
+                "roc_auc": 0.5924,
+                "pr_auc": 0.0038,
+                "fraud_caught": 0.0167
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 60,
+                "roc_auc": 0.6462,
+                "pr_auc": 0.0045,
+                "fraud_caught": 0.0333
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 170,
+                "roc_auc": 0.5719,
+                "pr_auc": 0.0099,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 118,
+                "roc_auc": 0.7538,
+                "pr_auc": 0.0129,
+                "fraud_caught": 0.0339
+              },
+              {
+                "scheme": "synthetic_bustout",
+                "purchases": 83,
+                "roc_auc": 0.6021,
+                "pr_auc": 0.0052,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 66,
+                "roc_auc": 0.794,
+                "pr_auc": 0.0092,
+                "fraud_caught": 0.0455
+              }
+            ]
+          },
+          "first_7_days": {
+            "purchases": 7847,
+            "fraud_rate": 0.0525,
+            "roc_auc": 0.4866,
+            "pr_auc": 0.0799,
+            "review_rate": 0.0466,
+            "precision": 0.0546,
+            "fraud_caught": 0.0485,
+            "legit_flagged": 0.0465,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 42,
+                "roc_auc": 0.5299,
+                "pr_auc": 0.0066,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 67,
+                "roc_auc": 0.3545,
+                "pr_auc": 0.0064,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 23,
+                "roc_auc": 0.9473,
+                "pr_auc": 0.5761,
+                "fraud_caught": 0.7391
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 37,
+                "roc_auc": 0.2659,
+                "pr_auc": 0.0032,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 69,
+                "roc_auc": 0.4327,
+                "pr_auc": 0.0075,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 23,
+                "roc_auc": 0.5483,
+                "pr_auc": 0.0035,
+                "fraud_caught": 0.0435
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 68,
+                "roc_auc": 0.3761,
+                "pr_auc": 0.007,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 51,
+                "roc_auc": 0.6306,
+                "pr_auc": 0.0094,
+                "fraud_caught": 0.0392
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 32,
+                "roc_auc": 0.7072,
+                "pr_auc": 0.0082,
+                "fraud_caught": 0.0
+              }
+            ]
+          },
+          "later_days": {
+            "purchases": 12026,
+            "fraud_rate": 0.0755,
+            "roc_auc": 0.6519,
+            "pr_auc": 0.2356,
+            "review_rate": 0.023,
+            "precision": 0.4638,
+            "fraud_caught": 0.141,
+            "legit_flagged": 0.0133,
+            "schemes": [
+              {
+                "scheme": "account_takeover",
+                "purchases": 66,
+                "roc_auc": 0.7142,
+                "pr_auc": 0.011,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "bot_farm_emulators",
+                "purchases": 89,
+                "roc_auc": 0.3048,
+                "pr_auc": 0.0052,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "card_testing_burst",
+                "purchases": 133,
+                "roc_auc": 0.994,
+                "pr_auc": 0.8648,
+                "fraud_caught": 0.9023
+              },
+              {
+                "scheme": "friendly_fraud",
+                "purchases": 161,
+                "roc_auc": 0.4139,
+                "pr_auc": 0.011,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "gift_reseller_ring",
+                "purchases": 76,
+                "roc_auc": 0.4552,
+                "pr_auc": 0.006,
+                "fraud_caught": 0.0132
+              },
+              {
+                "scheme": "holiday_gift_blend",
+                "purchases": 60,
+                "roc_auc": 0.6762,
+                "pr_auc": 0.009,
+                "fraud_caught": 0.0167
+              },
+              {
+                "scheme": "laundering_mule_accounts",
+                "purchases": 37,
+                "roc_auc": 0.7273,
+                "pr_auc": 0.0067,
+                "fraud_caught": 0.027
+              },
+              {
+                "scheme": "sleeper_low_and_slow",
+                "purchases": 102,
+                "roc_auc": 0.7187,
+                "pr_auc": 0.0149,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "stolen_card_fresh_account",
+                "purchases": 67,
+                "roc_auc": 0.8386,
+                "pr_auc": 0.0205,
+                "fraud_caught": 0.0299
+              },
+              {
+                "scheme": "synthetic_bustout",
+                "purchases": 83,
+                "roc_auc": 0.6989,
+                "pr_auc": 0.0119,
+                "fraud_caught": 0.0
+              },
+              {
+                "scheme": "triangulation_grey_shop",
+                "purchases": 34,
+                "roc_auc": 0.8595,
+                "pr_auc": 0.0126,
+                "fraud_caught": 0.0882
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "export": {
+    "version": "lgbm-game-v6",
+    "trees": 1500,
+    "golden_rows": 2000,
+    "tree_reader_max_difference": 3.3306690738754696e-16
+  }
+}
