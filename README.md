@@ -43,8 +43,10 @@ To develop the backend on the host, run `make migrate` to prepare the database, 
 | `make up` | Builds and starts the Docker stack, including migrations and the console |
 | `make down` | Stops the containers and keeps the database data |
 | `make run` | Starts PostgreSQL and Redis in Docker and runs the backend directly with Go |
-| `make test` | Starts PostgreSQL in Docker, applies migrations, and runs the tests |
+| `make test` | Applies migrations, starts Redis in Docker, and runs the backend tests |
+| `make test-ml` | Runs the ML tests with `ml/.venv` (see [ML](ml/README.md)) |
 | `make lint` | Checks formatting with `gofmt` and runs `go vet` |
+| `make lint-frontend` | Runs the frontend lint, type check, and unit tests |
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows the API spec in Swagger UI at http://localhost:8090 |
 | `make simulate` | Sends seeded demo purchases to the running backend (see below) |
