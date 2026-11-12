@@ -32,6 +32,8 @@ tags:
     description: Score a purchase.
   - name: Account events
     description: Record the logins and password resets that the game's account system reports.
+  - name: Chargebacks
+    description: Receive chargebacks from the payment processor.
   - name: Stats
     description: Decision statistics for the dashboard.
   - name: Blocklist
@@ -593,6 +595,139 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /chargebacks:
+    post:
+      tags: [Chargebacks]
+      operationId: recordChargeback
+      summary: Record a chargeback reported by the processor
+      description: |
+        Webhook for the payment processor. A processor reports a chargeback
+        days or weeks after the purchase, when the cardholder's bank receives
+        the dispute. The service records it as a training label for the fraud
+        model. Chargebacks never change a saved decision and are never read by
+        scoring, model inputs, rules, or reviews.
+
+        In this project the processor is mocked: `backend/cmd/mock-bank`
+        sends chargebacks for simulator runs.
+
+        The webhook is authenticated by its signature instead of an API key.
+        The sender computes HMAC-SHA256 with the shared
+        `CHARGEBACK_WEBHOOK_SECRET` over `<timestamp>.<raw body>`, where
+        `<timestamp>` is the exact `X-Signature-Timestamp` value, and sends
+        `X-Signature: sha256=<lowercase hex>`. The service compares the
+        signature in constant time and rejects a timestamp more than 5 minutes
+        from its clock, so a captured delivery cannot be replayed later. While
+        `CHARGEBACK_WEBHOOK_SECRET` is empty, the endpoint returns 503.
+
+        `chargeback_id` is the idempotency key. A repeated delivery with the
+        same content returns the recorded chargeback with 200. The same ID with
+        any different field returns 409. Times are compared at microsecond
+        precision.
+
+        Reason codes and how training labels use them:
+
+        | `reason_code` | Meaning | Counts as fraud |
+        |---|---|---|
+        | `fraud_card_not_present` | The cardholder did not authorise an online purchase with their card details | Yes |
+        | `fraud_card_absent_other` | Other card-absent fraud, for example a taken-over account with a saved card | Yes |
+        | `not_recognised` | The cardholder does not recognise the purchase; often a relative or a forgotten purchase | No |
+        | `product_not_received` | The cardholder paid but says the item never arrived | No |
+        | `duplicate` | The cardholder says they were charged twice | No |
+        | `other` | Any other dispute | No |
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: '`sha256=` followed by the lowercase hex HMAC-SHA256 of `<timestamp>.<raw body>`.'
+          schema:
+            type: string
+            pattern: '^sha256=[0-9a-f]{64}$'
+          example: sha256=49f24e537407743fa4a0242bb63b94b9a47ee99cbbe071ccd8a22550ae411686
+        - name: X-Signature-Timestamp
+          in: header
+          required: true
+          description: Unix time in seconds when the delivery was signed, in plain decimal digits without a sign. Must be within 5 minutes of the service clock.
+          schema:
+            type: string
+            pattern: '^[0-9]+$'
+          example: "1762941600"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargebackRequest"
+      responses:
+        "202":
+          description: The chargeback was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chargeback"
+        "200":
+          description: The same chargeback was already recorded. The body is the recorded chargeback.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chargeback"
+        "400":
+          description: >-
+            The body is not one valid JSON object, or a field is invalid. A
+            chargeback must not exceed the purchase amount or be received
+            before the purchase event time.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: invalid request
+                fields:
+                  received_at: must not be before the purchase event time
+        "401":
+          description: The signature or timestamp header is missing, malformed, wrong, or more than 5 minutes from the service clock.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing, invalid or expired webhook signature
+        "404":
+          description: No purchase was scored with this transaction ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: no purchase was scored with this transaction ID
+                fields:
+                  transaction_id: is unknown
+        "409":
+          description: A chargeback with this ID was recorded with different content.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: a chargeback with this ID was recorded with different content
+                fields:
+                  chargeback_id: is already recorded
+        "413":
+          description: The request body is larger than 65536 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >-
+            `CHARGEBACK_WEBHOOK_SECRET` is not configured, or the database is
+            unavailable and nothing was saved (with `Retry-After`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: the chargeback webhook is not configured
 
   /stats/quality:
     get:
@@ -2817,6 +2952,57 @@ components:
         ip_country:
           type: string
           nullable: true
+
+    ChargebackRequest:
+      type: object
+      additionalProperties: false
+      required: [chargeback_id, transaction_id, reason_code, amount_minor, received_at]
+      properties:
+        chargeback_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The processor's ID for the chargeback. Repeated deliveries use the same ID. Must not contain control characters.
+          example: cb-4f1c2a9e0b7d3c51
+        transaction_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The transaction ID of the scored purchase. Must not contain control characters.
+          example: txn-10042
+        reason_code:
+          type: string
+          enum: [fraud_card_not_present, fraud_card_absent_other, not_recognised, product_not_received, duplicate, other]
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Disputed amount in minor units, at most the purchase amount.
+          example: 1999
+        received_at:
+          type: string
+          format: date-time
+          description: >-
+            When the cardholder's bank received the dispute, RFC 3339. Not
+            before the purchase event time and not more than 5 minutes in the
+            future. Converted to UTC.
+          example: "2026-12-03T09:15:00Z"
+    Chargeback:
+      type: object
+      required: [chargeback_id, transaction_id, reason_code, amount_minor, received_at, recorded_at]
+      properties:
+        chargeback_id: {type: string, example: cb-4f1c2a9e0b7d3c51}
+        transaction_id: {type: string, example: txn-10042}
+        reason_code:
+          type: string
+          enum: [fraud_card_not_present, fraud_card_absent_other, not_recognised, product_not_received, duplicate, other]
+        amount_minor: {type: integer, format: int64, example: 1999}
+        received_at: {type: string, format: date-time, example: "2026-12-03T09:15:00Z"}
+        recorded_at:
+          type: string
+          format: date-time
+          description: When the service first recorded the chargeback, in UTC.
+          example: "2026-12-03T09:15:02Z"
 
     ErrorResponse:
       type: object

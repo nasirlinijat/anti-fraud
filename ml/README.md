@@ -331,7 +331,7 @@ The service saves the model inputs with every decision. Training can use them in
 
    One row per decision, in event time order: `transaction_id`, `event_time`, `player_id`, `model_score`, then the features. Decisions saved for another feature list (an older model) are skipped and counted.
 
-2. Prepare a labels file kept outside the service: `transaction_id,is_fraud`. For the IEEE-CIS replay, `replay.py` writes `labels.csv` next to its report. For live traffic it comes from chargebacks and analyst decisions; analyst decisions are only ever labels, never model inputs, and the scoring code never reads this file.
+2. Prepare a labels file kept outside the service: `transaction_id,is_fraud`. For the IEEE-CIS replay, `replay.py` writes `labels.csv` next to its report. For live traffic it comes from chargebacks: `export-inputs -chargeback-labels` writes it, see [Retrain from chargebacks](#retrain-from-chargebacks-mocked). Labels are never model inputs, and the scoring code never reads this file.
 
 3. Train (from `ml`):
 
@@ -342,6 +342,82 @@ The service saves the model inputs with every decision. Training can use them in
    `day` counts whole days since `--day-zero` (the replay's start by default). Purchases without a label are left out.
 
 Check (2026-11-10, model v4): 30,000 purchases replayed through the service and exported matched the Python features exactly on all 48 columns, and training from the export produced a model file identical to training from the Python features.
+
+## Retrain from chargebacks (mocked)
+
+In production the fraud labels are chargebacks: the processor reports them
+through the signed `POST /chargebacks` webhook weeks after the purchase. **In
+this project the chargebacks are mocked:** `backend/cmd/mock-bank` disputes a
+share of the simulator's charged purchases with illustrative rates and delays,
+described in the main README under Chargebacks. The private evaluation labels
+(`purchase_labels`) stay the exact answers for measuring decision quality;
+chargebacks are the noisier labels a real business would train on, with missed
+fraud and friendly fraud.
+
+1. Generate traffic far enough in the past for chargebacks to arrive, then let
+   the mock bank send the ones received by now (from `backend`):
+
+   ```bash
+   go run ./cmd/simulator -count 3000 -gap 1h -suspicious 0.3 -rate 0 -start 2026-06-01T00:00:00Z -run cb-demo
+   go run ./cmd/mock-bank -run cb-demo
+   ```
+
+2. Export the model inputs and the chargeback labels together:
+
+   ```bash
+   go run ./cmd/export-inputs -database "$DATABASE_URL" -out ../ml/data/cb/model_inputs.csv -chargeback-labels ../ml/data/cb/labels.csv
+   ```
+
+   Only purchases that were charged to the card get a label: allowed ones and
+   reviewed ones an analyst approved. Blocked, rejected and undecided
+   purchases can never be charged back, so they are left out; the model
+   therefore learns only from traffic the current system let through.
+
+   Only purchases older than the maturity window are labelled. Such a
+   purchase is `1` when it has a `fraud_card_not_present` or
+   `fraud_card_absent_other` chargeback received by the as-of time, and `0`
+   otherwise, also when it has a non-fraud chargeback. Every purchase inside
+   the window is left out, with or without a chargeback: chargebacks arrive
+   late, so a recent purchase without one is not yet known to be good, and
+   keeping only the recent purchases that already have a fraud chargeback
+   would make the recent days look almost all fraud. The window is 60 days by
+   default (`-maturity-days`), because most disputes arrive within two months
+   and networks allow about 120 days. `-maturity-days 0` labels every
+   purchase up to the as-of time, which is only useful for tests.
+
+   `-as-of` (default now, never in the future) ignores chargebacks received
+   later. The labels still depend on the chargebacks and review decisions
+   recorded so far, so the same command run later can give different labels.
+
+   The export labels every charged purchase in the database. `-since` and
+   `-until` (RFC 3339, converted to UTC) keep only purchases with an event
+   time at or after `-since` and before `-until`. The database must contain
+   only traffic that the bank has settled for the chosen range: a purchase
+   whose disputes the mock bank, or a real processor, never reports is
+   labelled `0` once it is mature.
+
+3. Train from `ml`, splitting by day since the run's start. Write the model to
+   `output/` instead of `backend/models/` until it has been checked:
+
+   ```bash
+   .venv/bin/python train.py --inputs data/cb/model_inputs.csv --labels data/cb/labels.csv --day-zero 2026-06-01T00:00:00Z --train-days 0-55 --validation-days 60-72 --test-days 76-88 --version lgbm-cb-v1 --models-dir output/cb-models
+   ```
+
+   Leave a gap of a few days between the splits, as the IEEE-CIS split does,
+   for the delay before labels arrive.
+
+4. Run the new model in shadow mode: copy the model file and its report to
+   `backend/models/`, start the backend with `MODEL_PATH` pointing to it, and
+   publish a ruleset with `model.mode` set to `shadow`. Every decision then
+   saves the new model's score while the outcome stays with the rules.
+
+5. After enough new chargebacks have arrived, export again with a later
+   `-as-of`, compare the shadow scores with the labels, and publish a ruleset
+   with `model.mode` set to `assist` only if the model clears reviews and
+   flags fraud as expected. The model still never blocks a purchase.
+
+Exported files are derived from the service's data and stay in the ignored
+`data/` and `output/` folders.
 
 ## Compare feature groups
 

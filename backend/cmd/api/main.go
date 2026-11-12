@@ -18,6 +18,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/accountevent"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/chargeback"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
@@ -67,6 +68,8 @@ func main() {
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), cfg.ModelPath != ""), access)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStorage)), access)
+	chargebacks := chargeback.NewService(storage.NewChargebackStore(pool))
+	transport.RegisterChargebackRoutes(mux, transport.NewChargebackHandler(chargebacks, cfg.ChargebackWebhookSecret))
 	evaluation, err := openEvaluationPool(cfg)
 	if err != nil {
 		fatal("open the evaluation database", err)

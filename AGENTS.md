@@ -55,13 +55,16 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Demo traffic | A seeded simulator that sends purchases in the same API format |
 | Caching | Redis mirror of the blocklist only, refreshed after each committed change, with PostgreSQL fallback. All other queries hit PostgreSQL |
 | Console updates | Polling every few seconds, no WebSockets |
-| API authentication | Service key for scoring. Console endpoints accept a signed-in session: reviewers can use the review endpoints, admins every console endpoint. Until the console signs in, they also accept the service key for configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
+| API authentication | Service key for scoring. Console endpoints accept a signed-in session: reviewers can use the review endpoints, admins every console endpoint. Until the console signs in, they also accept the service key for configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes. The processor's chargeback webhook is authenticated by an HMAC-SHA256 signature with a shared secret and a timestamp, not by a key |
 
 ### 3.2 Backend Layout
 
 ```
 backend/
-├── cmd/api/main.go     Wiring only: stores → services → handlers
+├── cmd/
+│   ├── api/main.go     Wiring only: stores → services → handlers
+│   ├── export-inputs/  Training export: saved model inputs and chargeback labels
+│   └── mock-bank/      Mock card networks: sends chargebacks for a simulator run
 └── internal/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/
@@ -73,11 +76,14 @@ backend/
     │   ├── ruleset/    Ruleset validation and publishing with the model report thresholds
     │   ├── blocklist/  Blocklist entry validation
     │   ├── stats/      Dashboard periods
+    │   ├── chargeback/ Chargeback webhook: validation, one record per chargeback ID, never read by scoring
     │   └── simulation/ Simulation runs: idempotent starts, one worker, checkpoints, recovery
-    ├── storage/        All SQL (purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts, account events) and the Redis blocklist mirror
+    ├── storage/        All SQL (purchases, decisions, reviews, rulesets, blocklist, stats, simulation runs, accounts, account events, chargebacks) and the Redis blocklist mirror
     ├── models/         Domain types shared by the layers
     ├── scoring/        Pure rule evaluation, no SQL or HTTP
     ├── labels/         Private fraud labels, kept apart from everything scoring uses
+    ├── mockbank/       Mock card networks: plans chargebacks for simulator runs and posts them to the signed webhook
+    ├── trainingdata/   Training export of saved model inputs and chargeback labels
     ├── simulator/      Demo traffic generator
     ├── lgbm/           Model loader and prediction
     ├── features/       Model inputs from the request and purchase history
@@ -87,7 +93,7 @@ backend/
 
 Each feature registers its own routes, so `main.go` contains only wiring.
 
-Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured.
+Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured. Chargebacks are labels too: only the webhook store (`storage/chargeback_store.go`), the training export and the mock bank handle them, and `services/chargeback/boundary_test.go` fails when any other backend code mentions them.
 
 ### 3.3 Model Data Pipeline
 
@@ -142,7 +148,7 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
 | `make simulate` | Sends seeded demo purchases to the running backend |
 
-The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REDIS_URL` is optional: when empty, the blocklist cache is disabled and lookups query PostgreSQL directly. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503.
+The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REDIS_URL` is optional: when empty, the blocklist cache is disabled and lookups query PostgreSQL directly. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503. `CHARGEBACK_WEBHOOK_SECRET` is optional: the shared secret, at least 32 bytes and different from `API_KEY` and every analyst and operator key, that signs `POST /chargebacks`. While it is empty, that endpoint returns 503.
 
 | Endpoint | Response |
 |---|---|
@@ -150,6 +156,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /ready` | 200 when the database is reachable, 503 when it is not |
 | `POST /score` | Scores a purchase and returns its saved decision. Requires the `X-API-Key` header. The optional `cvv_result`, `avs_result`, and `three_ds_result` fields carry the payment gateway's verification results; they are rule inputs only, never model inputs. A matching retry returns the saved decision with 200. Returns 401 for a missing or wrong key, 400 for an invalid request, and 409 for a saved transaction ID with different purchase fields |
 | `POST /account-events` | Records a login or password reset of a player, with the event time and optional device ID and two-letter IP country. IDs are at most 256 bytes without control characters. The account takeover rules read only events before the purchase. Requires the `X-API-Key` header and has the `/score` time limit. Returns 201 for a new event, 200 for a matching retry, 400 naming the invalid field, 401 for a missing or wrong key, 409 for a saved event ID with different fields, and 503 when it times out or the database is unavailable |
+| `POST /chargebacks` | Records a chargeback reported by the payment processor (mocked by `cmd/mock-bank`) as a training label. Authenticated by `X-Signature: sha256=<hex>`, an HMAC-SHA256 of `<X-Signature-Timestamp>.<raw body>` with `CHARGEBACK_WEBHOOK_SECRET`, and a timestamp within 5 minutes. Returns 202 for a new chargeback, 200 with the recorded one for a repeat of the same `chargeback_id`, 400 for an invalid request, 401 for a missing, wrong, or stale signature, 404 for an unknown transaction, 409 for the same ID with different content, and 503 while no secret is configured. Chargebacks are never read by scoring, model inputs, rules, or reviews |
 | `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
 | `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
 | `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
