@@ -1,0 +1,110 @@
+/* ConsoleTheme sets the color, type and spacing variables from the XUI theme.
+   The variables here are derived from them, so they follow light and dark mode. */
+:root {
+  --brand: #31cae8;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --control-height: 44px;
+  --accent-hover: color-mix(in srgb, var(--accent) 80%, #000);
+  --surface-hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.08);
+  --content-width: 1440px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--type-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); }
+h2 { font-size: 1.125rem; }
+h3 { font-size: 1rem; }
+
+p {
+  margin: 0 0 var(--space-md);
+}
+
+a {
+  color: var(--text);
+  text-underline-offset: 0.2em;
+}
+
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+strong,
+b {
+  font-weight: 600;
+}
+
+:is(a, button, input, select, textarea, summary, [tabindex='0']):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.muted { color: var(--muted); }
+.small { font-size: var(--type-note); line-height: 1.5; }
+.num { text-align: end; font-variant-numeric: tabular-nums; }
+
+.eyebrow {
+  margin: 0 0 var(--space-xs);
+  color: var(--muted);
+  font-size: var(--type-note);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+time { white-space: nowrap; }
+
+time[title] {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

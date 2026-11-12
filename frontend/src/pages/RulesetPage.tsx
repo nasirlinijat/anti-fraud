@@ -1,6 +1,8 @@
 import { type FormEvent, useCallback, useState } from 'react'
 import { getActiveRuleset, getRuleset, listRulesets, publishRuleset, type ErrorResponse, type RuleSettings, type Ruleset, type RulesetConfig, type RulesetSummary } from '../api'
 import { TimeDisplayToggle, Timestamp } from '../Display'
+import { Button } from '../ui/Button'
+import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
@@ -139,7 +141,6 @@ function RulesetForm({ initial, history, time, onPublished }: {
 }) {
   const [version, setVersion] = useState(initial.version)
   const [draft, setDraft] = useState(() => toDraft(initial))
-  const [operatorKey, setOperatorKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState('')
@@ -164,7 +165,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (saving || activeCheck.checking || readOnly || !operatorKey.trim()) return
+    if (saving || activeCheck.checking || readOnly) return
     setNotice('')
     activeCheck.clearError()
     const errors: FieldErrors = {}
@@ -175,7 +176,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
     }
     setError(null)
     setSaving(true)
-    const result = await publishRuleset(config, operatorKey.trim())
+    const result = await publishRuleset(config)
     setSaving(false)
     if (!result.ok) {
       setError(result.error)
@@ -189,49 +190,48 @@ function RulesetForm({ initial, history, time, onPublished }: {
   }
 
   return (
-    <>
-      <p>
-        <strong>Active version {version}</strong>
-        {readOnly && <> — viewing version {selected.version} (read-only)</>}
-      </p>
-      {readOnly && (
-        <p>
-          <button type="button" className="secondary" onClick={() => selected.select(version)}>
-            Edit active version ({version})
-          </button>
-        </p>
-      )}
-      {readOnly && selected.loading && <LoadingSkeleton shape="form" label={`Loading version ${selected.version}…`} />}
-      {readOnly && selected.error && (
-        <ErrorState onRetry={selected.retry} pending={selected.loading}>{selected.error}</ErrorState>
-      )}
-      {(!readOnly || selected.ruleset !== null) && (
-        <form onSubmit={save} noValidate>
-          <ThresholdFields draft={displayDraft} errors={shownErrors} disabled={saving || readOnly} onChange={updateDraft} />
-          {ruleDetails.map((detail) => (
-            <RuleFieldset
-              key={detail.name}
-              detail={detail}
-              savedRule={displayDraft.rules[detail.name]}
-              errors={shownErrors}
-              disabled={saving || readOnly}
-              onChange={(rule) => updateRule(detail.name, rule)}
-            />
-          ))}
-
-          {!readOnly && (
-            <>
-              <VersionNoteField note={draft.note} error={shownErrors.note} disabled={saving} onChange={(note) => updateDraft({ note })} />
-              <PublishControls error={error} checkError={activeCheck.error} checkingActive={activeCheck.checking} saving={saving}
-                operatorKey={operatorKey} onOperatorKey={setOperatorKey} onCheckActive={activeCheck.start} />
-            </>
+    <div className="ruleset-layout">
+      <div className="ruleset-main">
+        <div className="version-bar">
+          <span className="badge badge-accent">Active version {version}</span>
+          {readOnly && <span className="badge badge-muted">Viewing version {selected.version} (read-only)</span>}
+          {readOnly && (
+            <Button variant="secondary" size="sm" onClick={() => selected.select(version)}>
+              Edit active version ({version})
+            </Button>
           )}
-        </form>
-      )}
-      <p className="muted" role="status">{notice}</p>
+        </div>
+        {readOnly && selected.loading && <LoadingSkeleton shape="form" label={`Loading version ${selected.version}…`} />}
+        {readOnly && selected.error && (
+          <ErrorState onRetry={selected.retry} pending={selected.loading}>{selected.error}</ErrorState>
+        )}
+        {(!readOnly || selected.ruleset !== null) && (
+          <form onSubmit={save} noValidate>
+            <ThresholdFields draft={displayDraft} errors={shownErrors} disabled={saving || readOnly} onChange={updateDraft} />
+            {ruleDetails.map((detail) => (
+              <RuleFieldset
+                key={detail.name}
+                detail={detail}
+                savedRule={displayDraft.rules[detail.name]}
+                errors={shownErrors}
+                disabled={saving || readOnly}
+                onChange={(rule) => updateRule(detail.name, rule)}
+              />
+            ))}
 
+            {!readOnly && (
+              <>
+                <VersionNoteField note={draft.note} error={shownErrors.note} disabled={saving} onChange={(note) => updateDraft({ note })} />
+                <PublishControls error={error} checkError={activeCheck.error} checkingActive={activeCheck.checking} saving={saving}
+                  onCheckActive={activeCheck.start} />
+              </>
+            )}
+          </form>
+        )}
+        <p className={notice ? 'notice' : 'visually-hidden'} role="status">{notice}</p>
+      </div>
       <VersionHistory history={history} time={time} activeVersion={version} selectedVersion={selected.version} onSelect={selected.select} />
-    </>
+    </div>
   )
 }
 
@@ -334,7 +334,7 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
   return (
     <fieldset disabled={disabled}>
       <legend>{label}</legend>
-      <label className="ruleset-enabled">
+      <label className="switch ruleset-enabled">
         <input
           type="checkbox"
           checked={rule.enabled}
@@ -343,7 +343,7 @@ function RuleFieldset({ detail, savedRule, errors, disabled, onChange }: {
           aria-invalid={enabledError ? true : undefined}
           aria-describedby={enabledError ? `${field}.enabled-error` : undefined}
         />
-        Enabled
+        <span>Enabled</span>
       </label>
       {enabledError && (
         <span id={`${field}.enabled-error`} className="error-text">{enabledError}</span>
@@ -434,18 +434,16 @@ function VersionNoteField({ note, error, disabled, onChange }: {
   )
 }
 
-function PublishControls({ error, checkError, checkingActive, saving, operatorKey, onOperatorKey, onCheckActive }: {
+function PublishControls({ error, checkError, checkingActive, saving, onCheckActive }: {
   error: ErrorResponse | null
   checkError: string | null
   checkingActive: boolean
   saving: boolean
-  operatorKey: string
-  onOperatorKey: (key: string) => void
   onCheckActive: () => void
 }) {
   const fields = error?.fields ?? {}
   return (
-    <>
+    <div className="publish-bar">
       {error && (
         <ErrorState retryLabel="Check active version" pending={checkingActive}
           onRetry={Object.keys(fields).length === 0 ? onCheckActive : undefined}>
@@ -454,13 +452,9 @@ function PublishControls({ error, checkError, checkingActive, saving, operatorKe
           {checkError && <p>Could not check the active version. {checkError}</p>}
         </ErrorState>
       )}
-      <div className="field">
-        <label htmlFor="ruleset-operator-key">Operator key</label>
-        <input id="ruleset-operator-key" type="password" autoComplete="off" value={operatorKey}
-          disabled={saving} onChange={(event) => onOperatorKey(event.target.value)} />
-      </div>
-      <button type="submit" disabled={saving || checkingActive || !operatorKey.trim()}>{saving ? 'Publishing…' : 'Publish new version'}</button>
-    </>
+      <p className="muted small">Publishing adds a new version and makes it the only active one. Stored versions never change.</p>
+      <Button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</Button>
+    </div>
   )
 }
 
@@ -472,10 +466,12 @@ function VersionHistory({ history, time, activeVersion, selectedVersion, onSelec
   onSelect: (version: number) => void
 }) {
   return (
-    <>
-      <h2>Version history</h2>
-      <TimeDisplayToggle display={time} />
-      <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Ruleset data"><table>
+    <aside className="panel version-history" aria-labelledby="ruleset-history">
+      <div className="panel-head">
+        <h2 id="ruleset-history">Version history</h2>
+        <TimeDisplayToggle display={time} />
+      </div>
+      <div className="table-scroll" role="region" tabIndex={0} aria-label="Ruleset data"><table>
         <thead>
           <tr>
             <th scope="col">Version</th>
@@ -489,7 +485,7 @@ function VersionHistory({ history, time, activeVersion, selectedVersion, onSelec
               <th scope="row">
                 <button
                   type="button"
-                  className="review-open"
+                  className="btn-link"
                   aria-current={item.version === selectedVersion ? 'true' : undefined}
                   onClick={() => onSelect(item.version)}
                 >
@@ -502,7 +498,7 @@ function VersionHistory({ history, time, activeVersion, selectedVersion, onSelec
           ))}
         </tbody>
       </table></div>
-    </>
+    </aside>
   )
 }
 
@@ -544,8 +540,8 @@ function RulesetPage() {
 
   return (
     <section className="ruleset-editor">
-      <h1>Rulesets</h1>
-      <p className="muted">Publish a new ruleset to change how future purchases are scored.</p>
+      <PageHeader eyebrow="Configuration" title="Rulesets"
+        lead="Weighted rules add points to a purchase; the total is compared with the review and block thresholds. Publish a new version to change how future purchases are scored." />
       {data && <RulesetForm initial={data.active} history={data.history} time={time} onPublished={handlePublished} />}
       {!data && (!loadError || pending) && <LoadingSkeleton shape="form" label="Loading the active ruleset…" />}
       {loadError && (

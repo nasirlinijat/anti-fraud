@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
+import { Button } from './ui/Button'
 
 export function EmptyState({ children, announce = false }: { children: ReactNode; announce?: boolean }) {
-  return <p className="muted" role={announce ? 'status' : undefined}>{children}</p>
+  return <p className="empty-state" role={announce ? 'status' : undefined}>{children}</p>
 }
 
 export function ErrorState({ children, onRetry, retryLabel = 'Retry', pending = false, polite = false }: {
@@ -15,10 +16,10 @@ export function ErrorState({ children, onRetry, retryLabel = 'Retry', pending = 
     <div className="alert view-error">
       <div role={polite ? 'status' : 'alert'}>{children}</div>
       {onRetry && (
-        <button type="button" className="secondary" aria-disabled={pending}
+        <Button variant="secondary" size="sm" aria-disabled={pending}
           onClick={() => { if (!pending) onRetry() }}>
           {pending ? 'Checking…' : retryLabel}
-        </button>
+        </Button>
       )}
     </div>
   )

@@ -7,7 +7,7 @@ function report(coverage = {}) {
   return { labelled_decisions: 6, coverage: { pending: 0, quarantined: 0, scored_decisions: null, run_status: null, ...coverage } }
 }
 
-test('quality calls preserve source and encode IDs without sending credentials', async ({ mock }) => {
+test('quality calls preserve source and encode IDs and send no credentials while signed out', async ({ mock }) => {
   const calls = []
   mock.method(globalThis, 'fetch', async (path, options) => {
     calls.push([path, options])
@@ -19,7 +19,7 @@ test('quality calls preserve source and encode IDs without sending credentials',
   assert.equal(calls[0][0], '/stats/quality?source=simulator&run_id=a%2Fb+%26x')
   assert.equal(calls[1][0], '/stats/quality?source=ieee-cis&run_id=a%2Fb+%26x')
   assert.equal(calls[2][0], '/stats/quality/runs?source=ieee-cis&limit=20&after=a%2Fb+%26x')
-  assert.ok(calls.every(([, options]) => options.headers === undefined))
+  assert.ok(calls.every(([, options]) => [...options.headers].length === 0))
 })
 
 test('undefined rates remain distinct from zero percent', () => {

@@ -1,9 +1,8 @@
-import { Button } from '@xsolla/xui-button'
-import { Typography } from '@xsolla/xui-typography'
 import { useCallback, useId, useState } from 'react'
 import { getQuality, listQualityRuns, type QualityReport, type QualitySource } from '../api'
 import { formatQualityRate, qualityCoverage } from '../quality'
 import { formatUsdMinor } from '../displayFormat'
+import { Button } from '../ui/Button'
 import { usePolling } from '../usePolling'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { Timestamp } from '../Display'
@@ -18,7 +17,7 @@ export function QualityPanel() {
   const id = useId()
   return (
     <section className="panel quality-panel">
-      <p className="eyebrow">Evaluation</p><Typography as="h2" variant="h5" marginBottom={16}>Decision quality</Typography>
+      <p className="eyebrow">Evaluation</p><h2>Decision quality</h2>
       <p className="muted small">{source === 'simulator' ? 'Simulated traffic only' : 'IEEE-CIS replay only'}.
         {' '}Review and block count as flagged. Results evaluate saved scoring decisions, before analyst decisions.</p>
       <fieldset className="quality-sources">
@@ -83,8 +82,8 @@ function SourceQuality({ source }: { source: QualitySource }) {
             {runs.ids.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </div>
-        <Button type="button" tone="mono" variant="secondary" onPress={runs.refresh} disabled={runs.polling.pending}>Refresh runs</Button>
-        {runs.next && <Button type="button" tone="mono" variant="secondary" onPress={runs.more}
+        <Button variant="secondary" onClick={runs.refresh} disabled={runs.polling.pending}>Refresh runs</Button>
+        {runs.next && <Button variant="secondary" onClick={runs.more}
           disabled={runs.polling.pending}>Load more runs</Button>}
       </div>}
       {run && <p className="selected-run"><span className="muted">Selected run</span> <code>{run}</code></p>}

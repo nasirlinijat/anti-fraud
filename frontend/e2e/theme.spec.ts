@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
-import { mockConsole, runId } from './fixtures'
+import { mockConsole, runId, signIn } from './fixtures'
 
 test.beforeEach(async ({ page }) => { await mockConsole(page) })
 
@@ -78,6 +78,9 @@ test('blocked storage keeps switching usable and explains persistence failure', 
   await page.emulateMedia({ colorScheme: 'light' })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/dashboard')
+  // Without storage no session is restored, and the one from the form lives in memory.
+  await signIn(page)
+  await expect(page.locator('main h1')).toHaveText('Dashboard')
   await page.getByRole('button', { name: 'Dark mode' }).click()
   await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
   await expect(page.getByRole('status').filter({ hasText: 'Your choice could not be saved' })).toBeVisible()

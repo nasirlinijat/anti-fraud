@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from 'react'
 import { score, type ScoreResponse, type ScoreResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge } from '../Display'
+import { Button } from '../ui/Button'
+import { PageHeader } from '../ui/PageHeader'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 
 type Kind = 'text' | 'integer' | 'number' | 'time'
@@ -199,17 +201,17 @@ function TesterPage() {
   const fieldErrors = failure?.error.fields ?? {}
 
   return (
-    <div className="tester">
+    <div className="tester-page">
+      <PageHeader eyebrow="Tools" title="Score a purchase"
+        lead={<>Fill in a purchase and send it to <code>POST /score</code>. Optional fields can stay empty.</>} />
+      <div className="tester">
       <section>
-        <h1>Score a purchase</h1>
-        <p className="muted">
-          Fill in a purchase and send it to <code>POST /score</code>. Optional fields can stay empty.
-        </p>
         <div className="presets" role="group" aria-label="Fill the form with an example">
+          <span className="muted small">Start from an example</span>
           {Object.keys(presets).map((name) => (
-            <button key={name} type="button" className="secondary" disabled={sending} onClick={() => applyPreset(name)}>
+            <Button key={name} variant="secondary" size="sm" disabled={sending} onClick={() => applyPreset(name)}>
               {name}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -252,7 +254,7 @@ function TesterPage() {
                         </span>
                       ) : (
                         field.hint && (
-                          <span id={`${id}-hint`} className="muted small">
+                          <span id={`${id}-hint`} className="field-hint">
                             {field.hint}
                           </span>
                         )
@@ -263,14 +265,12 @@ function TesterPage() {
               </div>
             </fieldset>
           ))}
-          <button type="submit" disabled={sending}>
-            {sending ? 'Scoring…' : 'Score purchase'}
-          </button>
+          <Button type="submit" disabled={sending}>{sending ? 'Scoring…' : 'Score purchase'}</Button>
         </form>
       </section>
 
-      <section className="result">
-        <h2>Result</h2>
+      <section className="panel result" aria-labelledby="tester-result">
+        <h2 id="tester-result">Result</h2>
         {!result && !failure && (sending
           ? <LoadingSkeleton shape="result" label="Scoring purchase…" />
           : <EmptyState>Choose Normal or fill out the form, then select Score purchase to see the decision.</EmptyState>)}
@@ -291,6 +291,7 @@ function TesterPage() {
         )}
         <div aria-live="polite">{result && <ResultView result={result} />}</div>
       </section>
+      </div>
     </div>
   )
 }
@@ -317,7 +318,7 @@ function ResultView({ result }: { result: ScoreResponse }) {
       {result.fired_rules.length === 0 ? (
         <EmptyState>No rule fired.</EmptyState>
       ) : (
-        <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Tester data"><table>
+        <div className="table-scroll" role="region" tabIndex={0} aria-label="Tester data"><table>
           <thead>
             <tr>
               <th scope="col">Rule</th>

@@ -18,7 +18,7 @@ From the repository root, use Docker with the Compose plugin to run the console.
    docker compose up -d --build --wait
    ```
 
-3. Open [the console](http://127.0.0.1:3000). Select **Tester**, fill in the normal purchase example, and submit it to see the score. Open **Dashboard** to see the saved decision. Configure an individual analyst key to use **Review queue**.
+3. Create the first admin account as described in [Console accounts](#console-accounts), then open [the console](http://127.0.0.1:3000) and sign in. Select **Tester**, fill in the normal purchase example, and submit it to see the score. Open **Dashboard** to see the saved decision.
 
 4. Stop the stack and keep the database data:
 
@@ -26,7 +26,7 @@ From the repository root, use Docker with the Compose plugin to run the console.
    docker compose down
    ```
 
-Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The proxy adds `API_KEY` to scoring, statistics, and configuration reads. Review requests and configuration writes use the individual key entered in the console.
+Set `FRONTEND_PORT` in `.env` to change the console port, then rerun the startup command. The console and the direct backend port listen on loopback. The console asks you to sign in, and every request it makes carries your session token. The proxy adds `API_KEY` only to `POST /score`, which the Tester page uses.
 
 ## Deployment
 
@@ -236,7 +236,7 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key to scoring, statistics, and configuration reads. It forwards individual analyst keys for reviews and individual operator keys for configuration writes. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key only to `POST /score`. Every other request carries the session token of the signed-in account. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Command | What it does |
 |---|---|
@@ -248,14 +248,18 @@ Browser checks and the XUI design decisions are documented in [frontend/docs/af-
 
 ## Console pages
 
+The console opens on a sign-in screen. Reviewers see only the review queue; admins see every page. The session is kept in the browser until you sign out or it expires after 12 hours.
+
 | Page | What it does |
 |---|---|
 | Dashboard (`#/dashboard`) | Shows counts and rates by outcome, p95 scoring latency, blocked value in minor units, and a stacked decision timeline with a table view. Choose the last 15 minutes, hour, day, week, or all time. The dashboard also shows the current review queue, most fired rules, and model effects. It reads `GET /stats` every 5 seconds. Send traffic with the Tester page or `make simulate` to fill it. |
 | Blocklist (`#/blocklist`) | Lists the blocked card tokens, device IDs, player IDs and IP addresses with their reasons, adds new entries and removes them. A new entry applies to the next scored purchase. Invalid values, a missing reason and duplicates are shown next to their fields. |
 | Tester (`#/tester`) | A form with every score request field. It sends the purchase to `POST /score` and shows the outcome, the rule score, the model score and the fired rules with their points. Validation errors from the API are shown next to their fields. The buttons above the form fill in a normal purchase, a suspicious one, or nothing. |
-| Simulator (`#/simulator`) | Starts live or backfill simulation runs, follows decisions every three seconds and shows recent runs. Reads need no entered key; start and stop require an operator key. Runs continue across navigation, and history survives backend restarts. |
-| Review queue (`#/reviews`) | Enter your analyst key to browse and decide purchases awaiting review, or open a case to inspect its evidence. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
+| Simulator (`#/simulator`) | Starts live or backfill simulation runs, follows decisions every three seconds and shows recent runs. Runs continue across navigation, and history survives backend restarts. |
+| Review queue (`#/reviews`) | Claim a purchase awaiting review, then approve or reject it, or open a case to inspect its evidence. **My claims** lists only the purchases you hold. The queue shows the highest rule score first and refreshes every three seconds. With a model loaded, you can sort by model risk. |
 | Rulesets (`#/rulesets`) | Shows the active version and lets you edit decision thresholds, rule weights, and applicable limits. Publishing saves a new version with an optional note and shows its version number. Selecting an earlier version in the history shows its settings read-only. |
+| Assignments (`#/assignments`) | Admins see each reviewer's open claims and decided count, and release a claim to return a purchase to the shared queue. |
+| Accounts (`#/accounts`) | Admins list accounts, create reviewer or admin accounts, and disable an account, which ends its sessions. |
 
 ### Review access
 

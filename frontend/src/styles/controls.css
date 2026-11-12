@@ -1,0 +1,372 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-block-size: var(--control-height);
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn-sm {
+  min-block-size: 36px;
+  padding: 0 12px;
+  font-size: var(--type-label);
+}
+
+/* A finger needs a larger target than a mouse pointer. */
+@media (pointer: coarse) {
+  .btn-sm { min-block-size: var(--control-height); }
+}
+
+.btn-primary { background: var(--accent); color: var(--accent-text); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { border-color: var(--control-border); }
+.btn-secondary:hover,
+.btn-ghost:hover { background: var(--surface-hover); }
+.btn-danger { border-color: var(--block); color: var(--block); }
+.btn-danger:hover { background: var(--block-bg); color: var(--text); }
+.btn-ghost { padding-inline: var(--space-sm); }
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.btn-link[aria-current='true'] { text-decoration-thickness: 2px; }
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: var(--control-height);
+  block-size: var(--control-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.icon-button:hover { background: var(--surface-hover); }
+.icon-button[aria-disabled='true'] { opacity: 0.5; cursor: progress; }
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.segmented button {
+  min-block-size: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-label);
+  cursor: pointer;
+}
+
+.segmented button:hover { background: var(--surface-hover); }
+
+.segmented button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.field.wide { grid-column: 1 / -1; }
+
+.field label,
+.inline-field {
+  font-size: var(--type-label);
+  font-weight: 500;
+}
+
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.inline-field select { inline-size: auto; }
+
+:where(input:not([type='checkbox'], [type='radio']), select, textarea) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+:where(input, select, textarea):hover:not(:disabled) { border-color: var(--text); }
+:where(input, select, textarea, fieldset):disabled { opacity: 0.6; }
+:where(input)::placeholder { color: var(--muted); opacity: 0.7; }
+
+.field.invalid :is(input, select),
+input:user-invalid {
+  border-color: var(--block);
+  box-shadow: inset 0 0 0 1px var(--block);
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: var(--type-note);
+}
+
+.error-text {
+  color: var(--block);
+  font-size: var(--type-note);
+  font-weight: 500;
+}
+
+.required { color: var(--block); }
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-md);
+}
+
+fieldset {
+  min-inline-size: 0;
+  margin: 0 0 var(--space-md);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+/* A floated legend sits inside the card as its heading, not on the border. */
+legend {
+  float: inline-start;
+  inline-size: 100%;
+  margin-block-end: 12px;
+  padding: 0;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+legend + * { clear: both; }
+
+input[type='radio'],
+input[type='checkbox'] {
+  flex: none;
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+  accent-color: var(--text);
+}
+
+.check,
+.time-display-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-block-size: var(--control-height);
+  font-size: var(--type-label);
+}
+
+.time-display-toggle { color: var(--muted); }
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-block-size: var(--control-height);
+  font-size: var(--type-label);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.switch input {
+  appearance: none;
+  position: relative;
+  inline-size: 40px;
+  block-size: 24px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  cursor: pointer;
+}
+
+.switch input::after {
+  content: '';
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  inline-size: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.switch input:checked {
+  border-color: var(--text);
+  background: var(--accent);
+}
+
+.switch input:checked::after {
+  inset-inline-start: 19px;
+  background: #000;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .segmented button,
+  .icon-button { transition: background-color 120ms ease, border-color 120ms ease; }
+  .switch input::after { transition: inset-inline-start 120ms ease; }
+}
+
+.input-with-action { position: relative; }
+.input-with-action input { padding-inline-end: 48px; }
+
+.input-action {
+  position: absolute;
+  inset: 2px 2px 2px auto;
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.input-action:hover,
+.input-action[aria-pressed='true'] { color: var(--text); }
+
+.dialog {
+  inline-size: min(28rem, calc(100% - 2rem));
+  padding: var(--space-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+
+.dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+.dialog:modal,
+.dialog::backdrop { overscroll-behavior: contain; }
+.dialog h2 { margin-block-end: var(--space-sm); }
+.dialog-body { color: var(--muted); }
+.dialog-body .check { color: var(--text); }
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-block-start: var(--space-lg);
+}
+
+@media (max-width: 30rem) {
+  .dialog-actions { flex-direction: column-reverse; }
+}
+
+.theme-control { position: relative; flex: 0 0 64px; }
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  inline-size: 64px;
+  block-size: var(--control-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.theme-track {
+  position: relative;
+  inline-size: 56px;
+  block-size: 32px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+}
+
+.theme-thumb {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset: 3px auto auto 3px;
+  inline-size: 24px;
+  block-size: 24px;
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.theme-thumb svg { position: absolute; }
+.theme-moon { opacity: 0; transform: rotate(-45deg); }
+
+.theme-toggle[aria-pressed='true'] .theme-thumb {
+  transform: translateX(24px);
+  border-color: var(--accent-text);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.theme-toggle[aria-pressed='true'] .theme-moon { opacity: 1; transform: rotate(0); }
+.theme-toggle[aria-pressed='true'] .theme-sun { opacity: 0; transform: rotate(45deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .theme-thumb { transition: transform 200ms ease; }
+  .theme-thumb svg { transition: opacity 200ms ease, transform 200ms ease; }
+}

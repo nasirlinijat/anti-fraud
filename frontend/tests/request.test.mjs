@@ -5,6 +5,7 @@ import {
   score, submitReviewDecision,
 } from '../src/api.ts'
 import { request } from '../src/request.ts'
+import { forgetSessionToken, keepSessionToken, onSessionRejected } from '../src/session.ts'
 
 test('preserves score validation errors and sends the request once', async ({ mock }) => {
   const body = { error: 'invalid purchase', fields: { amount_minor: 'must be positive' } }
@@ -14,17 +15,46 @@ test('preserves score validation errors and sends the request once', async ({ mo
   assert.equal(new Headers(fetch.mock.calls[0].arguments[1].headers).has('X-API-Key'), false)
 })
 
-test('distinguishes service and analyst authentication failures', async ({ mock }) => {
-  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'invalid key' }, { status: 401 }))
-  await assert.rejects(request('/stats'), { status: 401, message: /Check API_KEY/ })
-  await assert.rejects(listReviews('test-analyst', 'model_score', 'opaque+/=', new AbortController().signal), {
-    status: 401, message: 'invalid key',
+test('session requests carry the token and a 401 reports the rejected session', async (t) => {
+  const { mock } = t
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'missing or invalid session' }, { status: 401 }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  t.after(forgetSessionToken)
+  keepSessionToken('session-token')
+
+  await assert.rejects(listReviews({ sort: 'model_score', cursor: 'opaque+/=', claimed: 'mine' }, new AbortController().signal), {
+    status: 401, message: 'missing or invalid session',
   })
-  const [path, options] = fetch.mock.calls[1].arguments
+  const [path, options] = fetch.mock.calls[0].arguments
   const query = new URL(path, 'http://localhost').searchParams
   assert.equal(query.get('cursor'), 'opaque+/=')
   assert.equal(query.get('sort'), 'model_score')
-  assert.equal(new Headers(options.headers).get('X-API-Key'), 'test-analyst')
+  assert.equal(query.get('claimed'), 'mine')
+  assert.equal(options.headers.get('Authorization'), 'Bearer session-token')
+  assert.equal(options.headers.has('X-API-Key'), false)
+  assert.equal(rejections, 1)
+})
+
+test('score and sign-in send no session token and their 401 keeps the session', async (t) => {
+  const { mock } = t
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'invalid key' }, { status: 401 }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  t.after(forgetSessionToken)
+  keepSessionToken('session-token')
+
+  const scored = await score({ amount_minor: 1 })
+  assert.match(scored.error.error, /Check API_KEY/)
+  await assert.rejects(request('/auth/login', { method: 'POST', auth: 'none' }), { status: 401, message: 'invalid key' })
+  for (const call of fetch.mock.calls) assert.equal(call.arguments[1].headers.has('Authorization'), false)
+  assert.equal(rejections, 0)
+})
+
+test('a throttled response reports how long to wait', async ({ mock }) => {
+  mock.method(globalThis, 'fetch', async () => Response.json({ error: 'too many sign-in attempts, try again later' },
+    { status: 429, headers: { 'Retry-After': '840' } }))
+  await assert.rejects(request('/auth/login', { method: 'POST', auth: 'none' }), { status: 429, retryAfterSeconds: 840 })
 })
 
 test('reports proxy, invalid JSON, and network failures distinctly', async ({ mock }) => {
@@ -40,7 +70,7 @@ test('reports proxy, invalid JSON, and network failures distinctly', async ({ mo
 
 test('accepts empty delete and readiness responses', async ({ mock }) => {
   mock.method(globalThis, 'fetch', async () => new Response(null, { status: 204 }))
-  assert.deepEqual(await removeBlocklistEntry(17, 'operator-key'), { ok: true, value: null })
+  assert.deepEqual(await removeBlocklistEntry(17), { ok: true, value: null })
   assert.equal(await checkReadiness(), undefined)
 })
 
@@ -77,7 +107,7 @@ test('ruleset limits round trip as exact JSON integers', async ({ mock }) => {
   const { version, ...config } = await getActiveRuleset()
   assert.equal(version, 1)
   assert.equal(config.rules.high_amount.limit, 9223372036854775807n)
-  assert.equal((await publishRuleset(config, 'operator-key')).ok, true)
+  assert.equal((await publishRuleset(config)).ok, true)
   assert.match(fetch.mock.calls[1].arguments[1].body, /"limit":9223372036854775807[},]/)
 })
 
@@ -86,9 +116,9 @@ test('a review save remains confirmed on 201 and preserves conflict status on 40
     ? new Response(null, { status: 201 })
     : Response.json({ error: 'purchase has already been decided' }, { status: 409 }))
   const { signal } = new AbortController()
-  assert.equal(await submitReviewDecision('test-analyst', 'saved', 'reject', true, signal), false)
+  assert.equal(await submitReviewDecision('saved', 'reject', true, signal), false)
   assert.deepEqual(JSON.parse(fetch.mock.calls[0].arguments[1].body), { decision: 'reject', block_device: true })
-  await assert.rejects(submitReviewDecision('test-analyst', 'conflict', 'approve', false, signal), {
+  await assert.rejects(submitReviewDecision('conflict', 'approve', false, signal), {
     status: 409, message: 'purchase has already been decided',
   })
   assert.equal(fetch.mock.callCount(), 2)
