@@ -473,9 +473,9 @@ function VersionHistory({ history, time, activeVersion, selectedVersion, onSelec
 }) {
   return (
     <>
-      <h3>Version history</h3>
+      <h2>Version history</h2>
       <TimeDisplayToggle display={time} />
-      <table>
+      <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Ruleset data"><table>
         <thead>
           <tr>
             <th scope="col">Version</th>
@@ -501,7 +501,7 @@ function VersionHistory({ history, time, activeVersion, selectedVersion, onSelec
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </>
   )
 }
@@ -544,7 +544,7 @@ function RulesetPage() {
 
   return (
     <section className="ruleset-editor">
-      <h2>Rulesets</h2>
+      <h1>Rulesets</h1>
       <p className="muted">Publish a new ruleset to change how future purchases are scored.</p>
       {data && <RulesetForm initial={data.active} history={data.history} time={time} onPublished={handlePublished} />}
       {!data && (!loadError || pending) && <LoadingSkeleton shape="form" label="Loading the active ruleset…" />}

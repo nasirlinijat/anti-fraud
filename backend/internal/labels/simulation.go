@@ -31,6 +31,11 @@ func (s *SimulationStore) Lock(ctx context.Context) (models.SimulationController
 	return &simulationController{SimulationController: c, evaluation: s.evaluation}, true, nil
 }
 
+// recoverRunsSQL counts a run's pending purchase from its saved decision, but
+// not when its label was rejected or never saved, so that no run counts a
+// purchase the evaluation cannot score.
+const recoverRunsSQL = storage.RecoverRunsSQL + ` AND NOT EXISTS (SELECT 1 FROM pending_purchase_labels l WHERE l.transaction_id=r.pending_transaction_id AND (l.rejection_reason IS NOT NULL OR l.request_json IS NULL))`
+
 // simulationController settles labels and run progress in one evaluation
 // transaction. The embedded controller's connection keeps the lock.
 type simulationController struct {
@@ -44,7 +49,7 @@ func (c *simulationController) Recover(ctx context.Context) error {
 		if _, err := RecoverTx(ctx, tx, ""); err != nil {
 			return err
 		}
-		return storage.RecoverSimulationRuns(ctx, tx)
+		return storage.RecoverSimulationRunsWith(ctx, tx, recoverRunsSQL)
 	})
 }
 
@@ -57,6 +62,12 @@ func (c *simulationController) PrepareLabel(ctx context.Context, runID string, p
 	}
 	c.current = label
 	return nil
+}
+
+// RejectLabel marks the purchase's pending label as rejected when the score
+// API refused the request, so that the label is never scored.
+func (c *simulationController) RejectLabel(ctx context.Context, transactionID string, err error) bool {
+	return Reject(ctx, c.evaluation, transactionID, err)
 }
 
 // Checkpoint finalizes the remembered label and counts the outcome in the

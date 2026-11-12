@@ -47,6 +47,9 @@ type SimulationController interface {
 	Create(ctx context.Context, id, operatorID string, s SimulationSettings) (SimulationRun, error)
 	MarkPending(ctx context.Context, runID, transactionID string) (bool, error)
 	PrepareLabel(ctx context.Context, runID string, p simulator.Purchase) error
+	// RejectLabel marks the pending label of a purchase the API refused, and
+	// reports whether the error was such a refusal.
+	RejectLabel(ctx context.Context, transactionID string, err error) bool
 	OutcomeOf(ctx context.Context, transactionID string) (string, error)
 	Checkpoint(ctx context.Context, runID, transactionID, outcome string) error
 	Finish(ctx context.Context, runID, status, message string) error

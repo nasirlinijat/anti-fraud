@@ -125,7 +125,7 @@ function CaseView({ apiKey, purchaseId, time, onBack, onKeyRejected }: {
   return (
     <article className="review-case" aria-labelledby="case-heading">
       <button type="button" className="review-back" onClick={onBack}>Back to the queue</button>
-      <h3 id="case-heading">Review case</h3>
+      <h2 id="case-heading">Review case</h2>
       {(state.status === 'loading' || pending) && <LoadingSkeleton shape="case" label="Loading review case…" />}
       {state.status === 'not-found' && (
         <EmptyState announce>This purchase is no longer available for review. Go back to the queue to pick another.</EmptyState>
@@ -163,9 +163,9 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
         <dt>Model version</dt>
         <dd>{review.model_version ?? 'None'}</dd>
       </dl>
-      <h4>Fired rules</h4>
+      <h3>Fired rules</h3>
       {review.fired_rules.length === 0 ? <EmptyState>No rules fired.</EmptyState> : (
-        <table className="review-table review-rules">
+        <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Fired rule evidence"><table className="review-table review-rules">
           <thead>
             <tr>
               <th scope="col">Rule</th>
@@ -182,13 +182,13 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
-      <h4>Recent player purchases</h4>
+      <h3>Recent player purchases</h3>
       {review.player_purchases.length === 0 ? (
         <EmptyState>No earlier purchases for this player.</EmptyState>
       ) : (
-        <table className="review-table review-rules">
+        <div className="legacy-table-scroll" role="region" tabIndex={0} aria-label="Recent player purchases"><table className="review-table review-rules">
           <thead>
             <tr>
               <th scope="col">Transaction</th>
@@ -207,9 +207,9 @@ function CaseDetails({ review, time }: { review: ReviewCase; time: TimeDisplay }
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
-      <h4>Recent device activity</h4>
+      <h3>Recent device activity</h3>
       {review.device_activity === null ? (
         <EmptyState>This purchase did not include a device ID.</EmptyState>
       ) : (
@@ -248,7 +248,7 @@ function ReviewQueue() {
 
   return (
     <section aria-labelledby="reviews-heading">
-      <h2 id="reviews-heading" ref={heading} tabIndex={-1}>Review queue</h2>
+      <h1 id="reviews-heading" ref={heading} tabIndex={-1}>Review queue</h1>
       {apiKey === null ? (
         <AnalystKeyForm keyError={keyError} onSubmit={openQueue} />
       ) : (
@@ -580,9 +580,9 @@ function ConfirmationDialog({ dialogRef, confirmation, blockDevice, onBlockDevic
         onDismiss()
         if (confirmed && confirmation) onConfirm(confirmation)
       }}>
-      <h3 id="review-confirmation-title">
+      <h2 id="review-confirmation-title">
         {confirmation?.decision === 'approve' ? 'Approve' : 'Reject'} this purchase?
-      </h3>
+      </h2>
       <p>Transaction {confirmation?.item.transaction_id}. This decision is final.</p>
       {confirmation?.decision === 'reject' && confirmation.item.device_id !== null && (
         <label className="review-block-device">

@@ -10,15 +10,25 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "node --test",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "test:browser": "tsc -p tsconfig.e2e.json && playwright test"
   },
   "dependencies": {
+    "@xsolla/xui-b2b-sidebar": "0.230.0",
+    "@xsolla/xui-button": "0.230.0",
+    "@xsolla/xui-core": "0.230.0",
+    "@xsolla/xui-icons-base": "0.230.0",
+    "@xsolla/xui-status": "0.230.0",
+    "@xsolla/xui-typography": "0.230.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-is": "19.3.1",
-    "recharts": "3.10.1"
+    "recharts": "3.10.1",
+    "styled-components": "6.6.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

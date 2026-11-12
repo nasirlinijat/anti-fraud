@@ -1,0 +1,225 @@
+{
+  "title": "Anti-fraud production",
+  "description": "Fraud decisions, traffic and infrastructure of the anti-fraud service on AWS.",
+  "layout_type": "ordered",
+  "reflow_type": "auto",
+  "widgets": [
+    {
+      "definition": {
+        "type": "group",
+        "title": "Fraud decisions",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Decisions per minute by outcome",
+              "show_legend": true,
+              "requests": [
+                {
+                  "q": "max:antifraud.decisions.last_minute{*} by {outcome}",
+                  "display_type": "bars"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "query_value",
+              "title": "Purchases waiting for review",
+              "precision": 0,
+              "requests": [
+                {
+                  "q": "max:antifraud.review_queue.size{*}",
+                  "aggregator": "last"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Scoring latency (ms, last 5 minutes)",
+              "show_legend": true,
+              "requests": [
+                { "q": "max:antifraud.scoring.latency_ms.p50{*}", "display_type": "line" },
+                { "q": "max:antifraud.scoring.latency_ms.p95{*}", "display_type": "line" },
+                { "q": "max:antifraud.scoring.latency_ms.p99{*}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Average model score (last 5 minutes)",
+              "requests": [
+                { "q": "max:antifraud.model.score.avg{*}", "display_type": "line" }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Traffic",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Requests by status code",
+              "show_legend": true,
+              "requests": [
+                {
+                  "q": "sum:antifraud.gateway.request.duration.count{server:srv1} by {code}.as_count()",
+                  "display_type": "bars"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Requests by address",
+              "show_legend": true,
+              "requests": [
+                {
+                  "q": "sum:antifraud.gateway.requests.count{server:srv1} by {site}.as_count()",
+                  "display_type": "bars"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Average response time (ms)",
+              "show_legend": true,
+              "requests": [
+                {
+                  "q": "1000 * sum:antifraud.gateway.request.duration.sum{server:srv1} by {site}.as_count() / sum:antifraud.gateway.request.duration.count{server:srv1} by {site}.as_count()",
+                  "display_type": "line"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "query_value",
+              "title": "Server errors (5xx) in the last hour",
+              "precision": 0,
+              "time": { "live_span": "1h" },
+              "requests": [
+                {
+                  "q": "sum:antifraud.gateway.request.duration.count{server:srv1,code:5*}.as_count()",
+                  "aggregator": "sum"
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "check_status",
+              "title": "Backend and database ready",
+              "check": "http.can_connect",
+              "grouping": "cluster",
+              "group_by": [],
+              "tags": ["instance:backend-ready"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Infrastructure",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Server CPU (%)",
+              "show_legend": true,
+              "requests": [
+                { "q": "avg:system.cpu.user{host:anti-fraud-prod}", "display_type": "area" },
+                { "q": "avg:system.cpu.system{host:anti-fraud-prod}", "display_type": "area" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Server memory usable (%)",
+              "requests": [
+                { "q": "100 * avg:system.mem.pct_usable{host:anti-fraud-prod}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Memory by container",
+              "show_legend": true,
+              "requests": [
+                { "q": "avg:container.memory.usage{host:anti-fraud-prod} by {container_name}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "CPU by container",
+              "show_legend": true,
+              "requests": [
+                { "q": "avg:container.cpu.usage{host:anti-fraud-prod} by {container_name}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Postgres connections",
+              "requests": [
+                { "q": "avg:postgresql.connections{*}", "display_type": "line" }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "type": "timeseries",
+              "title": "Disk in use (%)",
+              "requests": [
+                { "q": "100 * max:system.disk.in_use{host:anti-fraud-prod} by {device}", "display_type": "line" }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "title": "Logs",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "log_stream",
+              "title": "Errors and warnings",
+              "query": "project:anti-fraud status:(error OR warn)",
+              "indexes": [],
+              "columns": ["service"],
+              "show_date_column": true,
+              "show_message_column": true,
+              "message_display": "inline",
+              "sort": { "column": "time", "order": "desc" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

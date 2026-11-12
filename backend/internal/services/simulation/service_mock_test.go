@@ -112,6 +112,7 @@ func TestTrackedScorer(t *testing.T) {
 		controller := mocks.NewMockSimulationController(gomock.NewController(t))
 		gomock.InOrder(
 			controller.EXPECT().MarkPending(gomock.Any(), "sim-1", "txn-1").Return(true, nil),
+			controller.EXPECT().RejectLabel(gomock.Any(), "txn-1", gomock.Any()).Return(false),
 			controller.EXPECT().OutcomeOf(gomock.Any(), "txn-1").Return("block", nil),
 			controller.EXPECT().Checkpoint(gomock.Any(), "sim-1", "txn-1", "block").Return(nil),
 		)
@@ -122,6 +123,27 @@ func TestTrackedScorer(t *testing.T) {
 		got, err := tracker.Score(context.Background(), req)
 		if err != nil || got.Outcome != "block" {
 			t.Fatalf("Score = %+v, %v; want the saved block", got, err)
+		}
+	})
+
+	t.Run("a refused request rejects its label and stops the run", func(t *testing.T) {
+		controller := mocks.NewMockSimulationController(gomock.NewController(t))
+		refused := &simulator.HTTPError{Status: 400}
+		gomock.InOrder(
+			controller.EXPECT().MarkPending(gomock.Any(), "sim-1", "txn-1").Return(true, nil),
+			controller.EXPECT().RejectLabel(gomock.Any(), "txn-1", refused).Return(true),
+		)
+		controller.EXPECT().OutcomeOf(gomock.Any(), gomock.Any()).Times(0)
+		controller.EXPECT().Checkpoint(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+		cancelled := false
+		tracker := &trackedScorer{client: scoreFunc(func(context.Context, simulator.Request) (simulator.Result, error) {
+			return simulator.Result{}, refused
+		}), c: controller, id: "sim-1", cancel: func() { cancelled = true }}
+
+		_, err := tracker.Score(context.Background(), req)
+		var fatal simulator.FatalError
+		if !errors.As(err, &fatal) || tracker.fatal == nil || !cancelled {
+			t.Fatalf("err = %v, fatal %v, cancelled %v; want a FatalError that cancels the run", err, tracker.fatal, cancelled)
 		}
 	})
 

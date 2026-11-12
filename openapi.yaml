@@ -342,6 +342,80 @@ paths:
               example:
                 error: internal error
 
+  /stats/quality:
+    get:
+      tags: [Stats]
+      operationId: getQuality
+      summary: Decision quality for one evaluation run
+      description: |
+        Aggregate quality of saved scoring decisions with finalized known answers.
+        Review and block are flagged; allow is unflagged. Analyst decisions do not
+        change these results. Sources never mix. No individual answers are returned.
+        This whole-run report ignores dashboard periods. Reporting can operate with
+        simulation controls disabled when evaluation access is configured.
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - name: source
+          in: query
+          schema: {type: string, enum: [simulator, ieee-cis], default: simulator}
+        - name: run_id
+          in: query
+          required: true
+          description: Exact run ID within the selected source.
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Labelled sample and coverage, including known empty console runs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReport'}
+        '400':
+          description: Invalid, duplicate or unsupported query parameters.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401': {description: Missing or invalid service key.}
+        '404': {description: No run is known under this source and ID.}
+        '503': {description: Evaluation access is absent or temporarily unavailable.}
+
+  /stats/quality/runs:
+    get:
+      tags: [Stats]
+      operationId: listQualityRuns
+      summary: List evaluation run IDs for one source
+      description: |
+        Includes finalized and pending runs; simulator results also include console
+        runs without labels. CLI and imported runs are discoverable without enabling
+        simulation controls. IDs are ordered ascending using database text ordering.
+        Only aggregate run identities are exposed, never individual answers.
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - name: source
+          in: query
+          schema: {type: string, enum: [simulator, ieee-cis], default: simulator}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: after
+          in: query
+          description: Exclusive run ID cursor returned by the previous page.
+          schema: {type: string}
+      responses:
+        '200':
+          description: A bounded page; no runs returns an empty array.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, run_ids]
+                properties:
+                  source: {type: string, enum: [simulator, ieee-cis]}
+                  run_ids: {type: array, items: {type: string}}
+                  next_cursor: {type: string, description: Absent after the final page.}
+        '400': {description: Invalid, duplicate or unsupported query parameters.}
+        '401': {description: Missing or invalid service key.}
+        '503': {description: Evaluation access is absent or temporarily unavailable.}
+
   /stats:
     get:
       tags: [Stats]
@@ -1519,6 +1593,62 @@ components:
             entry, never its value. Decisions saved before messages existed
             return the rule name.
           example: Card used 5 times in 60 minutes (limit 5)
+
+    QualityReport:
+      type: object
+      required: [source, run_id, generated_at, labelled_decisions, true_positives, false_positives, true_negatives, false_negatives, precision, recall, false_positive_rate, fraud_value_flagged_minor, fraud_value_allowed_minor, coverage]
+      properties:
+        source: {type: string, enum: [simulator, ieee-cis]}
+        run_id: {type: string}
+        generated_at: {type: string, format: date-time}
+        labelled_decisions: {type: integer, format: int64, minimum: 0}
+        true_positives: {type: integer, format: int64, minimum: 0, description: Fraudulent purchases sent to review or blocked.}
+        false_positives: {type: integer, format: int64, minimum: 0, description: Legitimate purchases sent to review or blocked.}
+        true_negatives: {type: integer, format: int64, minimum: 0, description: Legitimate purchases allowed.}
+        false_negatives: {type: integer, format: int64, minimum: 0, description: Fraudulent purchases allowed.}
+        precision:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: True positives divided by all flagged purchases. Null without flagged purchases.
+        recall:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: True positives divided by fraudulent purchases. Null without fraudulent purchases.
+        false_positive_rate:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: False positives divided by legitimate purchases. Null without legitimate purchases.
+        fraud_value_flagged_minor:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Exact fraudulent purchase value sent to review or blocked, in minor units. This is not money recovered or prevented.
+        fraud_value_allowed_minor:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Exact fraudulent purchase value allowed, in minor units.
+        coverage:
+          type: object
+          required: [pending, quarantined, scored_decisions, run_status]
+          properties:
+            pending: {type: integer, format: int64, minimum: 0, description: Unresolved intents excluded from metrics.}
+            quarantined: {type: integer, format: int64, minimum: 0, description: Rejected or unverifiable intents excluded from metrics.}
+            scored_decisions:
+              type: integer
+              format: int64
+              nullable: true
+              minimum: 0
+              description: Recorded console progress. Null for CLI and imported runs whose expected total is unknown.
+            run_status:
+              type: string
+              nullable: true
+              enum: [starting, running, stopping, completed, stopped, failed, interrupted]
+              description: Console lifecycle status, otherwise null. An active run or excluded data makes results partial.
 
     StatsResponse:
       type: object
