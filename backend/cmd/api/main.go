@@ -41,17 +41,18 @@ func main() {
 
 	mux := http.NewServeMux()
 	platform.RegisterHealthRoutes(mux, pool)
+	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
+	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
+	access := platform.Access{ServiceKey: cfg.APIKey, Analysts: cfg.AnalystKeys, Operators: cfg.OperatorKeys, Sessions: authService}
 	rulesetStore := storage.NewRulesetStore(pool)
 	rulesetService := ruleset.NewService(rulesetStore)
-	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(rulesetService), access)
 	scoreService := scoresvc.NewService(rulesetStore, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))
 	useModel(cfg.ModelPath, scoreService, rulesetService)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), cfg.APIKey)
-	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
-	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), cfg.AnalystKeys)
-	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), cfg.APIKey)
-	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), cfg.ModelPath != ""), access)
+	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
+	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(pool))), access)
 	evaluation, err := openEvaluationPool(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -59,9 +60,9 @@ func main() {
 	if evaluation != nil {
 		defer evaluation.Close()
 	}
-	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), cfg.APIKey)
+	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), access)
 	manager := newSimulationManager(cfg, pool, evaluation)
-	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, cfg.APIKey, cfg.OperatorKeys)
+	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, access)
 
 	server := platform.NewServer(":"+cfg.Port, mux)
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

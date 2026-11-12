@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
@@ -48,14 +47,14 @@ func RegisterAuthRoutes(mux *http.ServeMux, h *AuthHandler) {
 func RequireSession(service AuthService, next func(http.ResponseWriter, *http.Request, models.Account)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		token, ok := bearerToken(r)
+		token, ok := platform.BearerToken(r)
 		if !ok {
-			writeSessionRequired(w)
+			platform.WriteSessionRequired(w)
 			return
 		}
 		account, err := service.Authenticate(r.Context(), token)
 		if errors.Is(err, models.ErrSessionNotFound) {
-			writeSessionRequired(w)
+			platform.WriteSessionRequired(w)
 			return
 		}
 		if err != nil {
@@ -65,25 +64,6 @@ func RequireSession(service AuthService, next func(http.ResponseWriter, *http.Re
 		}
 		next(w, r, account)
 	}
-}
-
-// bearerToken reads the token from a single "Authorization: Bearer <token>"
-// header. The scheme name is case-insensitive, as HTTP defines it.
-func bearerToken(r *http.Request) (string, bool) {
-	values := r.Header.Values("Authorization")
-	if len(values) != 1 {
-		return "", false
-	}
-	scheme, token, found := strings.Cut(values[0], " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" || strings.ContainsAny(token, " \t") {
-		return "", false
-	}
-	return token, true
-}
-
-func writeSessionRequired(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", "Bearer")
-	platform.WriteError(w, http.StatusUnauthorized, "missing or invalid session")
 }
 
 type loginRequest struct {
@@ -157,7 +137,7 @@ func (h *AuthHandler) serveMe(w http.ResponseWriter, _ *http.Request, account mo
 }
 
 func (h *AuthHandler) serveLogout(w http.ResponseWriter, r *http.Request, _ models.Account) {
-	token, _ := bearerToken(r)
+	token, _ := platform.BearerToken(r)
 	if err := h.service.Logout(r.Context(), token); err != nil {
 		log.Printf("sign out: %v", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal error")

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -104,6 +105,20 @@ func (s *Service) Authenticate(ctx context.Context, token string) (models.Accoun
 		return models.Account{}, models.ErrSessionNotFound
 	}
 	return s.sessions.Account(ctx, hashToken(token))
+}
+
+// Identify returns the username and role of the session, for the access
+// checks in platform. It returns platform.ErrNoSession for a session that
+// Authenticate rejects.
+func (s *Service) Identify(ctx context.Context, token string) (platform.Identity, error) {
+	account, err := s.Authenticate(ctx, token)
+	if errors.Is(err, models.ErrSessionNotFound) {
+		return platform.Identity{}, platform.ErrNoSession
+	}
+	if err != nil {
+		return platform.Identity{}, err
+	}
+	return platform.Identity{Username: account.Username, Role: string(account.Role)}, nil
 }
 
 // Logout ends the session. Ending an unknown session is not an error.

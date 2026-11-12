@@ -130,7 +130,7 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 			t.Fatal(err)
 		}
 		mux := http.NewServeMux()
-		RegisterReviewRoutes(mux, NewReviewHandler(service, true), keys)
+		RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Analysts: keys})
 		return mux, service
 	}
 	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
@@ -189,7 +189,7 @@ func TestRulesetHandlerWithMockedService(t *testing.T) {
 	newMux := func(t *testing.T) (*http.ServeMux, *mocks.MockRulesetService) {
 		service := mocks.NewMockRulesetService(gomock.NewController(t))
 		mux := http.NewServeMux()
-		RegisterRulesetRoutes(mux, NewRulesetHandler(service), mockServiceKey, mockOperators(t))
+		RegisterRulesetRoutes(mux, NewRulesetHandler(service), platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
 		return mux, service
 	}
 	body := `{"review_threshold":50,"block_threshold":80,"note":"n","rules":{"high_amount":{"enabled":true,"weight":30,"limit":5000}}}`
@@ -236,7 +236,7 @@ func TestBlocklistHandlerWithMockedService(t *testing.T) {
 	newMux := func(t *testing.T) (*http.ServeMux, *mocks.MockBlocklistService) {
 		service := mocks.NewMockBlocklistService(gomock.NewController(t))
 		mux := http.NewServeMux()
-		RegisterBlocklistRoutes(mux, NewBlocklistHandler(service), mockServiceKey, mockOperators(t))
+		RegisterBlocklistRoutes(mux, NewBlocklistHandler(service), platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
 		return mux, service
 	}
 	body := `{"type":"card","value":"card-1","reason":"stolen"}`
@@ -279,7 +279,7 @@ func TestStatsHandlerWithMockedService(t *testing.T) {
 	mux := http.NewServeMux()
 	h := NewStatsHandler(service)
 	h.now = func() time.Time { return statsNow }
-	RegisterStatsRoutes(mux, h, mockServiceKey)
+	RegisterStatsRoutes(mux, h, platform.Access{ServiceKey: mockServiceKey})
 
 	window := models.StatsWindow{Since: statsNow.Add(-time.Hour), Until: statsNow, BucketWidth: 5 * time.Minute}
 	service.EXPECT().Window("1h", statsNow).Return(window, nil)

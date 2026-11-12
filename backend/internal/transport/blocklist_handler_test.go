@@ -54,7 +54,7 @@ func call(t *testing.T, f *fakeEntries, method, path, body, key string) *httptes
 	if err != nil {
 		t.Fatal(err)
 	}
-	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(f)), blocklistServiceKey, keys)
+	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(f)), platform.Access{ServiceKey: blocklistServiceKey, Operators: keys})
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
 		req.Header.Set("X-API-Key", key)

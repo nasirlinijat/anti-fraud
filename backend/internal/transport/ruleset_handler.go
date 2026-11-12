@@ -36,11 +36,11 @@ func NewRulesetHandler(service RulesetService) *RulesetHandler {
 }
 
 // RegisterRulesetRoutes exposes the active ruleset, version history, and version publishing.
-func RegisterRulesetRoutes(mux *http.ServeMux, h *RulesetHandler, apiKey string, operators platform.OperatorKeys) {
-	mux.Handle("GET /rulesets", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.list)))
-	mux.Handle("GET /rulesets/active", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.getActive)))
-	mux.Handle("GET /rulesets/{version}", platform.RequireAPIKey(apiKey, http.HandlerFunc(h.getVersion)))
-	mux.Handle("POST /rulesets", platform.RequireOperator(operators, h.publish))
+func RegisterRulesetRoutes(mux *http.ServeMux, h *RulesetHandler, access platform.Access) {
+	mux.Handle("GET /rulesets", access.ConfigRead(http.HandlerFunc(h.list)))
+	mux.Handle("GET /rulesets/active", access.ConfigRead(http.HandlerFunc(h.getActive)))
+	mux.Handle("GET /rulesets/{version}", access.ConfigRead(http.HandlerFunc(h.getVersion)))
+	mux.Handle("POST /rulesets", access.ConfigWrite(h.publish))
 }
 
 type configPayload struct {

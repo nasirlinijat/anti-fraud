@@ -166,7 +166,7 @@ func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), testKey, keys)
+	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), platform.Access{ServiceKey: testKey, Operators: keys})
 	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), testKey)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {

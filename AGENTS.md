@@ -54,7 +54,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 | Demo traffic | A seeded simulator that sends purchases in the same API format |
 | Caching | None. Indexed PostgreSQL queries only, no Redis |
 | Console updates | Polling every few seconds, no WebSockets |
-| API authentication | Service key for scoring and configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
+| API authentication | Service key for scoring. Console endpoints accept a signed-in session: reviewers can use the review endpoints, admins every console endpoint. Until the console signs in, they also accept the service key for configuration reads, individual analyst keys for reviews, and individual operator keys for configuration writes |
 
 ### 3.2 Backend Layout
 
@@ -145,7 +145,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `POST /auth/login` | Signs in with a username and password and returns a session token that lasts 12 hours. Returns 401 for a wrong username or password or a disabled account, all with the same message, and 429 with `Retry-After` after 5 attempts for a username within 15 minutes |
 | `GET /auth/me` | Returns the username and role of the session. Requires `Authorization: Bearer <token>`. Returns 401 for a missing, unknown, expired, or ended session |
 | `POST /auth/logout` | Ends the session. Same authentication. Returns 204 |
-| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page. Requires an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong key and 503 when no analyst keys are configured |
+| `GET /reviews` | Lists purchases awaiting review by descending rule score or model risk, with a `next_cursor` for the next page. Requires a reviewer or admin session in the `Authorization: Bearer` header, or an analyst key in the `X-API-Key` header. Returns 401 for a missing or wrong session or key, and 503 for a key when no analyst keys are configured |
 | `GET /reviews/{purchase_id}` | Returns the evidence behind one purchase awaiting review: rule score, fired rules, ruleset version, model score and version, recent player purchases, and device activity. Same authentication. Returns 404 for a purchase that is not under review or was already decided |
 | `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. Returns 409 for a purchase that was already decided |
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -210,5 +211,29 @@ func TestLogoutDeletesTheSessionByTokenHash(t *testing.T) {
 	}
 	if _, err := service.Authenticate(context.Background(), session.Token); !errors.Is(err, models.ErrSessionNotFound) {
 		t.Fatalf("Authenticate after logout: err = %v", err)
+	}
+}
+
+func TestIdentifyReturnsUsernameAndRole(t *testing.T) {
+	service, _, _ := newTestService(t)
+	session, err := service.Login(context.Background(), "alice", testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	identity, err := service.Identify(context.Background(), session.Token)
+
+	if err != nil || identity != (platform.Identity{Username: "alice", Role: platform.RoleReviewer}) {
+		t.Fatalf("Identify = %+v, %v", identity, err)
+	}
+}
+
+func TestIdentifyMapsUnknownSessionsToNoSession(t *testing.T) {
+	service, _, _ := newTestService(t)
+
+	_, err := service.Identify(context.Background(), "unknown-token")
+
+	if !errors.Is(err, platform.ErrNoSession) {
+		t.Fatalf("err = %v, want platform.ErrNoSession", err)
 	}
 }

@@ -273,6 +273,13 @@ The command exits with an error when the username is already taken.
 
 Sign in with `POST /auth/login` and send the returned token as `Authorization: Bearer <token>`. A session lasts 12 hours, and `POST /auth/logout` ends it. After 5 sign-in attempts for a username within 15 minutes, further attempts are rejected until the 15 minutes have passed. The attempt count is kept in memory, so a restart clears it and each backend process counts on its own.
 
+| Role | Can use |
+|---|---|
+| `reviewer` | The review endpoints |
+| `admin` | The review endpoints and every statistics, quality, ruleset, blocklist and simulation endpoint, including changes |
+
+Other endpoints answer a valid session of the wrong role with 403. Review decisions and configuration changes save the username. `POST /score` accepts only the service key. A request with an `Authorization` header is checked as a session and its `X-API-Key` is ignored; requests without one still use the keys described above, until the console signs in.
+
 ## Security
 
 Configure `OPERATOR_API_KEYS` in `.env` to allow ruleset publishing and blocklist changes. Each operator needs a unique key distinct from the service and analyst keys. Generate keys with `openssl rand -hex 32` and enter your key in the Rulesets or Blocklist page.

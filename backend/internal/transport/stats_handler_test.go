@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/stats"
 )
 
@@ -33,7 +34,7 @@ func getStats(t *testing.T, src stats.Store, key, query string) *httptest.Respon
 	h := NewStatsHandler(stats.NewService(src))
 	h.now = func() time.Time { return statsNow }
 	mux := http.NewServeMux()
-	RegisterStatsRoutes(mux, h, testKey)
+	RegisterStatsRoutes(mux, h, platform.Access{ServiceKey: testKey})
 	req := httptest.NewRequest(http.MethodGet, "/stats"+query, nil)
 	if key != "" {
 		req.Header.Set("X-API-Key", key)

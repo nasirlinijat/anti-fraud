@@ -76,7 +76,7 @@ func requestCase(t *testing.T, store caseReader, target, key string) *httptest.R
 func requestReviewRead(t *testing.T, store review.Store, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(store), true), testAnalystKeys(t))
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(store), true), platform.Access{Analysts: testAnalystKeys(t)})
 	r := httptest.NewRequest(http.MethodGet, target, nil)
 	if key != "" {
 		r.Header.Set(platform.APIKeyHeader, key)

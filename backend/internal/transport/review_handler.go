@@ -37,33 +37,16 @@ func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 	return &ReviewHandler{service: service, modelEnabled: modelEnabled}
 }
 
-// RegisterReviewRoutes exposes the queue, case evidence, and decisions to authenticated analysts.
-func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, keys platform.AnalystKeys) {
-	mux.HandleFunc("GET /reviews", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
+// RegisterReviewRoutes exposes the queue, case evidence, and decisions to
+// analysts with a key and to signed-in reviewers and admins.
+func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.Access) {
+	mux.HandleFunc("GET /reviews", access.Review(func(w http.ResponseWriter, r *http.Request, _ string) {
 		h.serveQueue(w, r)
 	}))
-	mux.HandleFunc("GET /reviews/{purchase_id}", requireAnalyst(keys, func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ string) {
 		h.serveCase(w, r)
 	}))
-	mux.HandleFunc("POST /reviews/{purchase_id}/decision", requireAnalyst(keys, h.serveDecision))
-}
-
-func requireAnalyst(keys platform.AnalystKeys, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		if !keys.Configured() {
-			platform.WriteError(w, http.StatusServiceUnavailable, "review access is not configured")
-			return
-		}
-		headers := r.Header.Values(platform.APIKeyHeader)
-		if len(headers) == 1 {
-			if analystID := keys.Analyst(headers[0]); analystID != "" {
-				next(w, r, analystID)
-				return
-			}
-		}
-		platform.WriteError(w, http.StatusUnauthorized, "missing or invalid analyst key")
-	}
+	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
 }
 
 type reviewResponse struct {

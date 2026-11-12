@@ -17,13 +17,13 @@ func simulationMux(t *testing.T) (*http.ServeMux, *mocks.MockSimulationService) 
 	t.Helper()
 	service := mocks.NewMockSimulationService(gomock.NewController(t))
 	mux := http.NewServeMux()
-	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, mockServiceKey, mockOperators(t))
+	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
 	return mux, service
 }
 
 func TestSimulationRoutesDisabled(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterSimulationRoutes(mux, NewSimulationHandler(nil), false, "key", platform.OperatorKeys{})
+	RegisterSimulationRoutes(mux, NewSimulationHandler(nil), false, platform.Access{ServiceKey: "key"})
 	for _, path := range []string{"/simulations", "/simulations/x", "/simulations/x/stop"} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
