@@ -31,8 +31,12 @@ fi
 mv next app
 cd app
 echo "$1" > DEPLOYED_COMMIT
+files=(-f docker-compose.yml -f deploy/compose.prod.yml)
+if grep -q '^DD_API_KEY=.' ../.env; then
+	files+=(-f deploy/compose.datadog.yml)
+fi
 compose() {
-	docker compose -p antifraud --env-file ../.env -f docker-compose.yml -f deploy/compose.prod.yml "$@"
+	docker compose -p antifraud --env-file ../.env "${files[@]}" "$@"
 }
 compose up -d --build --wait --remove-orphans
 docker image prune -f > /dev/null

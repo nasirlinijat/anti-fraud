@@ -158,6 +158,47 @@ Start from an empty database, for example before a replay or a demo:
 dc down && docker volume rm antifraud_db-data && dc up -d --wait
 ```
 
+## Monitoring with Datadog
+
+The Datadog agent runs as one more container next to the others. It starts only when `DD_API_KEY` is set in `~/anti-fraud/.env`; without it, `deploy/deploy.sh` deploys the stack as before.
+
+| Source | What reaches Datadog |
+|---|---|
+| Server | CPU, memory, disk, network, processes (host `anti-fraud-prod`) |
+| Containers | CPU, memory and restarts of every container, and all their logs |
+| Postgres | Connections, database size, and fraud metrics from the `decisions` table: decisions per minute by outcome, scoring latency p50/p95/p99, review queue size, average model score |
+| Gateway | Requests per address, status codes and average response time (`antifraud.gateway.*`), and access logs without API keys, logins or cookies |
+| Uptime | `http.can_connect` on the backend's `/ready`, which also checks the database |
+
+The checks are configured in `deploy/datadog/conf.d/`. The fraud metrics are SQL queries in `postgres.d/conf.yaml`, so they need no change to the backend.
+
+### Turn it on
+
+1. Create a Datadog account in the **EU1** region.
+2. Add the API key to the server (from **Organization Settings, API Keys**). Paste it when asked:
+
+   ```bash
+   ssh -t -i ~/.ssh/anti-fraud.pem ubuntu@$IP 'read -rsp "Datadog API key: " k; echo; printf "DD_API_KEY=%s
+DD_SITE=datadoghq.eu
+" "$k" >> ~/anti-fraud/.env; echo saved'
+   ```
+
+3. Run `bash deploy/deploy.sh` again. The server appears under **Infrastructure** within a few minutes.
+
+### Dashboard and monitors
+
+`deploy/datadog/dashboard.json` and `deploy/datadog/monitors.json` define the **Anti-fraud production** dashboard and five monitors: backend or database down, slow scoring, gateway 5xx errors, low memory, and a growing review queue. To create or update them, add an application key (from **Organization Settings, Application Keys**) as `DD_APP_KEY` in the same way, then run on the server:
+
+```bash
+bash ~/anti-fraud/app/deploy/datadog/setup.sh
+```
+
+Running it again updates the dashboard and monitors with the same names instead of creating copies. Add a notification channel, for example `@your-email`, to the monitor messages in Datadog.
+
+### Turn it off
+
+Remove the `DD_` lines from `~/anti-fraud/.env` and run `bash deploy/deploy.sh` again; the agent container is removed.
+
 ## Security notes
 
 - PostgreSQL, the backend port and the console port listen only inside the server; only the gateway is public.

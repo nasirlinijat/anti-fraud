@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
 )
@@ -54,6 +55,9 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"TopFiredRules", storage.TopFiredRulesSQL, []any{at, until, int32(10)}},
 		{"CountReviewQueue", storage.CountReviewQueueSQL, nil},
 		{"CountModelEffects", storage.CountModelEffectsSQL, []any{at, until}},
+		{"QualityMetrics", stats.QualityMetricsSQL, []any{"simulator", "run-1"}},
+		{"QualityPending", stats.QualityPendingSQL, []any{"simulator", "run-1"}},
+		{"QualityRuns", stats.QualityRunsSQL, []any{"simulator", "", 21}},
 		{"ListModelInputs", trainingdata.ModelInputsPageSQL, []any{at, "txn-1", int32(5000)}},
 		{"PlayerEarlierModelScores", storage.PlayerEarlierModelScoresSQL, []any{"player-1", at, "txn-1"}},
 		{"CountDeviceDistinctCardsLastHour", storage.CountDeviceCardsLastHourSQL, []any{"device-1", at, "card-1"}},
