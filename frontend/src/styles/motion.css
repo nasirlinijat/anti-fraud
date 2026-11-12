@@ -1,0 +1,158 @@
+/* Every animation lives here and applies only when the user has not asked for
+   reduced motion. Each one is short, starts from the final layout, and never
+   blocks input, so the console works the same without it. */
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-fast: 120ms;
+    --motion: 200ms;
+    --motion-slow: 280ms;
+  }
+
+  .btn,
+  .icon-button,
+  .segmented button,
+  .run-link,
+  .input-action {
+    transition:
+      background-color var(--motion-fast) ease,
+      border-color var(--motion-fast) ease,
+      color var(--motion-fast) ease,
+      box-shadow var(--motion) ease,
+      transform var(--motion-fast) var(--ease-out);
+  }
+
+  .btn-primary:hover:not(:disabled, [aria-disabled='true']) {
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 45%, transparent);
+    transform: translateY(-1px);
+  }
+
+  :is(.btn, .icon-button, .segmented button, .run-link):active:not(:disabled, [aria-disabled='true']) {
+    box-shadow: none;
+    transform: scale(0.97);
+  }
+
+  .btn-link { transition: text-underline-offset var(--motion-fast) ease; }
+  .btn-link:hover { text-underline-offset: 0.35em; }
+
+  :where(input, select, textarea) { transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+  tbody tr { transition: background-color var(--motion-fast) ease; }
+  .quality-sources label { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease; }
+  .switch input { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease; }
+
+  .console-navigation a {
+    transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease;
+  }
+
+  .console-navigation a::before { transition: transform var(--motion) var(--ease-out); }
+  .console-navigation a svg { transition: transform var(--motion) var(--ease-out); }
+  .console-navigation a:hover svg { transform: translateX(2px); }
+
+  /* The drawer and its backdrop are animated in both directions. The display
+     and overlay steps keep the dialog rendered until it has left the screen. */
+  .navigation-dialog {
+    transform: translateX(-100%);
+    transition:
+      transform var(--motion-slow) var(--ease-out),
+      display var(--motion-slow) allow-discrete,
+      overlay var(--motion-slow) allow-discrete;
+  }
+
+  .navigation-dialog[open] { transform: none; }
+
+  .navigation-dialog::backdrop {
+    background: transparent;
+    transition:
+      background-color var(--motion-slow) ease,
+      display var(--motion-slow) allow-discrete,
+      overlay var(--motion-slow) allow-discrete;
+  }
+
+  .navigation-dialog[open]::backdrop { background: rgb(0 0 0 / 0.55); }
+
+  @starting-style {
+    .navigation-dialog[open] { transform: translateX(-100%); }
+    .navigation-dialog[open]::backdrop { background: transparent; }
+  }
+
+  .navigation-dialog[open] .console-navigation li,
+  .navigation-dialog[open] .account-card { animation: slide-from-start var(--motion-slow) var(--ease-out) both; }
+  .navigation-dialog[open] .console-navigation section:nth-child(2) li { animation-delay: 30ms; }
+  .navigation-dialog[open] .console-navigation section:nth-child(3) li { animation-delay: 60ms; }
+  .navigation-dialog[open] .console-navigation section:nth-child(4) li { animation-delay: 90ms; }
+  .navigation-dialog[open] .account-card { animation-delay: 120ms; }
+
+  /* A confirmation only animates in: its text is cleared as it closes. */
+  .dialog[open] { animation: pop-in var(--motion) var(--ease-out); }
+  .dialog[open]::backdrop { animation: fade-in var(--motion) ease; }
+
+  .console-content > *,
+  .review-case { animation: rise-in var(--motion-slow) var(--ease-out) both; }
+
+  .tiles > .tile { animation: rise-in var(--motion-slow) var(--ease-out) both; }
+  .tiles > .tile:nth-child(2) { animation-delay: 40ms; }
+  .tiles > .tile:nth-child(3) { animation-delay: 80ms; }
+  .tiles > .tile:nth-child(4) { animation-delay: 120ms; }
+  .loading-skeleton .tile { animation: none; }
+
+  .bar {
+    transform-origin: left center;
+    animation: grow-in var(--motion-slow) var(--ease-out) both;
+    transition: width var(--motion-slow) var(--ease-out);
+  }
+
+  .notice:not(.visually-hidden),
+  .alert,
+  .error-text { animation: drop-in var(--motion) var(--ease-out); }
+
+  details[open] > :not(summary) { animation: drop-in var(--motion) var(--ease-out); }
+
+  /* The link diagram builds outwards: lines first, then the values they lead to.
+     Marks scale around their own center, because their position is an SVG attribute. */
+  .network-edge { animation: fade-in var(--motion-slow) ease both; }
+  .network-diagram .network-anchor { animation: fade-in var(--motion-slow) ease 60ms both; }
+
+  .network-diagram .network-mark {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: mark-in var(--motion-slow) var(--ease-out) 120ms both;
+  }
+
+  .network-diagram .network-label { animation: fade-in var(--motion-slow) ease 160ms both; }
+
+  .status-pill::before { transition: background-color var(--motion) ease, border-radius var(--motion) ease; }
+
+  .login-hero > * { animation: rise-in var(--motion-slow) var(--ease-out) both; }
+  .login-hero > :nth-child(2) { animation-delay: 60ms; }
+  .login-hero > :nth-child(3) { animation-delay: 120ms; }
+  .login-form { animation: rise-in var(--motion-slow) var(--ease-out) 80ms both; }
+  .splash > * { animation: fade-in var(--motion-slow) ease both; }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+  }
+
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(8px); }
+  }
+
+  @keyframes drop-in {
+    from { opacity: 0; transform: translateY(-4px); }
+  }
+
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  }
+
+  @keyframes slide-from-start {
+    from { opacity: 0; transform: translateX(-12px); }
+  }
+
+  @keyframes mark-in {
+    from { opacity: 0; transform: scale(0.6); }
+  }
+
+  @keyframes grow-in {
+    from { transform: scaleX(0); }
+  }
+}

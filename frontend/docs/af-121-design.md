@@ -259,3 +259,13 @@ tokens, so the button, typography, status and sidebar XUI packages are no longer
 Checks: `npm run check`, `npm run build`, and the Chromium browser suite, which now
 includes sign-in, role, claim, account and assignment flows and axe scans of the
 sign-in screen and every page in both themes at 1280 and 390 pixels.
+
+## Follow-up: motion
+
+AF-143 adds short CSS animations in `src/styles/motion.css`: the mobile drawer and its
+backdrop slide and fade in both directions, buttons and navigation respond to hover and
+press, the current-page marker grows into place, pages, tiles, notices and confirmations
+fade in, and the sign-in screen has a short entrance. Nothing lasts longer than 280 ms and
+nothing moves the layout. The whole file applies only under
+`prefers-reduced-motion: no-preference`. The browser suite runs with reduced motion, so
+clicks and color checks never wait for an animation; `e2e/motion.spec.ts` turns motion on.

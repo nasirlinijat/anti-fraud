@@ -139,6 +139,7 @@ test('manual switching updates chart and native surfaces without discarding a se
 
 test('toggle motion respects reduced-motion preference', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/#/dashboard')
   await expect(page.locator('.theme-thumb')).toHaveCSS('transition-duration', '0.2s')
   await page.emulateMedia({ reducedMotion: 'reduce' })

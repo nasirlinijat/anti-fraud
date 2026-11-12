@@ -260,9 +260,6 @@ input[type='checkbox'] {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .btn,
-  .segmented button,
-  .icon-button { transition: background-color 120ms ease, border-color 120ms ease; }
   .switch input::after { transition: inset-inline-start 120ms ease; }
 }
 
