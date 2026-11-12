@@ -34,7 +34,11 @@ echo "$1" > DEPLOYED_COMMIT
 files=(-f docker-compose.yml -f deploy/compose.prod.yml)
 if grep -q '^DD_API_KEY=.' ../.env; then
 	files+=(-f deploy/compose.datadog.yml)
+	if ! grep -q '^DD_APM_ENABLED=false' ../.env; then
+		files+=(-f deploy/compose.tracing.yml)
+	fi
 fi
+echo "Compose files: ${files[*]}"
 compose() {
 	docker compose -p antifraud --env-file ../.env "${files[@]}" "$@"
 }

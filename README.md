@@ -434,7 +434,7 @@ The backend can send OpenTelemetry traces to the Datadog agent over OTLP gRPC. E
 
 Measured cost with tracing on: about 0.013 ms for the request span and 0.0015 ms per database query span, about 0.035 ms for a whole score request.
 
-On the server, `deploy/compose.tracing.yml` turns on the agent's APM and OTLP receiver and points the backend at it. It works together with the Datadog file from `deploy/compose.datadog.yml`:
+On the server, `deploy/compose.tracing.yml` turns on the agent's APM and OTLP receiver and points the backend at it. `deploy/deploy.sh` adds it together with `deploy/compose.datadog.yml` whenever `DD_API_KEY` is set, unless `.env` has `DD_APM_ENABLED=false`. By hand, the command is:
 
 ```bash
 docker compose -p antifraud --env-file ../.env -f docker-compose.yml -f deploy/compose.prod.yml -f deploy/compose.datadog.yml -f deploy/compose.tracing.yml up -d --wait

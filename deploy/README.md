@@ -170,6 +170,8 @@ The Datadog agent runs as one more container next to the others. It starts only 
 | Postgres | Connections, database size, and fraud metrics from the `decisions` table: decisions per minute by outcome, scoring latency p50/p95/p99, review queue size, average model score |
 | Gateway | Requests per address, status codes and average response time (`antifraud.gateway.*`), and access logs without API keys, logins or cookies |
 | Uptime | `http.can_connect` on the backend's `/ready`, which also checks the database |
+| Scoring | Every saved decision as DogStatsD metrics (`antifraud.score.*`): outcomes, fired rules, points, model scores and latency by ruleset and model version |
+| Traces | One APM trace per request with its database queries, model and rules, under the service `anti-fraud-backend` |
 
 The checks are configured in `deploy/datadog/conf.d/`. The fraud metrics are SQL queries in `postgres.d/conf.yaml`, so they need no change to the backend.
 
@@ -185,6 +187,8 @@ DD_SITE=datadoghq.eu
    ```
 
 3. Run `bash deploy/deploy.sh` again. The server appears under **Infrastructure** within a few minutes.
+
+With `DD_API_KEY` set, `deploy/deploy.sh` uses `deploy/compose.datadog.yml` and `deploy/compose.tracing.yml`, and prints the compose files it uses. Tracing turns on the agent's APM and sends every request as a trace. To keep the agent but turn tracing off, for example when the APM trial ends, add `DD_APM_ENABLED=false` to `~/anti-fraud/.env` and deploy again: the agent's APM stays off and the backend gets no tracing endpoint.
 
 ### Dashboard and monitors
 
