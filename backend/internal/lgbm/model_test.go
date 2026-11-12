@@ -76,7 +76,7 @@ func TestPredictTinyModel(t *testing.T) {
 // TestPredictMatchesGoldenRows checks every exported model against the scores
 // Python computed for its golden rows.
 func TestPredictMatchesGoldenRows(t *testing.T) {
-	for _, version := range []string{"lgbm-ieee-v3", "lgbm-ieee-v5", "lgbm-game-v2", "lgbm-game-v5"} {
+	for _, version := range []string{"lgbm-ieee-v3", "lgbm-ieee-v5", "lgbm-game-v2", "lgbm-game-v5", "lgbm-game-v6", "lgbm-game-v7"} {
 		t.Run(version, func(t *testing.T) {
 			checkGoldenRows(t, filepath.Join("../../models", version+".json"), filepath.Join("../../models", version+".golden.csv"))
 		})

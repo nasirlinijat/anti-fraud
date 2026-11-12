@@ -1,18 +1,22 @@
 """Checks how much of the game model's result comes from the simulator itself.
 
-Three checks, all on simulated traffic:
+Four checks, all on simulated traffic:
   1. Leave one scenario out: train without one fraud scenario and see how much
      of it the model still catches.
-  2. Empty database: score the first days of a world, when players have no
+  2. Leave one world out (with --worlds): train the earlier model's settings
+     on every world but one and score the one left out.
+  3. Empty database: score the first days of a world, when players have no
      history yet, with a model trained from day 0 (as train_game.py does) and
      with one trained only on later days.
-  3. Realistic fraud share: train and test on traffic with far less fraud.
+  4. Realistic fraud share: train and test on traffic with far less fraud.
 
 Generate the low-fraud traffic first (from the backend folder):
     go run ./cmd/simulator -dump ../ml/data/game/world3.jsonl -count 600000 -players 6000 -seed 31 -suspicious 0.015 -start 2026-01-01T00:00:00Z -run w3
 
 Usage (from the ml folder):
     python check_game.py data/game/world1.jsonl --second-world data/game/world2.jsonl --realistic data/game/world3.jsonl
+    python check_game.py data/game/world1.jsonl --second-world data/game/world2.jsonl \
+        --worlds data/game/world1.jsonl data/game/worldB.jsonl data/game/worldC.jsonl
 """
 import argparse
 import json
@@ -23,6 +27,7 @@ import export
 import features
 import train
 import train_game
+import worlds
 
 REVIEW_RATE = 0.005
 MAX_MISSED_FRAUD = 0.02
@@ -87,12 +92,33 @@ def leave_one_out(split, checkpoints, full):
     return rows
 
 
-def main():
+def leave_one_world_out(parser, args, checkpoints):
+    """The earlier model's settings trained on every world but one and scored
+    on the one left out, with the tree count chosen as train_game.py chooses
+    it, so the held-out numbers are optimistic."""
+    starts = worlds.check_world_arguments(parser, args, args.worlds)
+    data, _ = worlds.load_worlds(args.worlds, starts, args.history_window)
+    selection = worlds.Selection(args.max_trees, REVIEW_RATE, checkpoints / "lowo")
+    result = worlds.evaluate_candidate(worlds.candidate_grid()[0], data, selection)
+    for world, row in result.held_out.items():
+        print(f"left out world {world}: ROC-AUC {row['roc_auc']:.4f}, PR-AUC {row['pr_auc']:.4f}, "
+              f"caught {row['fraud_caught_at_review_rate']:.1%} at precision {row['precision_at_review_rate']:.1%}")
+    return {"settings": result.candidate.name, "trees": result.trees, "held_out": result.held_out}
+
+
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("requests", help="the simulator dump the game model is trained on")
     parser.add_argument("--second-world", required=True, help="a dump with another seed, scored from its first purchase")
     parser.add_argument("--realistic", help="a dump with a realistic fraud share, trained and tested on its own")
+    parser.add_argument("--worlds", nargs="+", default=[], help="dumps of independent worlds for leaving one world out")
     parser.add_argument("--out", default="output")
+    worlds.add_world_arguments(parser)
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     out_dir = Path(args.out)
     checkpoints = out_dir / "checkpoints" / "game-checks"
@@ -107,6 +133,8 @@ def main():
     print(f"full model ready, {time.time() - started:.0f}s")
 
     report["leave_one_scenario_out"] = leave_one_out((training, validation, test), checkpoints, full)
+    if args.worlds:
+        report["leave_one_world_out"] = leave_one_world_out(parser, args, checkpoints)
 
     # A world's first days are what the service sees on an empty database.
     world = train_game.load(args.second_world)

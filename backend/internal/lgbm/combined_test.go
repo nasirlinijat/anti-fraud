@@ -11,10 +11,23 @@ import (
 	"testing"
 )
 
-const combinedPath = "../../models/lgbm-ieee-v5-combined.json"
-
 func TestCombinedMatchesGoldenRows(t *testing.T) {
-	scorer, err := LoadScorer(combinedPath)
+	for _, version := range []string{"lgbm-ieee-v5-combined", "lgbm-game-v7-combined"} {
+		t.Run(version, func(t *testing.T) {
+			combined := loadCombined(t, "../../models/"+version+".json")
+			if combined.Version() != version || combined.Trees() < 2 {
+				t.Errorf("version %q, trees %d", combined.Version(), combined.Trees())
+			}
+			if worst := largestGoldenDifference(t, combined, "../../models/"+version+".golden.csv"); worst > 1e-12 {
+				t.Errorf("largest combined score difference from Python is %g", worst)
+			}
+		})
+	}
+}
+
+func loadCombined(t *testing.T, path string) *Combined {
+	t.Helper()
+	scorer, err := LoadScorer(path)
 	if err != nil {
 		t.Fatalf("LoadScorer: %v", err)
 	}
@@ -22,11 +35,14 @@ func TestCombinedMatchesGoldenRows(t *testing.T) {
 	if !ok {
 		t.Fatalf("LoadScorer returned %T, want *Combined", scorer)
 	}
-	if combined.Version() != "lgbm-ieee-v5-combined" || combined.Trees() < 2 {
-		t.Errorf("version %q, trees %d", combined.Version(), combined.Trees())
-	}
+	return combined
+}
 
-	file, err := os.Open("../../models/lgbm-ieee-v5-combined.golden.csv")
+// largestGoldenDifference scores every golden row, whose last column is the
+// Python score, and returns the largest difference from it.
+func largestGoldenDifference(t *testing.T, combined *Combined, path string) float64 {
+	t.Helper()
+	file, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open golden rows: %v", err)
 	}
@@ -53,9 +69,7 @@ func TestCombinedMatchesGoldenRows(t *testing.T) {
 		}
 		worst = max(worst, math.Abs(got-values[len(values)-1]))
 	}
-	if worst > 1e-12 {
-		t.Errorf("largest combined score difference from Python is %g", worst)
-	}
+	return worst
 }
 
 func TestLoadScorerLoadsSingleModels(t *testing.T) {

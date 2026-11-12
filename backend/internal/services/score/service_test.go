@@ -59,7 +59,7 @@ func TestUseModelRejectsMismatch(t *testing.T) {
 }
 
 func TestUseModelAcceptsExportedModels(t *testing.T) {
-	for _, path := range []string{"../../../models/lgbm-ieee-v5.json", "../../../models/lgbm-ieee-v5-combined.json", "../../../models/lgbm-game-v2.json", "../../../models/lgbm-game-v5.json"} {
+	for _, path := range []string{"../../../models/lgbm-ieee-v5.json", "../../../models/lgbm-ieee-v5-combined.json", "../../../models/lgbm-game-v2.json", "../../../models/lgbm-game-v5.json", "../../../models/lgbm-game-v6.json", "../../../models/lgbm-game-v7.json", "../../../models/lgbm-game-v7-combined.json"} {
 		t.Run(path, func(t *testing.T) { useExportedModel(t, path) })
 	}
 }
