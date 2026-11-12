@@ -1,4 +1,4 @@
-package score
+package storage
 
 import (
 	"context"
@@ -6,72 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
-
-// Purchase is a scored purchase as received in the score request. Optional
-// fields are nil when the request omits them.
-type Purchase struct {
-	TransactionID        string
-	EventTime            time.Time
-	AmountMinor          int64
-	PlayerID             string
-	CardToken            string
-	CardIssuer           *string
-	CardNetwork          *string
-	CardType             *string
-	CardCountry          *string
-	CardCategory         *string
-	ProductCode          *string
-	BillingRegion        *string
-	BillingCountry       *string
-	BillingDistance      *float64
-	EmailDomain          *string
-	RecipientEmailDomain *string
-	DeviceType           *string
-	DeviceName           *string
-	DeviceID             *string
-	IPAddress            *netip.Addr
-	IPCountry            *string
-	AccountCreatedAt     *time.Time
-	ClientOS             *string
-	ClientBrowser        *string
-	ScreenResolution     *string
-}
-
-// Decision is the scoring result saved with a purchase.
-type Decision struct {
-	RulesetVersion int
-	Result         scoring.Result
-	// ModelInputs maps each model feature name to its value. It is saved even
-	// when no model is loaded, so the inputs can be exported for training.
-	ModelInputs map[string]float64
-	// ModelScore is nil when no model is loaded. It is the score after blending
-	// with the player's earlier scores.
-	ModelScore *float64
-	// ModelScoreUnblended is the main model's own score, before blending and
-	// before combining with other models.
-	ModelScoreUnblended *float64
-	// ModelVersion is the version of the model that gave ModelScore. It is nil
-	// when no model is loaded.
-	ModelVersion *string
-	// Latency is how long scoring took, from the start of the request until
-	// the decision was ready to save. It is saved in microseconds.
-	Latency time.Duration
-	// FeatureHistory is the history the model inputs were computed from. Save
-	// uses it to add the purchase to the feature running totals.
-	FeatureHistory features.History
-}
-
-// ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.
-var ErrDuplicateTransaction = errors.New("transaction ID is already saved")
 
 // Conn runs queries and starts transactions. *pgxpool.Pool and pgx.Tx implement it.
 type Conn interface {
@@ -79,13 +22,13 @@ type Conn interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-// Store saves scored purchases and their decisions, and reads purchase history.
-type Store struct {
+// PurchaseStore saves scored purchases and their decisions, and reads purchase history.
+type PurchaseStore struct {
 	conn Conn
 }
 
-func NewStore(conn Conn) *Store {
-	return &Store{conn: conn}
+func NewPurchaseStore(conn Conn) *PurchaseStore {
+	return &PurchaseStore{conn: conn}
 }
 
 // CountCardPurchasesLastHourSQL counts the card's purchases in the hour up to $2.
@@ -98,7 +41,7 @@ WHERE card_token = $1
 
 // CardPurchasesLastHour counts saved purchases with the card in the hour before
 // at. A purchase exactly one hour earlier is not counted.
-func (s *Store) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error) {
+func (s *PurchaseStore) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error) {
 	var n int64
 	if err := s.conn.QueryRow(ctx, CountCardPurchasesLastHourSQL, cardToken, at.UTC()).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count card purchases: %w", err)
@@ -118,7 +61,7 @@ WHERE device_id IS NOT NULL
   AND card_token <> $3::text`
 
 // DeviceCardsLastHour counts distinct cards used on a device, including the current card.
-func (s *Store) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error) {
+func (s *PurchaseStore) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error) {
 	var n int64
 	if err := s.conn.QueryRow(ctx, CountDeviceCardsLastHourSQL, deviceID, at.UTC(), cardToken).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count distinct device cards: %w", err)
@@ -149,7 +92,7 @@ WHERE p.player_id = $2::text
   END`
 
 // TrustedHistory reads earlier allowed or approved purchases for a request with a device ID.
-func (s *Store) TrustedHistory(ctx context.Context, p Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error) {
+func (s *PurchaseStore) TrustedHistory(ctx context.Context, p models.Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error) {
 	since := p.EventTime.Add(-time.Duration(windowDays) * 24 * time.Hour)
 	var h scoring.TrustedPurchaseHistory
 	var totalMinor string
@@ -167,38 +110,8 @@ func (s *Store) TrustedHistory(ctx context.Context, p Purchase, windowDays int32
 	return &h, nil
 }
 
-// FeatureInput returns the request fields the model features use.
-func (p Purchase) FeatureInput() features.Input {
-	return features.Input{
-		TransactionID:        p.TransactionID,
-		EventTime:            p.EventTime,
-		AmountMinor:          p.AmountMinor,
-		PlayerID:             p.PlayerID,
-		CardToken:            p.CardToken,
-		CardIssuer:           p.CardIssuer,
-		CardNetwork:          p.CardNetwork,
-		CardType:             p.CardType,
-		CardCountry:          p.CardCountry,
-		CardCategory:         p.CardCategory,
-		ProductCode:          p.ProductCode,
-		BillingRegion:        p.BillingRegion,
-		BillingCountry:       p.BillingCountry,
-		BillingDistance:      p.BillingDistance,
-		EmailDomain:          p.EmailDomain,
-		RecipientEmailDomain: p.RecipientEmailDomain,
-		DeviceType:           p.DeviceType,
-		DeviceName:           p.DeviceName,
-		DeviceID:             p.DeviceID,
-		IPCountry:            p.IPCountry,
-		AccountCreatedAt:     p.AccountCreatedAt,
-		ClientOS:             p.ClientOS,
-		ClientBrowser:        p.ClientBrowser,
-		ScreenResolution:     p.ScreenResolution,
-	}
-}
-
 // FeatureHistory reads the purchase history the model features need.
-func (s *Store) FeatureHistory(ctx context.Context, in features.Input) (features.History, error) {
+func (s *PurchaseStore) FeatureHistory(ctx context.Context, in features.Input) (features.History, error) {
 	return features.NewStore(s.conn).History(ctx, in)
 }
 
@@ -215,7 +128,7 @@ WHERE p.player_id = $1
 
 // PlayerEarlierModelScores counts and sums the unblended model scores of the
 // player's purchases before the given one.
-func (s *Store) PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error) {
+func (s *PurchaseStore) PlayerEarlierModelScores(ctx context.Context, playerID string, at time.Time, transactionID string) (float64, int64, error) {
 	var count int64
 	var sum float64
 	if err := s.conn.QueryRow(ctx, PlayerEarlierModelScoresSQL, playerID, at.UTC(), transactionID).Scan(&count, &sum); err != nil {
@@ -252,11 +165,11 @@ JOIN decisions d ON d.purchase_id = p.id
 WHERE p.transaction_id = $1`
 
 // FindSavedDecision returns nil when the transaction has no saved decision.
-// It returns ErrDuplicateTransaction if the saved purchase differs.
-func (s *Store) FindSavedDecision(ctx context.Context, p Purchase) (*Decision, error) {
+// It returns models.ErrDuplicateTransaction if the saved purchase differs.
+func (s *PurchaseStore) FindSavedDecision(ctx context.Context, p models.Purchase) (*models.Decision, error) {
 	var matches bool
 	var firedRules []byte
-	var d Decision
+	var d models.Decision
 	err := s.conn.QueryRow(ctx, savedScore, purchaseArgs(p)...).Scan(
 		&matches, &d.Result.Outcome, &d.Result.Score, &firedRules, &d.RulesetVersion, &d.ModelScore, &d.ModelVersion,
 	)
@@ -267,7 +180,7 @@ func (s *Store) FindSavedDecision(ctx context.Context, p Purchase) (*Decision, e
 		return nil, fmt.Errorf("read saved decision: %w", err)
 	}
 	if !matches {
-		return nil, ErrDuplicateTransaction
+		return nil, models.ErrDuplicateTransaction
 	}
 	if err := json.Unmarshal(firedRules, &d.Result.FiredRules); err != nil {
 		return nil, fmt.Errorf("decode saved fired rules: %w", err)
@@ -303,8 +216,8 @@ INSERT INTO decisions (
 )`
 
 // Save stores a purchase and its decision in one transaction and returns the
-// purchase ID. It returns ErrDuplicateTransaction if the transaction ID is already saved.
-func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error) {
+// purchase ID. It returns models.ErrDuplicateTransaction if the transaction ID is already saved.
+func (s *PurchaseStore) Save(ctx context.Context, p models.Purchase, d models.Decision) (int64, error) {
 	firedRules := d.Result.FiredRules
 	if firedRules == nil {
 		firedRules = []scoring.FiredRule{}
@@ -333,7 +246,7 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 	if err := tx.QueryRow(ctx, insertPurchase, purchaseArgs(p)...).Scan(&id); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "purchases_transaction_id_key" {
-			return 0, ErrDuplicateTransaction
+			return 0, models.ErrDuplicateTransaction
 		}
 		return 0, fmt.Errorf("insert purchase %s: %w", p.TransactionID, err)
 	}
@@ -357,7 +270,7 @@ func (s *Store) Save(ctx context.Context, p Purchase, d Decision) (int64, error)
 
 // purchaseArgs binds the purchase fields for insertPurchase and savedScore, in
 // column order. Nil optional fields bind NULL.
-func purchaseArgs(p Purchase) []any {
+func purchaseArgs(p models.Purchase) []any {
 	var accountCreatedAt *time.Time
 	if p.AccountCreatedAt != nil {
 		utc := p.AccountCreatedAt.UTC()

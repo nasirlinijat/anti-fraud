@@ -1,4 +1,4 @@
-package score
+package storage
 
 import (
 	"context"
@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
@@ -44,49 +44,10 @@ func testTx(t *testing.T) pgx.Tx {
 	return tx
 }
 
-func testIsolatedPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx := t.Context()
-	pool := testPool(t)
-	schema := fmt.Sprintf("score_retries_%d", time.Now().UnixNano())
-	ident := pgx.Identifier{schema}.Sanitize()
-	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+ident); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if _, err := pool.Exec(context.Background(), "DROP SCHEMA "+ident+" CASCADE"); err != nil {
-			t.Error(err)
-		}
-	})
-	config := pool.Config()
-	config.MaxConns = max(config.MaxConns, 3)
-	config.ConnConfig.RuntimeParams["search_path"] = schema
-	isolated, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(isolated.Close)
-
-	migrations, err := filepath.Glob("../../migrations/*.up.sql")
-	if err != nil || len(migrations) == 0 {
-		t.Fatalf("find migrations: %v, found %d", err, len(migrations))
-	}
-	for _, path := range migrations {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := isolated.Exec(ctx, string(body)); err != nil {
-			t.Fatalf("apply %s: %v", path, err)
-		}
-	}
-	return isolated
-}
-
 func ptr[T any](v T) *T { return &v }
 
-func minimalPurchase(transactionID string) Purchase {
-	return Purchase{
+func minimalPurchase(transactionID string) models.Purchase {
+	return models.Purchase{
 		TransactionID: transactionID,
 		EventTime:     time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC),
 		AmountMinor:   1999,
@@ -106,9 +67,9 @@ func countRows(t *testing.T, conn Conn, query string, args ...any) int {
 
 // fullPurchase returns a purchase with every optional field set. Its event
 // time is in a zone other than UTC.
-func fullPurchase() Purchase {
+func fullPurchase() models.Purchase {
 	baku := time.FixedZone("Baku", 4*3600)
-	return Purchase{
+	return models.Purchase{
 		TransactionID:        "txn-full",
 		EventTime:            time.Date(2026, 11, 8, 14, 30, 0, 0, baku),
 		AmountMinor:          75000,
@@ -146,11 +107,11 @@ type savedDecision struct {
 
 // readSaved reads back a purchase that has every optional field, and its
 // decision.
-func readSaved(t *testing.T, tx pgx.Tx, id int64) (Purchase, savedDecision) {
+func readSaved(t *testing.T, tx pgx.Tx, id int64) (models.Purchase, savedDecision) {
 	t.Helper()
 	ctx := context.Background()
 	var (
-		got        Purchase
+		got        models.Purchase
 		d          savedDecision
 		ip         netip.Addr
 		accountAt  time.Time
@@ -190,7 +151,7 @@ func readSaved(t *testing.T, tx pgx.Tx, id int64) (Purchase, savedDecision) {
 func TestSaveStoresPurchaseAndDecision(t *testing.T) {
 	tx := testTx(t)
 	p := fullPurchase()
-	d := Decision{
+	d := models.Decision{
 		RulesetVersion: 1,
 		Result: scoring.Result{
 			Outcome: scoring.OutcomeReview,
@@ -204,7 +165,7 @@ func TestSaveStoresPurchaseAndDecision(t *testing.T) {
 		ModelScore:  ptr(0.42),
 	}
 
-	id, err := NewStore(tx).Save(context.Background(), p, d)
+	id, err := NewPurchaseStore(tx).Save(context.Background(), p, d)
 	if err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -241,8 +202,8 @@ func TestSaveWithoutOptionalFields(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 
-	d := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
-	id, err := NewStore(tx).Save(ctx, minimalPurchase("txn-minimal"), d)
+	d := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+	id, err := NewPurchaseStore(tx).Save(ctx, minimalPurchase("txn-minimal"), d)
 	if err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -265,10 +226,10 @@ func TestSaveWithoutOptionalFields(t *testing.T) {
 func TestSaveIsAtomic(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
-	store := NewStore(tx)
+	store := NewPurchaseStore(tx)
 
 	_, err := store.Save(ctx, minimalPurchase("txn-bad-version"),
-		Decision{RulesetVersion: 9999, Result: scoring.Result{Outcome: scoring.OutcomeAllow}})
+		models.Decision{RulesetVersion: 9999, Result: scoring.Result{Outcome: scoring.OutcomeAllow}})
 	if err == nil {
 		t.Fatal("Save with an unknown ruleset version succeeded, want an error")
 	}
@@ -276,7 +237,7 @@ func TestSaveIsAtomic(t *testing.T) {
 		t.Errorf("purchase was saved without its decision")
 	}
 	p := minimalPurchase("txn-bad-version")
-	if _, err := store.Save(ctx, p, Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}); err != nil {
+	if _, err := store.Save(ctx, p, models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}); err != nil {
 		t.Fatalf("retry after rollback: %v", err)
 	}
 	if got, err := store.FindSavedDecision(ctx, p); err != nil || got == nil || got.Result.Outcome != scoring.OutcomeAllow {
@@ -287,23 +248,23 @@ func TestSaveIsAtomic(t *testing.T) {
 func TestSaveRejectsDuplicateTransaction(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
-	store := NewStore(tx)
-	d := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+	store := NewPurchaseStore(tx)
+	d := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
 
 	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); err != nil {
 		t.Fatalf("first Save: %v", err)
 	}
-	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); !errors.Is(err, ErrDuplicateTransaction) {
-		t.Errorf("second Save error = %v, want ErrDuplicateTransaction", err)
+	if _, err := store.Save(ctx, minimalPurchase("txn-dup"), d); !errors.Is(err, models.ErrDuplicateTransaction) {
+		t.Errorf("second Save error = %v, want models.ErrDuplicateTransaction", err)
 	}
 }
 
 func TestCardPurchasesLastHour(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
-	store := NewStore(tx)
+	store := NewPurchaseStore(tx)
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
-	d := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+	d := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
 
 	saved := []struct {
 		id   string
@@ -338,11 +299,11 @@ func TestCardPurchasesLastHour(t *testing.T) {
 
 func TestDeviceCardsLastHour(t *testing.T) {
 	tx := testTx(t)
-	store := NewStore(tx)
+	store := NewPurchaseStore(tx)
 	ctx := t.Context()
 	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	device := "device-count"
-	decision := Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
+	decision := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}}
 	for i, row := range []struct {
 		device *string
 		card   string

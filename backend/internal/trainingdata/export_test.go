@@ -11,8 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
 )
 
@@ -45,9 +46,9 @@ func ptr[T any](v T) *T { return &v }
 
 func save(t *testing.T, tx pgx.Tx, id string, at time.Time, inputs map[string]float64, modelScore *float64) {
 	t.Helper()
-	p := score.Purchase{TransactionID: id, EventTime: at, AmountMinor: 1000, PlayerID: "player-" + id, CardToken: "card"}
-	d := score.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}, ModelInputs: inputs, ModelScore: modelScore}
-	if _, err := score.NewStore(tx).Save(context.Background(), p, d); err != nil {
+	p := models.Purchase{TransactionID: id, EventTime: at, AmountMinor: 1000, PlayerID: "player-" + id, CardToken: "card"}
+	d := models.Decision{RulesetVersion: 1, Result: scoring.Result{Outcome: scoring.OutcomeAllow}, ModelInputs: inputs, ModelScore: modelScore}
+	if _, err := storage.NewPurchaseStore(tx).Save(context.Background(), p, d); err != nil {
 		t.Fatalf("Save %s: %v", id, err)
 	}
 }

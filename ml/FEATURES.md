@@ -136,7 +136,7 @@ The service reads the thresholds at startup from the report next to `MODEL_PATH`
 
 - Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text. The player query also counts earlier purchases with the same device ID, and the card query also returns the card's earlier purchase count and how many had the same billing region.
 - Feature 53 reads the distinct earlier players on the device ID with the `DeviceIDHistorySQL` query, which is served by the partial index on `device_id` from migration 000014. It only runs when the request has a device ID.
-- `UseModel` in `backend/internal/score/handler.go` accepts a model whose `feature_names` are the first features of `Names` and scores it with only those features.
+- `UseModel` in `backend/internal/services/score/service.go` accepts a model whose `feature_names` are the first features of `Names` and scores it with only those features.
 - Features 18, 26, 29, 30, 42, 43 and 44 read running totals from the `feature_counts` table: all purchases, and purchases per email domain, device name, client OS, browser and screen, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.
 
 ## Checking the Go implementation

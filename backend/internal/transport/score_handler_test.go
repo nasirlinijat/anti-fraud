@@ -1,4 +1,4 @@
-package score
+package transport
 
 import (
 	"context"
@@ -19,9 +19,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
 const testKey = "test-key"
@@ -57,7 +60,7 @@ type fakeRulesets struct {
 func (f fakeRulesets) Active(context.Context) (scoring.Ruleset, error) { return f.rs, f.err }
 
 type fakePurchases struct {
-	find             func(Purchase) (*Decision, error)
+	find             func(models.Purchase) (*models.Decision, error)
 	findCalls        int
 	cardUses         int
 	countErr         error
@@ -71,14 +74,14 @@ type fakePurchases struct {
 	saveErr          error
 	countCard        string
 	countAt          time.Time
-	saved            []Purchase
-	decisions        []Decision
+	saved            []models.Purchase
+	decisions        []models.Decision
 
 	trustedHistoryErr   error
 	trustedHistoryCalls int
 }
 
-func (f *fakePurchases) FindSavedDecision(_ context.Context, p Purchase) (*Decision, error) {
+func (f *fakePurchases) FindSavedDecision(_ context.Context, p models.Purchase) (*models.Decision, error) {
 	f.findCalls++
 	if f.find != nil {
 		return f.find(p)
@@ -96,7 +99,7 @@ func (f *fakePurchases) DeviceCardsLastHour(context.Context, string, string, tim
 	return 0, f.deviceCardsErr
 }
 
-func (f *fakePurchases) TrustedHistory(context.Context, Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
+func (f *fakePurchases) TrustedHistory(context.Context, models.Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
 	f.trustedHistoryCalls++
 	return nil, f.trustedHistoryErr
 }
@@ -109,7 +112,7 @@ func (f *fakePurchases) PlayerEarlierModelScores(context.Context, string, time.T
 	return f.earlierSum, f.earlierCount, f.earlierErr
 }
 
-func (f *fakePurchases) Save(_ context.Context, p Purchase, d Decision) (int64, error) {
+func (f *fakePurchases) Save(_ context.Context, p models.Purchase, d models.Decision) (int64, error) {
 	if f.saveErr != nil {
 		return 0, f.saveErr
 	}
@@ -133,15 +136,15 @@ func (f *fakeBlocklist) Match(_ context.Context, s blocklist.Subject) (blocklist
 }
 
 // serve sends a request to a handler whose blocklist is empty.
-func serve(t *testing.T, r Rulesets, p Purchases, key, body string) *httptest.ResponseRecorder {
+func serve(t *testing.T, r score.Rulesets, p score.Purchases, key, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return serveWith(t, r, &fakeBlocklist{}, p, key, body)
 }
 
-func serveWith(t *testing.T, r Rulesets, b Blocklist, p Purchases, key, body string) *httptest.ResponseRecorder {
+func serveWith(t *testing.T, r score.Rulesets, b score.Blocklist, p score.Purchases, key, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewHandler(r, b, p), testKey)
+	registerScore(mux, newHandler(r, b, p), testKey)
 	return postScore(t.Context(), mux, key, body)
 }
 
@@ -196,7 +199,7 @@ func TestScoreAllowsMinimalPurchase(t *testing.T) {
 		t.Errorf("response = %+v, want %+v", got, want)
 	}
 
-	wantPurchase := Purchase{
+	wantPurchase := models.Purchase{
 		TransactionID: "txn-1",
 		EventTime:     time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC),
 		AmountMinor:   1999,
@@ -410,7 +413,7 @@ func TestScoreRequiresAPIKey(t *testing.T) {
 }
 
 func TestScoreSavedDecision(t *testing.T) {
-	saved := &Decision{
+	saved := &models.Decision{
 		RulesetVersion: 2,
 		Result: scoring.Result{
 			Outcome: scoring.OutcomeReview,
@@ -426,15 +429,15 @@ func TestScoreSavedDecision(t *testing.T) {
 	tests := []struct {
 		name       string
 		race       bool
-		decision   *Decision
+		decision   *models.Decision
 		lookupErr  error
 		wantStatus int
 	}{
 		{"matching", false, saved, nil, http.StatusOK},
-		{"conflict", false, nil, ErrDuplicateTransaction, http.StatusConflict},
+		{"conflict", false, nil, models.ErrDuplicateTransaction, http.StatusConflict},
 		{"lookup error", false, nil, boom, http.StatusInternalServerError},
 		{"race matching", true, saved, nil, http.StatusOK},
-		{"race conflict", true, nil, ErrDuplicateTransaction, http.StatusConflict},
+		{"race conflict", true, nil, models.ErrDuplicateTransaction, http.StatusConflict},
 		{"race missing", true, nil, nil, http.StatusInternalServerError},
 		{"race lookup error", true, nil, boom, http.StatusInternalServerError},
 	}
@@ -445,12 +448,12 @@ func TestScoreSavedDecision(t *testing.T) {
 			blocklist := &fakeBlocklist{err: active.err}
 			wantLookups := 1
 			if tt.race {
-				purchases.saveErr = ErrDuplicateTransaction
+				purchases.saveErr = models.ErrDuplicateTransaction
 				active = fakeRulesets{rs: testRuleset}
 				blocklist.err = nil
 				wantLookups = 2
 			}
-			purchases.find = func(Purchase) (*Decision, error) {
+			purchases.find = func(models.Purchase) (*models.Decision, error) {
 				if tt.race && purchases.findCalls == 1 {
 					return nil, nil
 				}
@@ -637,7 +640,7 @@ func TestScoreBlocklistWithPostgres(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), NewStore(tx)), testKey)
+	registerScore(mux, newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx)), testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(`{"transaction_id": "bl-1",
 		"event_time": "2026-11-08T10:00:00Z", "amount_minor": 1000, "player_id": "bl-player", "card_token": "bl-card"}`))
 	req.Header.Set(platform.APIKeyHeader, testKey)
@@ -661,9 +664,9 @@ func TestScoreBlocklistWithPostgres(t *testing.T) {
 // purchase on a card within an hour fires card_velocity under the default ruleset.
 func TestScoreWithPostgres(t *testing.T) {
 	tx := testTx(t)
-	h := NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), NewStore(tx))
+	h := newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 
 	post := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
@@ -714,13 +717,13 @@ func TestScoreWithPostgres(t *testing.T) {
 }
 
 type deviceHistoryStore struct {
-	*Store
+	*storage.PurchaseStore
 	calls int
 }
 
 func (s *deviceHistoryStore) DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error) {
 	s.calls++
-	return s.Store.DeviceCardsLastHour(ctx, deviceID, cardToken, at)
+	return s.PurchaseStore.DeviceCardsLastHour(ctx, deviceID, cardToken, at)
 }
 
 // publishDeviceCardRuleset publishes a ruleset with only the device card
@@ -762,10 +765,10 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	tx := testTx(t)
 	ctx := t.Context()
 	rulesetStore := rulesets.NewStore(tx)
-	purchaseStore := &deviceHistoryStore{Store: NewStore(tx)}
+	purchaseStore := &deviceHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}
 	mux := http.NewServeMux()
 	rulesets.RegisterRoutes(mux, rulesetStore, testKey, testOperators(t))
-	RegisterRoutes(mux, NewHandler(rulesetStore, blocklist.NewStore(tx), purchaseStore), testKey)
+	registerScore(mux, newHandler(rulesetStore, blocklist.NewStore(tx), purchaseStore), testKey)
 
 	originalRuleset, err := rulesetStore.Active(ctx)
 	if err != nil {
@@ -844,13 +847,13 @@ func encodeScoreFields(t *testing.T, fields map[string]any) string {
 
 func TestScoreRetryComparesStoredPurchase(t *testing.T) {
 	tx := testTx(t)
-	handler := NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), NewStore(tx))
+	handler := newHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))
 	model := &fakeModel{score: 0.75}
 	if err := handler.UseModel(model, testPolicy); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, handler, testKey)
+	registerScore(mux, handler, testKey)
 	post := func(fields map[string]any) *httptest.ResponseRecorder {
 		return postScore(t.Context(), mux, testKey, encodeScoreFields(t, fields))
 	}
@@ -915,7 +918,7 @@ func TestScoreRetryReturnsLegacyDecision(t *testing.T) {
 		VALUES ($1, 1, 'review', 60, '[{"name":"card_velocity","points":60}]', '{}', 0.65)`, id); err != nil {
 		t.Fatal(err)
 	}
-	store := NewStore(tx)
+	store := storage.NewPurchaseStore(tx)
 	active := fakeRulesets{err: errors.New("scoring should be bypassed")}
 	for _, body := range []string{
 		minimalBody,
@@ -936,13 +939,13 @@ func TestScoreRetryReturnsLegacyDecision(t *testing.T) {
 }
 
 type synchronizedScoreStore struct {
-	*Store
+	*storage.PurchaseStore
 	arrived chan<- struct{}
 	start   <-chan struct{}
 }
 
-func (s synchronizedScoreStore) FindSavedDecision(ctx context.Context, p Purchase) (*Decision, error) {
-	d, err := s.Store.FindSavedDecision(ctx, p)
+func (s synchronizedScoreStore) FindSavedDecision(ctx context.Context, p models.Purchase) (*models.Decision, error) {
+	d, err := s.PurchaseStore.FindSavedDecision(ctx, p)
 	if d == nil && err == nil {
 		s.arrived <- struct{}{}
 		select {
@@ -966,9 +969,9 @@ func synchronizedScoreMuxes(t *testing.T, pool *pgxpool.Pool, arrived chan<- str
 			t.Fatal(err)
 		}
 		t.Cleanup(conn.Release)
-		store := synchronizedScoreStore{Store: NewStore(conn), arrived: arrived, start: start}
+		store := synchronizedScoreStore{PurchaseStore: storage.NewPurchaseStore(conn), arrived: arrived, start: start}
 		muxes[i] = http.NewServeMux()
-		RegisterRoutes(muxes[i], NewHandler(rulesets.NewStore(conn), blocklist.NewStore(conn), store), testKey)
+		registerScore(muxes[i], newHandler(rulesets.NewStore(conn), blocklist.NewStore(conn), store), testKey)
 	}
 	return muxes
 }
@@ -1063,4 +1066,22 @@ func TestConcurrentScoreRetries(t *testing.T) {
 			checkOnePurchaseSaved(t, pool)
 		})
 	}
+}
+
+type scoreTestHandler struct {
+	*ScoreHandler
+	service *score.Service
+}
+
+func newHandler(r score.Rulesets, b score.Blocklist, p score.Purchases) *scoreTestHandler {
+	svc := score.NewService(r, b, p)
+	return &scoreTestHandler{ScoreHandler: NewScoreHandler(svc), service: svc}
+}
+
+func (h *scoreTestHandler) UseModel(m score.Model, p scoring.ModelPolicy) error {
+	return h.service.UseModel(m, p)
+}
+
+func registerScore(mux *http.ServeMux, h *scoreTestHandler, apiKey string) {
+	RegisterScoreRoutes(mux, h.ScoreHandler, apiKey)
 }

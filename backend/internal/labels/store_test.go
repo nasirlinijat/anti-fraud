@@ -155,7 +155,7 @@ func TestCheckpointRollsBackWithLabel(t *testing.T) {
 	}
 }
 func TestScoringBoundary(t *testing.T) {
-	for _, pkg := range []string{"score", "scoring", "features", "lgbm"} {
+	for _, pkg := range []string{"services/score", "storage", "transport", "models", "scoring", "features", "lgbm"} {
 		files, e := os.ReadDir("../" + pkg)
 		if e != nil {
 			t.Fatal(e)

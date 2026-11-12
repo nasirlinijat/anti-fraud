@@ -14,9 +14,11 @@ import (
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
 
 const testKey = "test-key"
@@ -49,12 +51,12 @@ func (noBlocklist) Match(context.Context, blocklist.Subject) (blocklist.Entry, b
 // CountCardPurchasesLastHour.
 type purchases struct {
 	mu        sync.Mutex
-	saved     []score.Purchase
-	decisions []score.Decision
+	saved     []models.Purchase
+	decisions []models.Decision
 	ids       map[string]int
 }
 
-func (s *purchases) FindSavedDecision(_ context.Context, p score.Purchase) (*score.Decision, error) {
+func (s *purchases) FindSavedDecision(_ context.Context, p models.Purchase) (*models.Decision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i, ok := s.ids[p.TransactionID]
@@ -62,7 +64,7 @@ func (s *purchases) FindSavedDecision(_ context.Context, p score.Purchase) (*sco
 		return nil, nil
 	}
 	if !reflect.DeepEqual(s.saved[i], p) {
-		return nil, score.ErrDuplicateTransaction
+		return nil, models.ErrDuplicateTransaction
 	}
 	decision := s.decisions[i]
 	return &decision, nil
@@ -88,7 +90,7 @@ func (s *purchases) DeviceCardsLastHour(context.Context, string, string, time.Ti
 	return 0, errors.New("unexpected device history lookup")
 }
 
-func (s *purchases) TrustedHistory(context.Context, score.Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
+func (s *purchases) TrustedHistory(context.Context, models.Purchase, int32) (*scoring.TrustedPurchaseHistory, error) {
 	return nil, errors.New("unexpected trusted history lookup")
 }
 
@@ -96,11 +98,11 @@ func (s *purchases) PlayerEarlierModelScores(context.Context, string, time.Time,
 	return 0, 0, nil
 }
 
-func (s *purchases) Save(_ context.Context, p score.Purchase, d score.Decision) (int64, error) {
+func (s *purchases) Save(_ context.Context, p models.Purchase, d models.Decision) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.ids[p.TransactionID]; ok {
-		return 0, score.ErrDuplicateTransaction
+		return 0, models.ErrDuplicateTransaction
 	}
 	s.ids[p.TransactionID] = len(s.saved)
 	s.saved = append(s.saved, p)
@@ -112,7 +114,7 @@ func newServer(t *testing.T) (*httptest.Server, *purchases) {
 	t.Helper()
 	store := &purchases{ids: map[string]int{}}
 	mux := http.NewServeMux()
-	score.RegisterRoutes(mux, score.NewHandler(rulesets{}, noBlocklist{}, store), testKey)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets{}, noBlocklist{}, store)), testKey)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, store

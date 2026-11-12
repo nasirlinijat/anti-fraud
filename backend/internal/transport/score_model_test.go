@@ -1,16 +1,15 @@
-package score
+package transport
 
 import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
 )
 
 var testPolicy = scoring.ModelPolicy{FlagAt: 0.3, ClearBelow: 0.01}
@@ -39,14 +38,14 @@ func (m *fakeModel) Features() []string {
 	return features.Names
 }
 
-func serveModel(t *testing.T, m Model, b Blocklist, p Purchases, body string) *httptest.ResponseRecorder {
+func serveModel(t *testing.T, m score.Model, b score.Blocklist, p score.Purchases, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := NewHandler(fakeRulesets{rs: testRuleset}, b, p)
+	h := newHandler(fakeRulesets{rs: testRuleset}, b, p)
 	if err := h.UseModel(m, testPolicy); err != nil {
 		t.Fatalf("UseModel: %v", err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
 	req.Header.Set("X-API-Key", testKey)
 	rec := httptest.NewRecorder()
@@ -172,60 +171,15 @@ func TestOlderModelIsScoredWithItsOwnFeatures(t *testing.T) {
 	}
 }
 
-func TestUseModelRejectsMismatch(t *testing.T) {
-	h := NewHandler(fakeRulesets{}, &fakeBlocklist{}, &fakePurchases{})
-	reordered := append([]string{features.Names[1], features.Names[0]}, features.Names[2:]...)
-	if err := h.UseModel(&fakeModel{features: reordered}, testPolicy); err == nil {
-		t.Error("UseModel accepted a model with features in another order")
-	}
-	if err := h.UseModel(&fakeModel{features: features.Names[1:]}, testPolicy); err == nil {
-		t.Error("UseModel accepted a model that skips the first feature")
-	}
-	if err := h.UseModel(&fakeModel{features: append(slices.Clone(features.Names), "unknown")}, testPolicy); err == nil {
-		t.Error("UseModel accepted a model with a feature the service does not compute")
-	}
-	if err := h.UseModel(&fakeModel{features: []string{}}, testPolicy); err == nil {
-		t.Error("UseModel accepted a model without features")
-	}
-	if err := h.UseModel(&fakeModel{}, scoring.ModelPolicy{FlagAt: 0.1, ClearBelow: 0.2}); err == nil {
-		t.Error("UseModel accepted a bad policy")
-	}
-	if h.model != nil {
-		t.Error("a rejected model was kept")
-	}
-}
-
-func TestUseModelAcceptsExportedModels(t *testing.T) {
-	for _, path := range []string{"../../models/lgbm-ieee-v5.json", "../../models/lgbm-ieee-v5-combined.json", "../../models/lgbm-game-v2.json", "../../models/lgbm-game-v5.json"} {
-		t.Run(path, func(t *testing.T) { useExportedModel(t, path) })
-	}
-}
-
-func useExportedModel(t *testing.T, path string) {
-	t.Helper()
-	model, err := lgbm.LoadScorer(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	policy, err := lgbm.LoadPolicy(lgbm.ReportPath(path))
-	if err != nil {
-		t.Fatalf("LoadPolicy: %v", err)
-	}
-	h := NewHandler(fakeRulesets{}, &fakeBlocklist{}, &fakePurchases{})
-	if err := h.UseModel(model, policy); err != nil {
-		t.Fatalf("UseModel: %v", err)
-	}
-}
-
 func TestModelScoreIsBlendedWithEarlierScores(t *testing.T) {
 	purchases := &fakePurchases{earlierSum: 1.6, earlierCount: 2}
-	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	h := newHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
 	policy := scoring.ModelPolicy{FlagAt: 0.4, ClearBelow: 0.01, PlayerBlendWeight: 0.5}
 	if err := h.UseModel(&fakeModel{score: 0.2}, policy); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
 	req.Header.Set("X-API-Key", testKey)
 	rec := httptest.NewRecorder()
@@ -248,12 +202,12 @@ func TestModelScoreIsBlendedWithEarlierScores(t *testing.T) {
 func TestBlendNeedsEarlierScores(t *testing.T) {
 	boom := errors.New("database is down")
 	purchases := &fakePurchases{earlierErr: boom}
-	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	h := newHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
 	if err := h.UseModel(&fakeModel{score: 0.2}, scoring.ModelPolicy{FlagAt: 0.6, ClearBelow: 0.01, PlayerBlendWeight: 0.5}); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
 	req.Header.Set("X-API-Key", testKey)
 	rec := httptest.NewRecorder()
@@ -282,12 +236,12 @@ func (c *fakeCombination) Combine(scores []float64) float64 {
 func TestBlendAppliesToTheMainModelOfACombination(t *testing.T) {
 	purchases := &fakePurchases{earlierSum: 1.6, earlierCount: 2}
 	model := &fakeCombination{scores: []float64{0.2, 0.3}}
-	h := NewHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
+	h := newHandler(fakeRulesets{rs: testRuleset}, &fakeBlocklist{}, purchases)
 	if err := h.UseModel(model, scoring.ModelPolicy{FlagAt: 0.9, ClearBelow: 0.01, PlayerBlendWeight: 0.5}); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
 	req.Header.Set("X-API-Key", testKey)
 	rec := httptest.NewRecorder()
@@ -307,14 +261,14 @@ func TestBlendAppliesToTheMainModelOfACombination(t *testing.T) {
 	}
 }
 
-func serveModelWithRuleset(t *testing.T, m Model, rs scoring.Ruleset, p Purchases, body string) scoreResponse {
+func serveModelWithRuleset(t *testing.T, m score.Model, rs scoring.Ruleset, p score.Purchases, body string) scoreResponse {
 	t.Helper()
-	h := NewHandler(fakeRulesets{rs: rs}, &fakeBlocklist{}, p)
+	h := newHandler(fakeRulesets{rs: rs}, &fakeBlocklist{}, p)
 	if err := h.UseModel(m, testPolicy); err != nil {
 		t.Fatalf("UseModel: %v", err)
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, h, testKey)
+	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
 	req.Header.Set("X-API-Key", testKey)
 	rec := httptest.NewRecorder()

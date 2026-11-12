@@ -16,7 +16,9 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/rulesets"
-	"github.com/nasirlinijat/anti-fraud/backend/internal/score"
+	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/transport"
 )
 
 const testKey = "test-key"
@@ -168,7 +170,7 @@ func TestNewEntryBlocksNextPurchase(t *testing.T) {
 		t.Fatal(err)
 	}
 	blocklist.RegisterRoutes(mux, blocklist.NewHandler(blocklist.NewStore(tx)), testKey, keys)
-	score.RegisterRoutes(mux, score.NewHandler(rulesets.NewStore(tx), blocklist.NewStore(tx), score.NewStore(tx)), testKey)
+	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoresvc.NewService(rulesets.NewStore(tx), blocklist.NewStore(tx), storage.NewPurchaseStore(tx))), testKey)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
