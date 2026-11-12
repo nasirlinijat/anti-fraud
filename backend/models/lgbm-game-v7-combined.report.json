@@ -1,0 +1,351 @@
+{
+  "features": [
+    "amount",
+    "cents",
+    "product_code",
+    "card_network",
+    "card_type",
+    "player_txn_count",
+    "player_avg_amount",
+    "amount_to_avg",
+    "secs_since_last",
+    "secs_since_first",
+    "card_uses_1h",
+    "card_uses_24h",
+    "player_distinct_cards",
+    "email_is_new_for_player",
+    "card_country",
+    "card_category",
+    "billing_country",
+    "email_domain_share",
+    "has_recipient_email",
+    "recipient_email_differs",
+    "player_max_amount",
+    "player_uses_1h",
+    "player_uses_24h",
+    "player_same_amount_count",
+    "player_distinct_emails",
+    "email_players_share",
+    "has_device_info",
+    "device_type",
+    "device_info_share",
+    "device_players_share",
+    "device_is_new_for_player",
+    "player_distinct_devices",
+    "card_distinct_players",
+    "card1_distinct_players",
+    "card1_distinct_addresses",
+    "card1_distinct_emails",
+    "billing_distance",
+    "account_age_days",
+    "has_client_info",
+    "os_family",
+    "browser_family",
+    "os_share",
+    "browser_share",
+    "screen_share",
+    "screen_area",
+    "os_is_new_for_player",
+    "browser_is_new_for_player",
+    "player_distinct_browsers",
+    "card_issuer_code",
+    "billing_region_code",
+    "ip_country_differs_from_card",
+    "device_id_is_new_for_player",
+    "device_distinct_players",
+    "billing_region_is_new_for_card"
+  ],
+  "data": "simulated game traffic from several worlds",
+  "combination": "highest percentile of lgbm-game-v7 (multi-world) and lgbm-game-v5 (single-world)",
+  "parts": [
+    {
+      "version": "lgbm-game-v7",
+      "table_source": "leave-one-world-out scores of codes+history_age+amount_levels/strong at 200 trees, seed 1234: each reference row is scored by the fold model trained without its world"
+    },
+    {
+      "version": "lgbm-game-v5",
+      "table_source": "scores of the exported lgbm-game-v5: rows of world1 are kept only from its validation (90-104) and test (105-124) days, because it trained on days 0-84; every row of the other worlds is unseen by it"
+    }
+  ],
+  "policy": {
+    "flag_at": 0.977602,
+    "clear_below": 0.427525,
+    "flag_by": "review_rate",
+    "review_rate": 0.01,
+    "review_cost": null,
+    "target_precision": null,
+    "max_missed_fraud": 0.02,
+    "player_blend_weight": 0,
+    "chosen_on": "combined scores of the reference set (see reference_set): flag_at is the quantile of the legitimate rows at 1 - review_rate, clear_below the quantile of the fraud rows at max_missed_fraud",
+    "reference_effect": {
+      "flagged_fraud_money_caught": 0.4616,
+      "fraud_money_missed_by_clearing": 0.0123,
+      "flagged_share": 0.0396,
+      "flagged_precision": 0.7611,
+      "flagged_fraud_caught": 0.4682,
+      "cleared_share": 0.2782,
+      "cleared_fraud_rate": 0.0046,
+      "cleared_legit_share": 0.2959,
+      "fraud_missed_by_clearing": 0.02,
+      "legit_flagged": 0.0101
+    },
+    "reference_effect_per_world": {
+      "world1": {
+        "flagged_fraud_money_caught": 0.5239,
+        "fraud_money_missed_by_clearing": 0.0,
+        "flagged_share": 0.0622,
+        "flagged_precision": 0.9992,
+        "flagged_fraud_caught": 0.6663,
+        "cleared_share": 0.5343,
+        "cleared_fraud_rate": 0.0,
+        "cleared_legit_share": 0.5893,
+        "fraud_missed_by_clearing": 0.0,
+        "legit_flagged": 0.0001
+      },
+      "worldB": {
+        "flagged_fraud_money_caught": 0.5044,
+        "fraud_money_missed_by_clearing": 0.0159,
+        "flagged_share": 0.0375,
+        "flagged_precision": 0.6685,
+        "flagged_fraud_caught": 0.496,
+        "cleared_share": 0.1632,
+        "cleared_fraud_rate": 0.0046,
+        "cleared_legit_share": 0.1711,
+        "fraud_missed_by_clearing": 0.0149,
+        "legit_flagged": 0.0131
+      },
+      "worldC": {
+        "flagged_fraud_money_caught": 0.4592,
+        "fraud_money_missed_by_clearing": 0.0461,
+        "flagged_share": 0.0456,
+        "flagged_precision": 0.5932,
+        "flagged_fraud_caught": 0.4869,
+        "cleared_share": 0.2566,
+        "cleared_fraud_rate": 0.0078,
+        "cleared_legit_share": 0.2696,
+        "fraud_missed_by_clearing": 0.0362,
+        "legit_flagged": 0.0197
+      },
+      "worldA": {
+        "flagged_fraud_money_caught": 0.2946,
+        "fraud_money_missed_by_clearing": 0.0068,
+        "flagged_share": 0.0253,
+        "flagged_precision": 0.7396,
+        "flagged_fraud_caught": 0.2818,
+        "cleared_share": 0.168,
+        "cleared_fraud_rate": 0.0063,
+        "cleared_legit_share": 0.1788,
+        "fraud_missed_by_clearing": 0.0159,
+        "legit_flagged": 0.0071
+      },
+      "worldD": {
+        "flagged_fraud_money_caught": 0.2463,
+        "fraud_money_missed_by_clearing": 0.0575,
+        "flagged_share": 0.0271,
+        "flagged_precision": 0.6456,
+        "flagged_fraud_caught": 0.3146,
+        "cleared_share": 0.269,
+        "cleared_fraud_rate": 0.0097,
+        "cleared_legit_share": 0.282,
+        "fraud_missed_by_clearing": 0.047,
+        "legit_flagged": 0.0102
+      }
+    }
+  },
+  "caveats": [
+    "the percentile table of lgbm-game-v7 comes from one-seed fold models, each trained on one world fewer, while the exported part is the final model averaged over several seeds and trained on every world; its scores can run higher or lower, so the review rate on new traffic can differ from review_rate",
+    "the held-out worlds also chose lgbm-game-v7's configuration and tree count, so its reference scores are slightly optimistic",
+    "lgbm-game-v5's validation days chose its tree count by early stopping, and its world's reference rows come only from late days, when players have long histories"
+  ],
+  "reference_set": {
+    "rows": "history start 0 rows only, so each purchase counts once; the single-world model's training rows are removed; then the same number of rows is drawn from every world (the size of the smallest)",
+    "seed": 1234,
+    "rows_per_world": {
+      "world1": 19873,
+      "worldB": 19873,
+      "worldC": 19873,
+      "worldA": 19873,
+      "worldD": 19873
+    },
+    "fraud_per_world": {
+      "world1": 1855,
+      "worldB": 1004,
+      "worldC": 1105,
+      "worldA": 1320,
+      "worldD": 1106
+    },
+    "days_per_world": {
+      "world1": "90-124",
+      "worldB": "0-59",
+      "worldC": "0-59",
+      "worldA": "0-14",
+      "worldD": "0-27"
+    },
+    "multi_world_training": {
+      "history_starts": [
+        0,
+        14,
+        20,
+        40,
+        60,
+        80,
+        100
+      ],
+      "history_window_days": 14
+    }
+  },
+  "final_part_percentiles": {
+    "lgbm-game-v7": {
+      "world1": {
+        "table_source": {
+          "q50": 0.2058,
+          "q90": 0.5483,
+          "q99": 0.8435,
+          "share_at_or_above_flag_at": 0.0
+        },
+        "exported_model": {
+          "q50": 0.1494,
+          "q90": 0.7351,
+          "q99": 0.9717,
+          "share_at_or_above_flag_at": 0.0063
+        }
+      },
+      "worldB": {
+        "table_source": {
+          "q50": 0.5865,
+          "q90": 0.9062,
+          "q99": 0.9749,
+          "share_at_or_above_flag_at": 0.0085
+        },
+        "exported_model": {
+          "q50": 0.5471,
+          "q90": 0.8773,
+          "q99": 0.9662,
+          "share_at_or_above_flag_at": 0.0052
+        }
+      },
+      "worldC": {
+        "table_source": {
+          "q50": 0.4013,
+          "q90": 0.9036,
+          "q99": 0.9804,
+          "share_at_or_above_flag_at": 0.0124
+        },
+        "exported_model": {
+          "q50": 0.4307,
+          "q90": 0.8636,
+          "q99": 0.9639,
+          "share_at_or_above_flag_at": 0.0043
+        }
+      },
+      "worldA": {
+        "table_source": {
+          "q50": 0.6302,
+          "q90": 0.8733,
+          "q99": 0.9607,
+          "share_at_or_above_flag_at": 0.0023
+        },
+        "exported_model": {
+          "q50": 0.6221,
+          "q90": 0.8753,
+          "q99": 0.9609,
+          "share_at_or_above_flag_at": 0.0024
+        }
+      },
+      "worldD": {
+        "table_source": {
+          "q50": 0.5143,
+          "q90": 0.8409,
+          "q99": 0.9509,
+          "share_at_or_above_flag_at": 0.0012
+        },
+        "exported_model": {
+          "q50": 0.5465,
+          "q90": 0.8595,
+          "q99": 0.9614,
+          "share_at_or_above_flag_at": 0.0025
+        }
+      }
+    },
+    "lgbm-game-v5": {
+      "world1": {
+        "table_source": {
+          "q50": 0.2249,
+          "q90": 0.7327,
+          "q99": 0.9539,
+          "share_at_or_above_flag_at": 0.0001
+        },
+        "exported_model": {
+          "q50": 0.2249,
+          "q90": 0.7327,
+          "q99": 0.9539,
+          "share_at_or_above_flag_at": 0.0001
+        }
+      },
+      "worldB": {
+        "table_source": {
+          "q50": 0.5846,
+          "q90": 0.8716,
+          "q99": 0.9717,
+          "share_at_or_above_flag_at": 0.0059
+        },
+        "exported_model": {
+          "q50": 0.5846,
+          "q90": 0.8716,
+          "q99": 0.9717,
+          "share_at_or_above_flag_at": 0.0059
+        }
+      },
+      "worldC": {
+        "table_source": {
+          "q50": 0.5051,
+          "q90": 0.8801,
+          "q99": 0.977,
+          "share_at_or_above_flag_at": 0.0091
+        },
+        "exported_model": {
+          "q50": 0.5051,
+          "q90": 0.8801,
+          "q99": 0.977,
+          "share_at_or_above_flag_at": 0.0091
+        }
+      },
+      "worldA": {
+        "table_source": {
+          "q50": 0.5672,
+          "q90": 0.9039,
+          "q99": 0.971,
+          "share_at_or_above_flag_at": 0.0049
+        },
+        "exported_model": {
+          "q50": 0.5672,
+          "q90": 0.9039,
+          "q99": 0.971,
+          "share_at_or_above_flag_at": 0.0049
+        }
+      },
+      "worldD": {
+        "table_source": {
+          "q50": 0.4375,
+          "q90": 0.886,
+          "q99": 0.9771,
+          "share_at_or_above_flag_at": 0.0094
+        },
+        "exported_model": {
+          "q50": 0.4375,
+          "q90": 0.886,
+          "q99": 0.9771,
+          "share_at_or_above_flag_at": 0.0094
+        }
+      }
+    }
+  },
+  "export": {
+    "version": "lgbm-game-v7-combined",
+    "models": [
+      "lgbm-game-v7",
+      "lgbm-game-v5"
+    ],
+    "golden_rows": 2000
+  }
+}

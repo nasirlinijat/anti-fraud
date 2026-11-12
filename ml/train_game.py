@@ -45,6 +45,8 @@ SINGLE_WORLD_VERSION = "lgbm-game-v5"
 SINGLE_WORLD_COMPARE = "../backend/models/lgbm-ieee-v5-combined.json"
 WORLDS_VERSION = "lgbm-game-v6"
 WORLDS_COMPARE = "../backend/models/lgbm-game-v5.json"
+# Share of fraud the model may let through by clearing a review.
+DEFAULT_MAX_MISSED_FRAUD = 0.02
 
 
 def load(path):
@@ -125,7 +127,7 @@ def build_parser():
     parser.add_argument("--models-dir", default="../backend/models")
     parser.add_argument("--models", type=int, default=5, help="number of models averaged into the model (1 to 5)")
     parser.add_argument("--review-rate", type=float, default=0.005)
-    parser.add_argument("--max-missed-fraud", type=float, default=0.02)
+    parser.add_argument("--max-missed-fraud", type=float, default=DEFAULT_MAX_MISSED_FRAUD)
     parser.add_argument("--target-precision", type=float)
     parser.add_argument("--train-days", help="first-last day used for training, default 0-84")
     parser.add_argument("--validation-days", help="first-last validation day, default 90-104")

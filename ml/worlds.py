@@ -177,16 +177,27 @@ def fit_model(candidate, rows, seed, checkpoint=None):
     number of trees in candidate.params; nothing is held back for early
     stopping. A finished model is saved at checkpoint and loaded by a later
     run with the same seed, settings and data."""
-    model = train.lightgbm_model()
-    model.set_params(**candidate.params, random_state=seed)
-    x, y, weight = masked_inputs(rows, candidate.masked), rows["is_fraud"].to_numpy(), world_weights(rows["world"])
-    key = train.fingerprint(seed, model.get_params(), x, y, weight)
+    model, (x, y, weight), key = training_run(candidate, rows, seed)
     saved = train.load_checkpoint(checkpoint, key)
     if saved is not None:
         return saved
     model.fit(x, y, sample_weight=weight)
     train.save_checkpoint(checkpoint, key, model)
     return model
+
+
+def training_run(candidate, rows, seed):
+    """The unfitted model, its training inputs (x, y, weight) and the
+    fingerprint that names the run in a checkpoint."""
+    model = train.lightgbm_model()
+    model.set_params(**candidate.params, random_state=seed)
+    x, y, weight = masked_inputs(rows, candidate.masked), rows["is_fraud"].to_numpy(), world_weights(rows["world"])
+    return model, (x, y, weight), train.fingerprint(seed, model.get_params(), x, y, weight)
+
+
+def fold_checkpoint(checkpoints, candidate, world):
+    """The file that holds the candidate's model trained without world."""
+    return Path(checkpoints) / f"{candidate.name.replace('/', '-')}-without-{world}.joblib"
 
 
 def equal_world_sample(rows, seed):
@@ -237,7 +248,7 @@ def evaluate_candidate(candidate, data, selection):
     choose the tree count."""
     folds, curves = [], {}
     for world, training, held_out in lowo_folds(data):
-        checkpoint = selection.checkpoints / f"{candidate.name.replace('/', '-')}-without-{world}.joblib"
+        checkpoint = fold_checkpoint(selection.checkpoints, candidate, world)
         model = fit_model(with_trees(candidate, selection.max_trees), training, train.SEED, checkpoint)
         folds.append(Fold(world, model))
         curves[world] = held_out_curve(model, masked_inputs(held_out, candidate.masked), held_out["is_fraud"].to_numpy())
