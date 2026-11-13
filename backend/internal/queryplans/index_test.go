@@ -51,6 +51,9 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"DeviceIDHistory", features.DeviceIDHistorySQL, []any{"device-1", at, "txn-1"}},
 		{"IssuerHistory", features.IssuerHistorySQL, []any{"1001", at, "txn-1"}},
 		{"FeatureCounts", features.FeatureCountsSQL, []any{"gmail.com", device, client, client, client}},
+		{"AccountActivity", features.AccountActivitySQL, []any{
+			"player-1", monthBefore, at, deviceID, pgtype.Text{String: "AZ", Valid: true}, pgtype.Timestamptz{Time: at.Time.Add(-24 * time.Hour), Valid: true},
+		}},
 		{"DecisionOverview", storage.DecisionOverviewSQL, []any{at, until}},
 		{"BlockedValue", storage.BlockedValueSQL, []any{at, until}},
 		{"CountDecisionBuckets", storage.CountDecisionBucketsSQL, []any{width, at, until}},

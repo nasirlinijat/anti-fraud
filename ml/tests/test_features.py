@@ -396,3 +396,62 @@ def test_signals_from_a_simulator_dump(tmp_path):
 def test_ieee_columns_leave_the_signals_missing():
     built = features.build(features.load(TESTDATA / "transactions.csv").drop(columns=features.GAME_COLUMNS))
     assert (built[features.FEATURE_GROUPS["signals"]] == features.MISSING).all().all()
+
+
+def write_account_events(dump, events):
+    lines = [json.dumps({"event_id": f"e{index}", **event}) for index, event in enumerate(events)]
+    features.account_events_path(dump).write_text("\n".join(lines) + "\n")
+    return features.load_account_events(dump)
+
+
+def test_account_inputs_from_the_events_next_to_a_dump(tmp_path):
+    home = {"player_id": "p1", "card_token": "c1", "amount_minor": 1999}
+    dump = write_dump(tmp_path / "world.jsonl", [
+        ("normal", False, {**home, "event_time": "2026-01-01T10:00:00Z", "device_id": "d1", "ip_country": "az"}),
+        ("account_takeover", True, {**home, "event_time": "2026-01-02T10:00:00Z", "device_id": "d2", "ip_country": "TR"}),
+        ("normal", False, {**home, "event_time": "2026-03-01T10:00:00Z", "device_id": "d1"}),
+    ])
+    events = write_account_events(dump, [
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-01T09:00:00Z", "device_id": "d1", "ip_country": " AZ "},
+        {"player_id": "p1", "event_type": "password_reset", "event_time": "2026-01-02T08:30:00Z"},
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T03:00:00Z", "device_id": "d4"},
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T09:54:00Z", "device_id": "d2", "ip_country": "tr"},
+        # At the purchase time, so it does not count for that purchase.
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T10:00:00Z", "device_id": "d3"},
+        {"player_id": "p2", "event_type": "login", "event_time": "2026-01-01T09:30:00Z", "device_id": "d1"},
+    ])
+
+    built = features.build(features.load_requests(dump), events)
+
+    assert built["hours_since_password_reset"].tolist() == [features.MISSING, 1.5, features.MISSING]
+    assert built["device_first_login_hours"].tolist() == [1.0, pytest.approx(0.1), features.MISSING]
+    assert built["country_first_login_hours"].tolist() == [1.0, pytest.approx(0.1), features.MISSING]
+    # The login from d1 is 25 hours before the second purchase, and the third
+    # purchase comes more than 30 days after every event.
+    assert built["login_devices_24h"].tolist() == [1.0, 2.0, features.MISSING]
+
+
+def test_a_dump_without_account_events_has_the_inputs_of_a_player_without_any(tmp_path):
+    dump = write_dump(tmp_path / "world.jsonl", [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
+                           "card_token": "c1", "device_id": "d1", "ip_country": "AZ"}),
+    ])
+
+    built = features.build(features.load_requests(dump), features.load_account_events(dump))
+
+    assert (built[features.FEATURE_GROUPS["account_events"]] == features.MISSING).all().all()
+
+
+def test_account_country_changes_only_ascii_letters():
+    assert features.ascii_upper("az") == "AZ"
+    assert features.ascii_upper("150") == "150"
+    assert features.ascii_upper("ſé") == "ſé"
+
+
+def test_account_inputs_never_change_when_later_rows_are_added(raw):
+    events = make_fixture.account_events(raw)
+    full = features.build(raw.copy(), events).set_index(raw["TransactionID"])
+    for count in range(1, len(raw)):
+        prefix = raw.iloc[:count]
+        built = features.build(prefix.copy(), events).set_index(prefix["TransactionID"])
+        pd.testing.assert_frame_equal(built[features.FEATURES], full.loc[built.index, features.FEATURES])

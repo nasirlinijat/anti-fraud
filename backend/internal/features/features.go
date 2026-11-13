@@ -73,6 +73,10 @@ var Names = []string{
 	"three_ds_result_code",
 	"ip_is_hosting",
 	"ip_is_anonymous",
+	"hours_since_password_reset",
+	"device_first_login_hours",
+	"country_first_login_hours",
+	"login_devices_24h",
 }
 
 var (
@@ -92,6 +96,13 @@ var (
 	avsResults     = map[string]float64{"match": 0, "partial": 1, "not_checked": 2, "mismatch": 3}
 	threeDSResults = map[string]float64{"authenticated": 0, "attempted": 1, "not_enrolled": 2, "failed": 3}
 	screenSize     = regexp.MustCompile(`^(\d+)x(\d+)$`)
+)
+
+// Account events count only within these windows before the purchase, so a
+// player's whole account history is never read.
+const (
+	AccountLookback    = 720 * time.Hour
+	LoginDevicesWindow = 24 * time.Hour
 )
 
 // NoEmail is the email domain key of a purchase without one.
@@ -158,6 +169,22 @@ func (in Input) RegionKey() string {
 	return *in.BillingRegion
 }
 
+// AccountCountry returns the purchase's IP country as account events store
+// it: upper case. Only ASCII letters change, so ml/features.py can match it
+// exactly.
+func (in Input) AccountCountry() *string {
+	if in.IPCountry == nil {
+		return nil
+	}
+	upper := strings.Map(func(r rune) rune {
+		if 'a' <= r && r <= 'z' {
+			return r - 'a' + 'A'
+		}
+		return r
+	}, *in.IPCountry)
+	return &upper
+}
+
 // PlayerHistory summarizes the player's earlier purchases.
 type PlayerHistory struct {
 	Purchases        int64
@@ -199,7 +226,8 @@ type Count struct {
 	Players   int64
 }
 
-// History is everything the features need from earlier purchases.
+// History is everything the features need from earlier purchases and
+// account events.
 type History struct {
 	Player  PlayerHistory
 	Card    CardHistory
@@ -213,6 +241,25 @@ type History struct {
 	// DeviceIDPlayers counts the earlier players on this device ID; zero when
 	// it is missing.
 	DeviceIDPlayers int64
+	Account         AccountActivity
+}
+
+// AccountActivity summarizes the player's account events in the
+// AccountLookback before the purchase. Events at or after the purchase time
+// are never read.
+type AccountActivity struct {
+	// HasEvents is true when the player has any account event in the window.
+	HasEvents         bool
+	LastPasswordReset *time.Time
+	// DeviceFirstLogin is the first login in the window from the purchase's
+	// device ID; nil without a device ID or such a login.
+	DeviceFirstLogin *time.Time
+	// CountryFirstLogin is the first login in the window from the purchase's
+	// IP country, compared in upper case; nil without one.
+	CountryFirstLogin *time.Time
+	// LoginDevices24h counts the distinct device IDs of the player's logins
+	// in the LoginDevicesWindow before the purchase.
+	LoginDevices24h int64
 }
 
 // Vector returns the feature values in the order of Names. It is long because
@@ -293,6 +340,10 @@ func Vector(in Input, h History) []float64 {
 		code(threeDSResults, in.ThreeDSResult),
 		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Hosting }),
 		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Anonymous }),
+		hoursSince(h.Account.LastPasswordReset, t),
+		hoursSince(h.Account.DeviceFirstLogin, t),
+		hoursSince(h.Account.CountryFirstLogin, t),
+		when(h.Account.HasEvents, func() float64 { return float64(h.Account.LoginDevices24h) }),
 	}
 }
 
@@ -320,6 +371,15 @@ func ipFlag(network *IPNetwork, is func(IPNetwork) bool) float64 {
 		return Missing
 	}
 	return flag(is(*network))
+}
+
+// hoursSince returns the hours from an account event to the purchase, or
+// Missing without the event.
+func hoursSince(event *time.Time, at time.Time) float64 {
+	if event == nil {
+		return Missing
+	}
+	return at.Sub(*event).Hours()
 }
 
 // accountAge returns the whole days between account creation and the purchase.

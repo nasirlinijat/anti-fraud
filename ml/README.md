@@ -478,7 +478,7 @@ The tests use synthetic purchases in `testdata/`, so they run without the datase
 
 The exact feature definitions for the Go service are in [FEATURES.md](FEATURES.md).
 
-All history features use only transactions that happened before the current one, so the scoring service can compute the same values at request time. Anonymized IEEE-CIS columns (`C`, `M`, `V` and most `D` and `id_*`) are never model inputs. The exceptions map to score request fields: `D1` (days since the client began) gives the account age, `id_30`, `id_31` and `id_33` hold the client's operating system, browser and screen, and `card1` and `addr1` are the card issuer and billing region codes. Whether these inputs agree with the project guide is tracked in AF-92.
+All history features use only transactions and account events that happened before the current one, so the scoring service can compute the same values at request time. Anonymized IEEE-CIS columns (`C`, `M`, `V` and most `D` and `id_*`) are never model inputs. The exceptions map to score request fields: `D1` (days since the client began) gives the account age, `id_30`, `id_31` and `id_33` hold the client's operating system, browser and screen, and `card1` and `addr1` are the card issuer and billing region codes. Whether these inputs agree with the project guide is tracked in AF-92.
 
 | Feature | Meaning |
 |---|---|
@@ -505,6 +505,7 @@ All history features use only transactions that happened before the current one,
 | `os_share`, `browser_share`, `screen_share` | How common the OS, browser and screen are among earlier purchases |
 | `os_is_new_for_player`, `browser_is_new_for_player`, `player_distinct_browsers` | OS and browsers the player used before |
 | `cvv_result_code`, `avs_result_code`, `three_ds_result_code`, `ip_is_hosting`, `ip_is_anonymous` | Payment verification results and the IP intelligence answer (game traffic only) |
+| `hours_since_password_reset`, `device_first_login_hours`, `country_first_login_hours`, `login_devices_24h` | The player's account events before the purchase (game traffic only) |
 
 Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`.
 

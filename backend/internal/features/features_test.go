@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	transactionsPath = "../../../ml/testdata/transactions.csv"
-	expectedPath     = "../../../ml/testdata/expected_features.csv"
-	modelPath        = "../../models/lgbm-ieee-v5.json"
-	tolerance        = 1e-9
+	transactionsPath  = "../../../ml/testdata/transactions.csv"
+	accountEventsPath = "../../../ml/testdata/account_events.csv"
+	expectedPath      = "../../../ml/testdata/expected_features.csv"
+	modelPath         = "../../models/lgbm-ieee-v5.json"
+	tolerance         = 1e-9
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -109,6 +110,11 @@ func TestVectorWithoutHistory(t *testing.T) {
 		"three_ds_result_code": features.Missing,
 		"ip_is_hosting":        features.Missing,
 		"ip_is_anonymous":      features.Missing,
+		// No account events.
+		"hours_since_password_reset": features.Missing,
+		"device_first_login_hours":   features.Missing,
+		"country_first_login_hours":  features.Missing,
+		"login_devices_24h":          features.Missing,
 	}
 	if len(got) != len(features.Names) {
 		t.Fatalf("got %d features, want %d", len(got), len(features.Names))
@@ -224,6 +230,62 @@ func TestVectorIPNetworkFlags(t *testing.T) {
 	}
 }
 
+func TestVectorAccountActivity(t *testing.T) {
+	at := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	in := features.Input{AmountMinor: 100, EventTime: at}
+	h := features.History{Account: features.AccountActivity{
+		HasEvents:         true,
+		LastPasswordReset: ptr(at.Add(-90 * time.Minute)),
+		DeviceFirstLogin:  ptr(at.Add(-6 * time.Minute)),
+		CountryFirstLogin: ptr(at.Add(-200 * time.Hour)),
+		LoginDevices24h:   2,
+	}}
+
+	got := features.Map(features.Vector(in, h))
+
+	want := map[string]float64{
+		"hours_since_password_reset": 1.5,
+		"device_first_login_hours":   0.1,
+		"country_first_login_hours":  200,
+		"login_devices_24h":          2,
+	}
+	for name, w := range want {
+		if math.Abs(got[name]-w) > tolerance {
+			t.Errorf("%s = %v, want %v", name, got[name], w)
+		}
+	}
+}
+
+func TestVectorAccountEventsOnlyOutsideTheLoginWindow(t *testing.T) {
+	h := features.History{Account: features.AccountActivity{HasEvents: true}}
+
+	got := features.Map(features.Vector(features.Input{AmountMinor: 100}, h))
+
+	if got["login_devices_24h"] != 0 || got["hours_since_password_reset"] != features.Missing {
+		t.Errorf("login_devices_24h %v, hours_since_password_reset %v; want 0, %v",
+			got["login_devices_24h"], got["hours_since_password_reset"], features.Missing)
+	}
+}
+
+func TestAccountCountryChangesOnlyASCIILetters(t *testing.T) {
+	tests := []struct {
+		country *string
+		want    string
+	}{
+		{ptr("az"), "AZ"},
+		{ptr("Tr"), "TR"},
+		{ptr("150"), "150"},
+		{ptr("ſé"), "ſé"},
+		{nil, "<nil>"},
+	}
+	for _, tt := range tests {
+		got := features.Input{IPCountry: tt.country}.AccountCountry()
+		if deref(got) != tt.want {
+			t.Errorf("AccountCountry(%q) = %q, want %q", deref(tt.country), deref(got), tt.want)
+		}
+	}
+}
+
 func deref(s *string) string {
 	if s == nil {
 		return "<nil>"
@@ -251,7 +313,7 @@ func testTx(t *testing.T) pgx.Tx {
 	t.Cleanup(func() { tx.Rollback(ctx) })
 
 	// Start from an empty history inside the transaction; the rollback restores it.
-	for _, table := range []string{"review_resolutions", "review_claims", "decisions", "purchases", "feature_counts"} {
+	for _, table := range []string{"review_resolutions", "review_claims", "decisions", "purchases", "feature_counts", "account_events"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("empty %s: %v", table, err)
 		}
@@ -404,13 +466,15 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) models.Purchase {
 // saving each after it is scored, and compares every feature with the values
 // ml/features.py computed for the same rows. The IP addresses are classified
 // by the mock provider with its default ranges, which ml/features.py reads
-// from the same file.
+// from the same file. The account events are all saved first: only those
+// before a purchase may count.
 func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	store := storage.NewPurchaseStore(tx)
 
 	_, transactions := readCSV(t, transactionsPath)
+	saveFixtureAccountEvents(t, tx, transactions)
 	header, expected := readCSV(t, expectedPath)
 	if want := append([]string{"TransactionID"}, features.Names...); !reflect.DeepEqual(header, want) {
 		t.Fatalf("expected features header = %v, want %v", header, want)
@@ -451,6 +515,46 @@ func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("transaction %s: Save: %v", p.TransactionID, err)
+		}
+	}
+}
+
+// saveFixtureAccountEvents saves the test account events. Each belongs to the
+// player of the purchase in its player_transaction column, or to a player
+// without purchases when the column is empty, as in ml/make_fixture.py.
+func saveFixtureAccountEvents(t *testing.T, tx pgx.Tx, transactions []map[string]string) {
+	t.Helper()
+	players := map[string]string{}
+	for _, row := range transactions {
+		players[row["TransactionID"]] = purchaseFromIEEE(t, row).PlayerID
+	}
+	optional := func(value string) *string {
+		if value == "" {
+			return nil
+		}
+		return ptr(value)
+	}
+	_, events := readCSV(t, accountEventsPath)
+	store := storage.NewAccountEventStore(tx)
+	for _, row := range events {
+		seconds, err := strconv.ParseInt(row["event_seconds"], 10, 64)
+		if err != nil {
+			t.Fatalf("event %s: event_seconds %q: %v", row["event_id"], row["event_seconds"], err)
+		}
+		player, ok := players[row["player_transaction"]]
+		if !ok {
+			player = "no-purchases"
+		}
+		_, err = store.Save(t.Context(), models.AccountEvent{
+			EventID:   row["event_id"],
+			PlayerID:  player,
+			EventType: models.AccountEventType(row["event_type"]),
+			EventTime: time.Unix(seconds, 0).UTC(),
+			DeviceID:  optional(row["device_id"]),
+			IPCountry: optional(row["ip_country"]),
+		})
+		if err != nil {
+			t.Fatalf("save event %s: %v", row["event_id"], err)
 		}
 	}
 }

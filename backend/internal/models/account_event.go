@@ -18,7 +18,8 @@ var AccountEventTypes = []AccountEventType{AccountEventLogin, AccountEventPasswo
 
 // AccountEvent is a login or password reset that the game's account system
 // reports for a player. Optional fields are nil when the request omits them.
-// Account events feed rules only, never model inputs.
+// Account events feed the takeover rules and the account activity model
+// inputs.
 type AccountEvent struct {
 	EventID   string
 	PlayerID  string

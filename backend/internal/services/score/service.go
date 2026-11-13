@@ -303,8 +303,10 @@ func (s *Service) ruleInput(ctx context.Context, p models.Purchase, rs scoring.R
 }
 
 // accountHistory reads the player's account events for the enabled rules
-// that need them. It returns nil when no enabled rule does. Account events
-// feed only the rules, never the model inputs.
+// that need them. It returns nil when no enabled rule does. The model inputs
+// read their own account activity with the feature history, because the
+// rules also trust earlier purchases by their decisions, which the model
+// must never see.
 func (s *Service) accountHistory(ctx context.Context, p models.Purchase, rs scoring.Ruleset) (*scoring.AccountHistory, error) {
 	lookback := scoring.AccountEventLookback(rs)
 	if lookback == 0 || s.accountEvents == nil {

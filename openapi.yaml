@@ -489,11 +489,14 @@ paths:
         Saves a login or password reset that the game's account system
         reports for a player. The account takeover rules
         `recent_password_reset`, `new_device_login`, and `new_country_login`
-        read these events, and the review case lists them. They are never
-        model inputs.
+        read these events, and the review case lists them. Game models
+        trained with account events (from `lgbm-game-v8`) also take four
+        inputs computed from them: the hours since the latest password reset,
+        the hours since the first login from the purchase's device and from
+        its IP country, and the distinct login devices in the last 24 hours.
 
-        A rule reads only events with an event time before the purchase's
-        event time, so send each event as soon as it happens. After
+        A rule or model input reads only events with an event time before
+        the purchase's event time, so send each event as soon as it happens. After
         authentication and validation, a retry with the same event ID and
         matching fields returns the saved event with 200 without saving it
         again. Fields are compared after normal request normalization, with

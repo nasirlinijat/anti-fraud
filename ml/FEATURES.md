@@ -1,13 +1,13 @@
 # Model feature specification
 
-The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
+The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases, `ml/testdata/account_events.csv` account events of their players, and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads all three and compares every value.
 
-This file describes 59 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, `lgbm-game-v5` the first 54, and a game model trained after features 55-59 were added takes all 59. IEEE-CIS has none of the fields behind features 55-59, so they are `-1` for every IEEE-CIS purchase and the IEEE-CIS model does not use them.
+This file describes 63 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, `lgbm-game-v5`, `v6` and `v7` the first 54, and `lgbm-game-v8` all 63. IEEE-CIS has none of the fields behind features 55-63, so they are `-1` for every IEEE-CIS purchase and the IEEE-CIS model does not use them.
 
 ## General rules
 
 1. **Order.** Purchases are ordered by event time, then by transaction ID. Two purchases in the same second are therefore ordered by ID.
-2. **History means strictly earlier purchases** in that order. The current purchase never counts itself, and later purchases never count.
+2. **History means strictly earlier purchases** in that order. The current purchase never counts itself, and later purchases never count. Account events count only when their event time is strictly before the purchase's.
 3. **Time windows.** "In the last hour" counts earlier purchases with `time > now - 3600` seconds; "in the last day" uses 86400. A purchase exactly 3600 seconds earlier is not counted.
 4. **Missing values become `-1`**: a missing request field, or a history feature that has no history yet (for example an average with no earlier purchase).
 5. **Model input order** is the order of the table below, the same as `FEATURES` in `ml/features.py`. A model takes the first features of this list, in order, and its `feature_names` say how many. Features are only added at the end, so a model exported with fewer features still loads and is scored with those. The service must refuse a model whose `feature_names` are in another order, skip a feature, or name a feature the service does not compute.
@@ -100,6 +100,10 @@ Any other or missing value is `-1`. The verification codes go from a pass (0) to
 | 57 | `three_ds_result_code` | Code table above |
 | 58 | `ip_is_hosting` | 1 if IP intelligence placed `ip_address` in a hosting or data-centre range, 0 if it was looked up and is not in one, `-1` without a lookup result |
 | 59 | `ip_is_anonymous` | 1 if IP intelligence placed `ip_address` in a VPN, public proxy or Tor range, 0 if it was looked up and is not in one, `-1` without a lookup result |
+| 60 | `hours_since_password_reset` | Hours from the player's latest password reset in the 720 hours before the purchase to the purchase; `-1` without one |
+| 61 | `device_first_login_hours` | Hours from the player's first login from the purchase's `device_id` in the 720 hours before the purchase to the purchase; `-1` when the request has no device ID or there is no such login |
+| 62 | `country_first_login_hours` | Same for the player's first login from the purchase's `ip_country`, upper-cased (ASCII letters only) as account events store it; `-1` without an IP country or such a login |
+| 63 | `login_devices_24h` | Distinct device IDs of the player's logins in the 24 hours before the purchase (logins without a device ID are not counted); `-1` when the player has no account event of any kind in the 720 hours before the purchase |
 
 Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 
@@ -138,7 +142,15 @@ Features 58 and 59 are the IP intelligence provider's answer for `ip_address`, n
 
 Training must classify an address exactly as the service does. The mock provider's default ranges are in `backend/internal/ipintel/default_ranges.json`: the Go service embeds the file, and `ml/features.py` reads the same file. Training follows the mock's lookup: an IPv4 address written in IPv6 form (`::ffff:192.0.2.1`) is looked up as IPv4, an address with an IPv6 zone matches no range, and every range that contains the address counts. Training assumes the lookup succeeds for every address, so a model trained on simulator traffic expects the default ranges; a deployment with `IP_INTEL_MOCK_RANGES` or another provider must train on its own lookups, for example from the inputs it saves (see "Train on the service's own data" in `README.md`).
 
-Inputs added later, such as account events, are appended after feature 59 with `-1` for a missing value, so models with 54 or 59 features keep loading.
+### Account event inputs
+
+Features 60-63 read the logins and password resets that the game's account system sends to `POST /account-events`: the same events the account takeover rules read, but without the rules' trusted purchases, because a purchase is trusted by its decision and a review outcome, which are never model inputs. An event counts when its time is after `purchase time - 720 hours` and before the purchase time, both strictly; `login_devices_24h` uses `purchase time - 24 hours`. The window bounds the work per purchase and caps the hours below 720.
+
+A player without any account event in the window has `-1` for all four, and so does every purchase when the game sends no account events at all. The four inputs therefore never tell a service without account events from a player without recent activity, and a model needs no setting to tell them apart. `login_devices_24h` is 0, not `-1`, for a player who has older events in the window but no login in the last 24 hours.
+
+In training, the account events of a simulator dump are in the file next to it: `world1.jsonl` has `world1.account_events.jsonl`, one `POST /account-events` request per line, which the simulator's `-dump` writes. A dump without that file has no account events. `ml/features.py` normalizes them as the service saves them (text trimmed, empty text missing, the IP country in upper case) and uses times to the nanosecond; the service stores them to the microsecond, which only matters for events with fractions of a microsecond.
+
+Account events are history from earlier events, not from earlier transactions; they follow the same rule as purchase history: only values the service has before it scores the purchase.
 
 `hour_of_day` was removed in model v4: IEEE-CIS times start at an unknown moment, so the hour was shifted for live traffic, and the model loses nothing without it.
 
@@ -153,6 +165,7 @@ The service reads the thresholds at startup from the report next to `MODEL_PATH`
 `backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
 
 - Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text. The player query also counts earlier purchases with the same device ID, and the card query also returns the card's earlier purchase count and how many had the same billing region.
+- Features 60-63 read the player's account events with the `AccountActivitySQL` query, one statement of index seeks on the indexes of migration 000028: the latest password reset, the first login from the device ID and from the IP country, and an index-only range scan of the player's events in the last 24 hours.
 - Features 55-57 come from the request. Features 58 and 59 come from the IP intelligence result that `Score` looks up before the rules run; `models.IPNetworkInput` turns it into `features.IPNetwork`, nil without a usable result. None of them reads history.
 - Feature 53 reads the distinct earlier players on the device ID with the `DeviceIDHistorySQL` query, which is served by the partial index on `device_id` from migration 000014. It only runs when the request has a device ID.
 - `UseModel` in `backend/internal/services/score/service.go` accepts a model whose `feature_names` are the first features of `Names` and scores it with only those features.
