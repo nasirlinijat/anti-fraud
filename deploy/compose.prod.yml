@@ -8,7 +8,7 @@ services:
   backend:
     restart: unless-stopped
     environment:
-      MODEL_PATH: /models/${MODEL_FILE:-lgbm-game-v5.json}
+      MODEL_PATH: /models/${MODEL_FILE:-lgbm-game-v9.json}
       # The mock classifies only documentation addresses, so production turns
       # IP intelligence off unless a real provider is configured.
       IP_INTEL_PROVIDER: ${IP_INTEL_PROVIDER:-off}
