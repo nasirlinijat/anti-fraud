@@ -27,8 +27,8 @@ type ReviewService interface {
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
-	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
-	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
+	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error)
+	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
 	ReleaseClaim(ctx context.Context, purchaseID int64) error
@@ -159,8 +159,11 @@ type decisionResponse struct {
 	Decision   string    `json:"decision"`
 	AnalystID  string    `json:"analyst_id"`
 	ResolvedAt time.Time `json:"resolved_at"`
-	// DeviceBlocked is true when this rejection added the device to the blocklist.
+	// The blocked fields are true when this rejection added that value of the
+	// purchase to the blocklist.
 	DeviceBlocked bool `json:"device_blocked"`
+	CardBlocked   bool `json:"card_blocked"`
+	PlayerBlocked bool `json:"player_blocked"`
 }
 
 type claimResponse struct {
@@ -193,6 +196,12 @@ type assignmentsResponse struct {
 type decisionRequest struct {
 	Decision    string `json:"decision"`
 	BlockDevice bool   `json:"block_device"`
+	BlockCard   bool   `json:"block_card"`
+	BlockPlayer bool   `json:"block_player"`
+}
+
+func (body decisionRequest) blocks() models.ReviewBlocks {
+	return models.ReviewBlocks{Device: body.BlockDevice, Card: body.BlockCard, Player: body.BlockPlayer}
 }
 
 func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
@@ -434,9 +443,9 @@ func parsePurchaseID(id string) (int64, bool) {
 // purchase; an analyst key decides without one, as before claims existed.
 func (h *ReviewHandler) decide(ctx context.Context, purchaseID int64, body decisionRequest, actor platform.Actor) (models.Resolution, error) {
 	if actor.Session {
-		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
 	}
-	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
 }
 
 func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
@@ -461,7 +470,9 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 		Decision:      body.Decision,
 		AnalystID:     actor.ID,
 		ResolvedAt:    result.ResolvedAt.UTC(),
-		DeviceBlocked: result.DeviceBlocked,
+		DeviceBlocked: result.Blocked.Device,
+		CardBlocked:   result.Blocked.Card,
+		PlayerBlocked: result.Blocked.Player,
 	})
 }
 
@@ -469,7 +480,7 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 // error is logged with the action that failed and answered with 500.
 func writeReviewError(ctx context.Context, w http.ResponseWriter, purchaseID int64, err error, action string) {
 	switch {
-	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject),
+	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockNeedsReject),
 		errors.Is(err, review.ErrInvalidNetworkAnchor), errors.Is(err, review.ErrInvalidLinkedValue):
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, review.ErrPurchaseNotFound), errors.Is(err, review.ErrNoOpenClaim):

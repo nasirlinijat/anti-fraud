@@ -342,16 +342,16 @@ func TestResolveCallsBlocklistRefresherOnDeviceBlock(t *testing.T) {
 	store := NewReviewStore(tx).UseBlocklistCache(refresher)
 
 	res, err := store.Resolve(ctx, models.ReviewDecision{
-		PurchaseID:  id,
-		Decision:    "reject",
-		AnalystID:   "analyst-1",
-		BlockDevice: true,
+		PurchaseID: id,
+		Decision:   "reject",
+		AnalystID:  "analyst-1",
+		Blocks:     models.ReviewBlocks{Device: true},
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if !res.DeviceBlocked {
-		t.Fatal("DeviceBlocked = false, want true")
+	if res.Blocked != (models.ReviewBlocks{Device: true}) {
+		t.Fatalf("Blocked = %+v, want only the device", res.Blocked)
 	}
 	if len(refresher.refreshed) != 1 || refresher.refreshed[0] != "device:target-device" {
 		t.Errorf("refreshed = %v, want [device:target-device]", refresher.refreshed)
