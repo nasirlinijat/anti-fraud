@@ -49,6 +49,15 @@ type CaseItem struct {
 	// IPIntel is the IP intelligence lookup saved with the decision, or nil
 	// when no lookup was made.
 	IPIntel *ipintel.Result
+	// Resolution is present when reading a resolved case.
+	Resolution *CaseResolution
+}
+
+// CaseResolution records the analyst's decision on a resolved case.
+type CaseResolution struct {
+	Decision   string
+	AnalystID  string
+	ResolvedAt time.Time
 }
 
 // PlayerPurchase is an earlier purchase by the same player.
@@ -147,6 +156,21 @@ const (
 
 // ErrReviewNotFound means no purchase under review has the given ID.
 var ErrReviewNotFound = errors.New("review case not found")
+
+// NumberedReviewPage holds one page and the total for the same queue filter.
+type NumberedReviewPage struct {
+	Items      []QueueItem
+	Number     int64
+	TotalItems int64
+}
+
+// ReviewPageCount returns the number of pages, including one empty page for an empty queue.
+func ReviewPageCount(total int64, size int) int64 {
+	if total == 0 {
+		return 1
+	}
+	return 1 + (total-1)/int64(size)
+}
 
 type QueueOrder string
 

@@ -285,6 +285,17 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   gap: 12px;
 }
 
+.resolved-case-dialog {
+  inline-size: min(60rem, calc(100% - 2rem));
+  max-block-size: calc(100% - 2rem);
+  overflow: auto;
+}
+
+.resolved-case-dialog > .panel,
+.resolved-case-dialog > .case-grid {
+  margin-block-start: var(--space-md);
+}
+
 .case-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));

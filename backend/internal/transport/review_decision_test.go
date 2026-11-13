@@ -28,6 +28,14 @@ func (rejectUnexpectedReviewAccess) Case(context.Context, int64) (models.CaseIte
 	panic("unexpected case read")
 }
 
+func (rejectUnexpectedReviewAccess) QueuePage(context.Context, int, models.QueueOrder, int64, *string) (models.NumberedReviewPage, error) {
+	panic("unexpected numbered queue read")
+}
+
+func (rejectUnexpectedReviewAccess) ResolvedCase(context.Context, int64) (models.CaseItem, error) {
+	panic("unexpected resolved case read")
+}
+
 func (rejectUnexpectedReviewAccess) Network(context.Context, int64) (models.CaseNetwork, error) {
 	panic("unexpected network read")
 }
@@ -72,6 +80,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
+		{http.MethodGet, "/reviews/1/resolved"},
 		{http.MethodGet, "/reviews/1/network"},
 		{http.MethodGet, "/reviews/1/network/purchases?anchor=card&value=player-1"},
 		{http.MethodPost, "/reviews/1/decision"},

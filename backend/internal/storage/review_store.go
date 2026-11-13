@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
 const casePlayerPurchaseLimit = 5
@@ -214,16 +215,19 @@ JOIN purchases p ON p.id = d.purchase_id
 LEFT JOIN review_claims rc ON rc.purchase_id = d.purchase_id
 LEFT JOIN accounts ca ON ca.id = rc.account_id`
 
+const openReviewFilter = `
+WHERE d.outcome = 'review'
+  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
+
+const queueClaimFilter = ` AND ($5::text IS NULL OR ca.username = $5::text)`
+
 // listQueueByRuleScore pages through open reviews, highest rule score first.
 // $1 to $3 are the cursor of the last item already returned, or NULL for the
 // first page. $5 limits the page to purchases claimed by that username, or is
 // NULL for all of them.
 const listQueueByRuleScore = `
 SELECT ` + queueItemColumns + `
-FROM ` + queueItemTables + `
-WHERE d.outcome = 'review'
-  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
-  AND ($5::text IS NULL OR ca.username = $5::text)
+FROM ` + queueItemTables + openReviewFilter + queueClaimFilter + `
   AND (
       $1::integer IS NULL
       OR (-d.rule_score, d.decided_at, d.purchase_id) > (
@@ -231,17 +235,14 @@ WHERE d.outcome = 'review'
       )
   )
 ORDER BY -d.rule_score, d.decided_at, d.purchase_id
-LIMIT $4`
+LIMIT $4 OFFSET $6`
 
 // listQueueByModelScore pages through open reviews, highest model score first
 // and purchases without a model score last. The parameters are those of
 // listQueueByRuleScore.
 const listQueueByModelScore = `
 SELECT ` + queueItemColumns + `
-FROM ` + queueItemTables + `
-WHERE d.outcome = 'review'
-  AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)
-  AND ($5::text IS NULL OR ca.username = $5::text)
+FROM ` + queueItemTables + openReviewFilter + queueClaimFilter + `
   AND (
       $1::double precision IS NULL
       OR (COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id) > (
@@ -249,7 +250,7 @@ WHERE d.outcome = 'review'
       )
   )
 ORDER BY COALESCE(-d.model_score, 1::double precision), d.decided_at, d.purchase_id
-LIMIT $4`
+LIMIT $4 OFFSET $6`
 
 // Queue returns up to limit open reviews in the given order, after the cursor
 // when it is set. When claimedBy is set, it returns only the purchases claimed
@@ -265,11 +266,18 @@ func (s *ReviewStore) Queue(ctx context.Context, limit int, order models.QueueOr
 			score = int32(after.ScoreKey)
 		}
 	}
-	query := listQueueByModelScore
+	return readQueueRows(ctx, s.conn, queueSQL(order), score, decidedAt, purchaseID, int32(limit), claimedBy, int64(0))
+}
+
+func queueSQL(order models.QueueOrder) string {
 	if order == models.QueueByRuleScore {
-		query = listQueueByRuleScore
+		return listQueueByRuleScore
 	}
-	rows, err := s.conn.Query(ctx, query, score, decidedAt, purchaseID, int32(limit), claimedBy)
+	return listQueueByModelScore
+}
+
+func readQueueRows(ctx context.Context, conn platform.DBTX, query string, args ...any) ([]models.QueueItem, error) {
+	rows, err := conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list review queue: %w", err)
 	}
@@ -312,13 +320,22 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 	return item, nil
 }
 
+const caseEvidenceColumns = queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel`
+
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
-SELECT ` + queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel
+SELECT ` + caseEvidenceColumns + `
 FROM ` + queueItemTables + `
 WHERE d.purchase_id = $1
   AND d.outcome = 'review'
   AND NOT EXISTS (SELECT 1 FROM review_resolutions r WHERE r.purchase_id = d.purchase_id)`
+
+// getResolvedReviewCase returns the same evidence and the saved analyst decision.
+const getResolvedReviewCase = `
+SELECT ` + caseEvidenceColumns + `, r.decision, r.analyst_id, r.resolved_at
+FROM ` + queueItemTables + `
+JOIN review_resolutions r ON r.purchase_id = d.purchase_id
+WHERE d.purchase_id = $1 AND d.outcome = 'review'`
 
 // listCasePlayerPurchases lists the player's purchases before the given one,
 // newest first.
@@ -357,30 +374,45 @@ LIMIT $4`
 // Case returns the purchase with the given ID if it is under review. It
 // returns models.ErrReviewNotFound if there is none.
 func (s *ReviewStore) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
-	var c models.CaseItem
+	return s.readCase(ctx, s.conn.QueryRow(ctx, getReviewCase, purchaseID), nil)
+}
+
+// ResolvedCase returns the evidence and analyst decision for a resolved review.
+func (s *ReviewStore) ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
+	return s.readCase(ctx, s.conn.QueryRow(ctx, getResolvedReviewCase, purchaseID), &models.CaseResolution{})
+}
+
+func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *models.CaseResolution) (models.CaseItem, error) {
+	c := models.CaseItem{Resolution: resolution}
 	var ipIntel []byte
-	item, err := scanQueueItem(s.conn.QueryRow(ctx, getReviewCase, purchaseID),
-		&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel)
+	dest := []any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel}
+	if resolution != nil {
+		dest = append(dest, &resolution.Decision, &resolution.AnalystID, &resolution.ResolvedAt)
+	}
+	item, err := scanQueueItem(row, dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.CaseItem{}, models.ErrReviewNotFound
 	}
 	if err != nil {
-		return models.CaseItem{}, fmt.Errorf("get review case %d: %w", purchaseID, err)
+		return models.CaseItem{}, fmt.Errorf("get review case: %w", err)
 	}
 	c.QueueItem = item
+	if resolution != nil {
+		resolution.ResolvedAt = resolution.ResolvedAt.UTC()
+	}
 	if ipIntel != nil {
 		if err := json.Unmarshal(ipIntel, &c.IPIntel); err != nil {
-			return models.CaseItem{}, fmt.Errorf("decode IP intelligence of case %d: %w", purchaseID, err)
+			return models.CaseItem{}, fmt.Errorf("decode IP intelligence of case %d: %w", item.PurchaseID, err)
 		}
 	}
 	if c.PlayerPurchases, err = s.casePlayerPurchases(ctx, item); err != nil {
-		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", purchaseID, err)
+		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", item.PurchaseID, err)
 	}
 	if c.DeviceActivity, err = s.caseDeviceActivity(ctx, item); err != nil {
-		return models.CaseItem{}, fmt.Errorf("get device activity for case %d: %w", purchaseID, err)
+		return models.CaseItem{}, fmt.Errorf("get device activity for case %d: %w", item.PurchaseID, err)
 	}
 	if c.AccountEvents, err = s.caseAccountEvents(ctx, item); err != nil {
-		return models.CaseItem{}, fmt.Errorf("list account events for case %d: %w", purchaseID, err)
+		return models.CaseItem{}, fmt.Errorf("list account events for case %d: %w", item.PurchaseID, err)
 	}
 	return c, nil
 }

@@ -322,8 +322,20 @@ caption {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-block-start: var(--space-md);
+  margin-block-end: var(--space-md);
   font-size: var(--type-label);
+}
+
+.pager-controls,
+.pager-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.pager-buttons .btn {
+  min-inline-size: var(--control-height);
 }
 
 .loading-skeleton {

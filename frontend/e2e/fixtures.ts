@@ -76,7 +76,7 @@ export async function mockConsole(page: Page, role: Role | null = 'admin') {
       evaluation: { dataset: 'Held-out simulator traffic', roc_auc: 0.9926, pr_auc: 0.9624 },
     } })
     if (url.pathname.endsWith('/network/reviews')) return route.fulfill({ json: { window_days: 30, total: 0, items: [] } })
-    if (url.pathname.startsWith('/reviews')) return route.fulfill({ json: { items: [], next_cursor: null, model_enabled: true } })
+    if (url.pathname.startsWith('/reviews')) return route.fulfill({ json: { items: [], next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 } } })
     if (url.pathname === '/rulesets/active') return route.fulfill({ json: { version: 3, created_at: now, note: 'Demo configuration', review_threshold: 30, block_threshold: 80, rules: {} } })
     if (url.pathname === '/rulesets') return route.fulfill({ json: { versions: [] } })
     return route.continue()

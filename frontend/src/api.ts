@@ -276,6 +276,14 @@ export interface ReviewCase extends Review {
   ip_intel: IpIntel | null
 }
 
+export interface ResolvedReviewCase extends ReviewCase {
+  resolution: { decision: Decision; analyst_id: string; resolved_at: string }
+}
+
+export function getResolvedReviewCase(purchaseId: string, signal: AbortSignal): Promise<ResolvedReviewCase> {
+  return request(`/reviews/${encodeURIComponent(purchaseId)}/resolved`, { signal })
+}
+
 export interface IpIntel {
   provider: string
   available: boolean
@@ -289,6 +297,16 @@ export interface QueuePage {
   items: Review[]
   next_cursor: string | null
   model_enabled: boolean
+}
+
+export interface QueuePagination {
+  page: number
+  total_pages: number
+  total_items: number
+}
+
+export interface NumberedQueuePage extends QueuePage {
+  pagination: QueuePagination
 }
 
 export type ReviewSort = 'rule_score' | 'model_score'
@@ -305,6 +323,15 @@ export interface QueueQuery {
 export function listReviews({ sort, cursor, claimed }: QueueQuery, signal: AbortSignal): Promise<QueuePage> {
   const params = new URLSearchParams({ sort })
   if (cursor !== null) params.set('cursor', cursor)
+  if (claimed === 'mine') params.set('claimed', 'mine')
+  return request(`/reviews?${params}`, { signal })
+}
+
+export function listReviewPage(
+  { sort, claimed, page }: Omit<QueueQuery, 'cursor'> & { page: number },
+  signal: AbortSignal,
+): Promise<NumberedQueuePage> {
+  const params = new URLSearchParams({ sort, page: String(page) })
   if (claimed === 'mine') params.set('claimed', 'mine')
   return request(`/reviews?${params}`, { signal })
 }

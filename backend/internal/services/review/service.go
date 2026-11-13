@@ -17,7 +17,9 @@ const maxLinkedValueBytes = 256
 
 type Store interface {
 	Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error)
+	QueuePage(ctx context.Context, limit int, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
@@ -55,6 +57,11 @@ func (s *Service) Queue(ctx context.Context, order models.QueueOrder, after *mod
 	return Page{Items: items, Next: &next}, nil
 }
 
+// QueuePage returns a numbered page using the same size as the cursor API.
+func (s *Service) QueuePage(ctx context.Context, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error) {
+	return s.store.QueuePage(ctx, PageSize, order, number, claimedBy)
+}
+
 // CursorFor matches the ascending score keys in the queue SQL, including the
 // key for a missing model score.
 func CursorFor(order models.QueueOrder, item models.QueueItem) models.QueueCursor {
@@ -70,6 +77,11 @@ func CursorFor(order models.QueueOrder, item models.QueueItem) models.QueueCurso
 
 func (s *Service) Case(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
 	return s.store.Case(ctx, purchaseID)
+}
+
+// ResolvedCase returns the evidence and analyst decision for a resolved review.
+func (s *Service) ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
+	return s.store.ResolvedCase(ctx, purchaseID)
 }
 
 func (s *Service) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {

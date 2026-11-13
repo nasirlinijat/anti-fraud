@@ -66,6 +66,14 @@ func (fakeReviewReads) LinkedReviews(context.Context, int64) (models.LinkedRevie
 	panic("unexpected linked reviews request")
 }
 
+func (fakeReviewReads) QueuePage(context.Context, int, models.QueueOrder, int64, *string) (models.NumberedReviewPage, error) {
+	panic("unexpected numbered queue read")
+}
+
+func (fakeReviewReads) ResolvedCase(context.Context, int64) (models.CaseItem, error) {
+	panic("unexpected resolved case read")
+}
+
 func (fakeReviewReads) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected decision request")
 }

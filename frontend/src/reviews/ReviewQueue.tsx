@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from 'react'
-import { listReviews, type ClaimFilter, type QueuePage, type ReviewSort } from '../api'
+import { listReviewPage, type ClaimFilter, type NumberedQueuePage, type ReviewSort } from '../api'
 import { TimeDisplayToggle } from '../Display'
 import { useAccount } from '../sessionContext'
-import { Button } from '../ui/Button'
 import { PageHeader } from '../ui/PageHeader'
 import { SelectMenu } from '../ui/SelectMenu'
 import { usePolling } from '../usePolling'
@@ -12,6 +11,7 @@ import { BatchDecisionDialog, DecisionDialog } from './DecisionDialog'
 import { ModelPanel } from './ModelPanel'
 import { CaseView } from './ReviewCase'
 import { ReviewTable } from './ReviewTable'
+import { QueuePages } from './QueuePages'
 import type { Feedback } from './useDecisions'
 import { useReviewWork } from './useReviewWork'
 
@@ -29,15 +29,14 @@ function ReviewQueue() {
 }
 
 function useQueuePages() {
-  const [cursors, setCursors] = useState<(string | null)[]>([null])
+  const [number, setNumber] = useState(1)
   const [sort, setSort] = useState<ReviewSort>('rule_score')
   const [claimed, setClaimed] = useState<ClaimFilter>('all')
   return {
-    cursors, sort, claimed, cursor: cursors[cursors.length - 1],
-    setCursors,
+    number, sort, claimed, setNumber,
     // A new order or filter starts again from its first page.
-    setSort: (next: ReviewSort) => { setSort(next); setCursors([null]) },
-    setClaimed: (next: ClaimFilter) => { setClaimed(next); setCursors([null]) },
+    setSort: (next: ReviewSort) => { setSort(next); setNumber(1) },
+    setClaimed: (next: ClaimFilter) => { setClaimed(next); setNumber(1) },
   }
 }
 
@@ -45,16 +44,17 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   const { username, role } = useAccount()
   const time = useTimeDisplay()
   const pages = useQueuePages()
-  const { cursor, sort, claimed } = pages
+  const { number, sort, claimed } = pages
   const [modelEnabled, setModelEnabled] = useState(false)
-  const [page, setPage] = useState<QueuePage | null>(null)
+  const [page, setPage] = useState<NumberedQueuePage | null>(null)
+  const [pagination, setPagination] = useState<NumberedQueuePage['pagination'] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [openCase, setOpenCase] = useState<string | null>(null)
 
   const loadQueue = useCallback(
-    (signal: AbortSignal) => listReviews({ sort, cursor, claimed }, signal),
-    [sort, cursor, claimed],
+    (signal: AbortSignal) => listReviewPage({ sort, page: number, claimed }, signal),
+    [sort, number, claimed],
   )
   const { stop, refresh, retry, pending: queuePending } = usePolling(loadQueue, {
     intervalMs: REFRESH_MS,
@@ -67,6 +67,8 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
       }
       work.reconcile(result.items)
       setPage(result)
+      setPagination(result.pagination)
+      if (result.pagination.page !== number) pages.setNumber(result.pagination.page)
       setLoadError(null)
     },
     onError: (error) => setLoadError(error instanceof Error ? error.message : 'Could not load the review queue.'),
@@ -95,7 +97,6 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
     setOpenCase(id)
   }
 
-  const nextCursor = page?.next_cursor ?? null
   const dialog = (
     <>
       <DecisionDialog confirmation={decisions.confirmation} blocks={decisions.blocks}
@@ -133,18 +134,15 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
           {loadError} {page && 'Showing the last successful update for this page. '}Retrying automatically.
         </ErrorState>
       )}
+      {pagination && <QueuePages pagination={pagination} busy={page === null}
+        onPage={next => change(() => pages.setNumber(next))} />}
       {page === null && (!loadError || queuePending) && <LoadingSkeleton shape="table" label="Loading review queue…" />}
       {page && page.items.length > 0 && (
         <ReviewTable items={page.items} time={time} sort={sort} modelEnabled={modelEnabled} handlers={handlers} onOpen={setOpenCase} />
       )}
       {page && page.items.length === 0 && (
-        <EmptyQueue firstPage={cursor === null} mine={claimed === 'mine'} admin={role === 'admin'} />
+        <EmptyQueue mine={claimed === 'mine'} admin={role === 'admin'} />
       )}
-      <QueuePages
-        number={pages.cursors.length}
-        onPrevious={pages.cursors.length > 1 ? () => change(() => pages.setCursors(pages.cursors.slice(0, -1))) : undefined}
-        onNext={nextCursor !== null ? () => change(() => pages.setCursors([...pages.cursors, nextCursor])) : undefined}
-      />
       <ModelPanel />
       {dialog}
     </>
@@ -181,10 +179,7 @@ function ClaimFilterButtons({ claimed, onChange }: { claimed: ClaimFilter; onCha
 
 const sortOptions = [['rule_score', 'Rule score'], ['model_score', 'Model risk']] as const
 
-function EmptyQueue({ firstPage, mine, admin }: { firstPage: boolean; mine: boolean; admin: boolean }) {
-  if (!firstPage) {
-    return <EmptyState>No purchases on this page. Choose Previous to see the earlier page.</EmptyState>
-  }
+function EmptyQueue({ mine, admin }: { mine: boolean; admin: boolean }) {
   if (mine) {
     return <EmptyState>You hold no claims. Choose All purchases and claim one to start.</EmptyState>
   }
@@ -193,21 +188,6 @@ function EmptyQueue({ firstPage, mine, admin }: { firstPage: boolean; mine: bool
       No purchases are waiting for review.
       {admin && <> Score a purchase in <a href="#/tester">Tester</a> or start a run in <a href="#/simulator">Simulator</a> to generate traffic.</>}
     </EmptyState>
-  )
-}
-
-// A missing handler means there is no page in that direction.
-function QueuePages({ number, onPrevious, onNext }: {
-  number: number
-  onPrevious?: () => void
-  onNext?: () => void
-}) {
-  return (
-    <nav className="pager" aria-label="Review queue pagination">
-      <Button variant="secondary" size="sm" aria-disabled={!onPrevious} onClick={() => onPrevious?.()}>Previous</Button>
-      <span aria-live="polite">Page {number}</span>
-      <Button variant="secondary" size="sm" aria-disabled={!onNext} onClick={() => onNext?.()}>Next</Button>
-    </nav>
   )
 }
 

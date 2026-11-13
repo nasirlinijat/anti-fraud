@@ -24,7 +24,9 @@ const maxDecisionBytes = 1024
 
 type ReviewService interface {
 	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error)
+	QueuePage(ctx context.Context, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
@@ -55,6 +57,9 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
 	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveCase(w, r)
+	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/resolved", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveResolvedCase(w, r)
 	}))
 	mux.HandleFunc("GET /reviews/{purchase_id}/network", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveNetwork(w, r)
@@ -162,6 +167,13 @@ type queueResponse struct {
 	Items        []reviewResponse `json:"items"`
 	NextCursor   *string          `json:"next_cursor"`
 	ModelEnabled bool             `json:"model_enabled"`
+	Pagination   *queuePagination `json:"pagination,omitempty"`
+}
+
+type queuePagination struct {
+	Page       int64 `json:"page"`
+	TotalPages int64 `json:"total_pages"`
+	TotalItems int64 `json:"total_items"`
 }
 
 type decisionResponse struct {
@@ -238,6 +250,42 @@ func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if values, numbered := params["page"]; numbered {
+		number, err := parseQueuePage(values)
+		if err != nil || after != nil {
+			platform.WriteError(w, http.StatusBadRequest, "page must be a positive integer and cannot be combined with cursor")
+			return
+		}
+		h.serveNumberedQueue(w, r, order, number, claimedBy)
+		return
+	}
+	h.serveCursorQueue(w, r, order, after, claimedBy)
+}
+
+func parseQueuePage(values []string) (int64, error) {
+	if len(values) == 1 {
+		number, err := strconv.ParseInt(values[0], 10, 64)
+		if err == nil && number > 0 {
+			return number, nil
+		}
+	}
+	return 0, errors.New("invalid page number")
+}
+
+func (h *ReviewHandler) serveNumberedQueue(w http.ResponseWriter, r *http.Request, order models.QueueOrder, number int64, claimedBy *string) {
+	page, err := h.service.QueuePage(r.Context(), order, number, claimedBy)
+	if err != nil {
+		platform.WriteServerError(r.Context(), w, "read numbered review queue", err)
+		return
+	}
+	response := queueResponse{
+		Items: reviewItems(page.Items), ModelEnabled: h.modelEnabled,
+		Pagination: &queuePagination{Page: page.Number, TotalPages: models.ReviewPageCount(page.TotalItems, review.PageSize), TotalItems: page.TotalItems},
+	}
+	platform.WriteJSON(w, http.StatusOK, response)
+}
+
+func (h *ReviewHandler) serveCursorQueue(w http.ResponseWriter, r *http.Request, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) {
 	page, err := h.service.Queue(r.Context(), order, after, claimedBy)
 	if err != nil {
 		platform.WriteServerError(r.Context(), w, "read review queue", err)
@@ -249,20 +297,32 @@ func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor
 		token := encodeCursor(order, *page.Next)
 		nextCursor = &token
 	}
-	items := make([]reviewResponse, 0, len(page.Items))
-	for _, row := range page.Items {
+	platform.WriteJSON(w, http.StatusOK, queueResponse{Items: reviewItems(page.Items), NextCursor: nextCursor, ModelEnabled: h.modelEnabled})
+}
+
+func reviewItems(rows []models.QueueItem) []reviewResponse {
+	items := make([]reviewResponse, 0, len(rows))
+	for _, row := range rows {
 		items = append(items, newReviewResponse(row))
 	}
-	platform.WriteJSON(w, http.StatusOK, queueResponse{Items: items, NextCursor: nextCursor, ModelEnabled: h.modelEnabled})
+	return items
 }
 
 func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
+	readReviewCase(w, r, h.service.Case)
+}
+
+func (h *ReviewHandler) serveResolvedCase(w http.ResponseWriter, r *http.Request) {
+	readReviewCase(w, r, h.service.ResolvedCase)
+}
+
+func readReviewCase(w http.ResponseWriter, r *http.Request, load func(context.Context, int64) (models.CaseItem, error)) {
 	purchaseID, err := strconv.ParseInt(r.PathValue("purchase_id"), 10, 64)
 	if err != nil || purchaseID <= 0 {
 		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
 		return
 	}
-	item, err := h.service.Case(r.Context(), purchaseID)
+	item, err := load(r.Context(), purchaseID)
 	if errors.Is(err, models.ErrReviewNotFound) {
 		platform.WriteError(w, http.StatusNotFound, "review case not found")
 		return
@@ -271,7 +331,28 @@ func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
 		platform.WriteServerError(r.Context(), w, "read review case", err, "purchase_id", purchaseID)
 		return
 	}
-	platform.WriteJSON(w, http.StatusOK, newCaseResponse(item))
+	response := newCaseResponse(item)
+	if item.Resolution == nil {
+		platform.WriteJSON(w, http.StatusOK, response)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, resolvedCaseResponse{
+		caseResponse: response,
+		Resolution: caseResolutionResponse{
+			Decision: item.Resolution.Decision, AnalystID: item.Resolution.AnalystID, ResolvedAt: item.Resolution.ResolvedAt.UTC(),
+		},
+	})
+}
+
+type resolvedCaseResponse struct {
+	caseResponse
+	Resolution caseResolutionResponse `json:"resolution"`
+}
+
+type caseResolutionResponse struct {
+	Decision   string    `json:"decision"`
+	AnalystID  string    `json:"analyst_id"`
+	ResolvedAt time.Time `json:"resolved_at"`
 }
 
 func newCaseResponse(item models.CaseItem) caseResponse {

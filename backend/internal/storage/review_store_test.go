@@ -357,3 +357,56 @@ func TestResolveCallsBlocklistRefresherOnDeviceBlock(t *testing.T) {
 		t.Errorf("refreshed = %v, want [device:target-device]", refresher.refreshed)
 	}
 }
+
+func TestResolvedCaseReturnsTheSavedAnalystDecision(t *testing.T) {
+	tx := testTx(t)
+	at := time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+	id := insertReviewDecision(t, tx, "resolved-case", "review", at, nil,
+		`[{"name":"card_velocity","points":40,"message":"Five earlier purchases used this card."}]`)
+	store := NewReviewStore(tx)
+	if _, err := store.ResolvedCase(t.Context(), id); !errors.Is(err, models.ErrReviewNotFound) {
+		t.Fatalf("read unresolved case: %v", err)
+	}
+	resolvedAt := at.Add(time.Minute)
+	if _, err := tx.Exec(t.Context(), `
+INSERT INTO review_resolutions (purchase_id, decision, analyst_id, resolved_at)
+VALUES ($1, 'reject', 'reviewer-one', $2)`, id, resolvedAt); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ResolvedCase(t.Context(), id)
+	want := models.CaseResolution{Decision: "reject", AnalystID: "reviewer-one", ResolvedAt: resolvedAt}
+	if err != nil || got.Resolution == nil || *got.Resolution != want {
+		t.Fatalf("resolved case = %+v, err = %v", got, err)
+	}
+	if len(got.FiredRules) != 1 || got.FiredRules[0].Message != "Five earlier purchases used this card." {
+		t.Fatalf("saved evidence = %+v", got.FiredRules)
+	}
+	if _, err := store.Case(t.Context(), id); !errors.Is(err, models.ErrReviewNotFound) {
+		t.Fatalf("open case read after resolution: %v", err)
+	}
+}
+
+func TestNumberedReviewQueueCountsAndClampsForTheClaimFilter(t *testing.T) {
+	tx := testTx(t)
+	at := time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+	first := insertReviewDecision(t, tx, "pages-first", "review", at, nil, `[]`)
+	last := insertReviewDecision(t, tx, "pages-last", "review", at.Add(time.Minute), nil, `[]`)
+	insertReviewDecision(t, tx, "pages-unclaimed", "review", at, nil, `[]`)
+	const username = "pages-reviewer"
+	if _, err := tx.Exec(t.Context(), `
+WITH reviewer AS (
+    INSERT INTO accounts (username, password_hash, role) VALUES ($1, 'unused', 'reviewer') RETURNING id
+)
+INSERT INTO review_claims (purchase_id, account_id)
+SELECT purchase_id, reviewer.id FROM reviewer CROSS JOIN unnest($2::bigint[]) AS purchase_id
+`, username, []int64{first, last}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := NewReviewStore(tx).QueuePage(t.Context(), 1, models.QueueByRuleScore, 50, ptr(username))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Number != 2 || page.TotalItems != 2 || len(page.Items) != 1 || page.Items[0].PurchaseID != last {
+		t.Fatalf("unexpected numbered page: %+v", page)
+	}
+}
