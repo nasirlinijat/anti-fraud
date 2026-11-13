@@ -9,6 +9,7 @@ import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { BatchDecisionDialog, DecisionDialog } from './DecisionDialog'
+import { ModelPanel } from './ModelPanel'
 import { CaseView } from './ReviewCase'
 import { ReviewTable } from './ReviewTable'
 import type { Feedback } from './useDecisions'
@@ -144,6 +145,7 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
         onPrevious={pages.cursors.length > 1 ? () => change(() => pages.setCursors(pages.cursors.slice(0, -1))) : undefined}
         onNext={nextCursor !== null ? () => change(() => pages.setCursors([...pages.cursors, nextCursor])) : undefined}
       />
+      <ModelPanel />
       {dialog}
     </>
   )

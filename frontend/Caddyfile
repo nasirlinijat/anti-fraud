@@ -13,7 +13,7 @@
 		header_regexp Sec-Fetch-Site ^(cross-site|same-site)$
 	}
 	@score path /score
-	@console path /health /ready /auth/* /admin/* /reviews /reviews/* /stats /stats/* /blocklist /blocklist/* /rulesets /rulesets/* /simulations /simulations/*
+	@console path /health /ready /auth/* /admin/* /reviews /reviews/* /model /stats /stats/* /blocklist /blocklist/* /rulesets /rulesets/* /simulations /simulations/*
 
 	route {
 		# Restrict the local console before adding credentials upstream.

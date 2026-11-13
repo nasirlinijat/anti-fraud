@@ -26,8 +26,8 @@ Sign in with `POST /auth/login` and send the returned token as `Authorization: B
 
 | Role | Can use |
 |---|---|
-| `reviewer` | The review endpoints |
-| `admin` | The review endpoints and every statistics, quality, ruleset, blocklist and simulation endpoint, including changes |
+| `reviewer` | The review endpoints and `GET /model` |
+| `admin` | The review endpoints, `GET /model`, and every statistics, quality, ruleset, blocklist and simulation endpoint, including changes |
 
 A reviewer or admin claims a purchase with `POST /reviews/{purchase_id}/claim` before deciding it, so that two people never work on the same purchase. Only the account holding the claim can decide it. `GET /reviews?claimed=mine` lists your own claims, and every queue item shows who has claimed it. Analyst keys cannot claim and decide without a claim, as before.
 
@@ -53,7 +53,7 @@ Replace the placeholders in `REVIEW_ANALYST_KEYS` in your local `.env` and give 
 REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-one","key":"<generated-key-one>"},{"analyst_id":"analyst-two","key":"<generated-key-two>"}]
 ```
 
-Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. The console does not use analyst keys: it signs in with an account. An analyst key works only for API calls to the review endpoints, sent in the `X-API-Key` header. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
+Run `docker compose up -d --wait` to apply the updated environment, or restart the host backend if you use `make run`. The console does not use analyst keys: it signs in with an account. An analyst key works for API calls to the review endpoints and `GET /model`, sent in the `X-API-Key` header. Keep the configured keys out of Git. Each analyst key must be distinct from `API_KEY`. Leaving `REVIEW_ANALYST_KEYS` empty disables review access while the other APIs remain available.
 
 ## Operator keys and database roles
 

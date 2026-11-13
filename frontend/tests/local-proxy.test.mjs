@@ -46,6 +46,8 @@ test('local console proxy checks origin and adds the service key only to score',
   assert.equal(await call(port, '/score', 'POST', { origin, 'x-api-key': 'caller-key' }), 204)
   assert.equal(await call(port, '/auth/login', 'POST', { origin }), 204)
   assert.equal(await call(port, '/auth/me', 'GET', { authorization }), 204)
+  assert.equal(await call(port, '/model', 'GET', { authorization }), 204)
+  assert.equal(await call(port, '/model', 'GET', { origin: 'https://example.invalid' }), 403)
   assert.equal(await call(port, '/reviews?sort=model_score', 'GET', { authorization }), 204)
   assert.equal(await call(port, '/reviews/7/claim', 'POST', { origin, authorization }), 204)
   assert.equal(await call(port, '/rulesets', 'GET', { origin }), 204)
@@ -64,6 +66,7 @@ test('local console proxy checks origin and adds the service key only to score',
     ['/score', 'proxy-test-service-key', undefined],
     ['/auth/login', undefined, undefined],
     ['/auth/me', undefined, authorization],
+    ['/model', undefined, authorization],
     ['/reviews?sort=model_score', undefined, authorization],
     ['/reviews/7/claim', undefined, authorization],
     ['/rulesets', undefined, undefined],

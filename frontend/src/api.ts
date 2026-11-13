@@ -22,6 +22,19 @@ export interface ScoreResponse {
   model_version: string | null
 }
 
+export interface ModelStatus {
+  loaded: boolean
+  version: string | null
+  mode: 'off' | 'shadow' | 'assist'
+  clear_below: number | null
+  flag_at: number | null
+  evaluation: { dataset: string; roc_auc: number; pr_auc: number } | null
+}
+
+export function getModelStatus(signal?: AbortSignal): Promise<ModelStatus> {
+  return request('/model', { signal })
+}
+
 export const periods = ['15m', '1h', '24h', '7d', 'all'] as const
 export type Period = (typeof periods)[number]
 

@@ -49,7 +49,8 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 
 	accountEventStore := storage.NewAccountEventStore(pool)
 	scoreService := scoresvc.NewService(rulesetStore, blocklistStorage, storage.NewPurchaseStore(pool)).UseAccountEvents(accountEventStore)
-	useModel(cfg.ModelPath, scoreService, rulesetService)
+	model := useModel(cfg.ModelPath, scoreService, rulesetService)
+	transport.RegisterModelRoutes(mux, rulesetService.Active, model, access)
 	if err := useIPIntel(cfg.IPIntel, scoreService); err != nil {
 		fatal("load IP intelligence ranges", err)
 	}
@@ -60,7 +61,7 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 	transport.RegisterAccountEventRoutes(mux,
 		transport.NewAccountEventHandler(accountevent.NewService(accountEventStore)).UseTimeout(cfg.ScoreLimits.Timeout), cfg.APIKey)
 
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), cfg.ModelPath != ""), access)
+	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), model != nil), access)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStorage)), access)
 	chargebacks := chargeback.NewService(storage.NewChargebackStore(pool))
