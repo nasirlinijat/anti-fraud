@@ -1446,6 +1446,8 @@ paths:
       description: >-
         A session must first claim the purchase with POST
         /reviews/{purchase_id}/claim. An analyst key decides without a claim.
+        A rejection can also blocklist the purchase's device, card and player
+        in the same transaction.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -1479,6 +1481,24 @@ paths:
                     purchase without a device, or a device that is already
                     blocked, is rejected without a new entry. A decision
                     that conflicts with an earlier one saves nothing.
+                block_card:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the card token of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. When the card is already blocked, the purchase
+                    is rejected without a new entry. A decision that
+                    conflicts with an earlier one saves nothing.
+                block_player:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the player ID of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. When the player is already blocked, the
+                    purchase is rejected without a new entry. A decision that
+                    conflicts with an earlier one saves nothing.
       responses:
         "201":
           description: The analyst decision was saved.
@@ -2060,7 +2080,7 @@ components:
         error: {type: string}
     ReviewResolution:
       type: object
-      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked]
+      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked, card_blocked, player_blocked]
       properties:
         purchase_id:
           type: string
@@ -2078,6 +2098,12 @@ components:
         device_blocked:
           type: boolean
           description: True when this rejection added the device of the purchase to the blocklist.
+        card_blocked:
+          type: boolean
+          description: True when this rejection added the card token of the purchase to the blocklist.
+        player_blocked:
+          type: boolean
+          description: True when this rejection added the player ID of the purchase to the blocklist.
 
     ReviewPage:
       type: object

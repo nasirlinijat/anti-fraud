@@ -163,13 +163,25 @@ const (
 
 // ReviewDecision is a decision on a purchase under review.
 type ReviewDecision struct {
-	PurchaseID  int64
-	Decision    string
-	AnalystID   string
-	BlockDevice bool
+	PurchaseID int64
+	Decision   string
+	AnalystID  string
+	Blocks     ReviewBlocks
 	// ClaimedBy is the username that must hold the claim on the purchase, or
 	// nil for a decision made with an analyst key, which needs no claim.
 	ClaimedBy *string
+}
+
+// ReviewBlocks says which values of the purchase a rejection also blocklists.
+type ReviewBlocks struct {
+	Device bool
+	Card   bool
+	Player bool
+}
+
+// Any reports whether any value is to be blocklisted.
+func (b ReviewBlocks) Any() bool {
+	return b.Device || b.Card || b.Player
 }
 
 type ClaimStatus string
@@ -219,7 +231,9 @@ type Claim struct {
 }
 
 type Resolution struct {
-	Status        ResolutionStatus
-	ResolvedAt    time.Time
-	DeviceBlocked bool
+	Status     ResolutionStatus
+	ResolvedAt time.Time
+	// Blocked says which values of the purchase this rejection added to the
+	// blocklist. A value that was already blocked is not reported.
+	Blocked ReviewBlocks
 }

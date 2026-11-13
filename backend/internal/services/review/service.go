@@ -96,18 +96,19 @@ func isLinkedValue(value string) bool {
 
 // Decide saves the decision of an analyst with a key on a purchase awaiting
 // review. Each purchase gets one decision; a rejection can also blocklist the
-// purchase's device in the same transaction.
-func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
+// purchase's device, card and player in the same transaction.
+func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: analystID, BlockDevice: blockDevice,
+		PurchaseID: purchaseID, Decision: decision, AnalystID: analystID, Blocks: blocks,
 	})
 }
 
 // DecideClaimed saves the decision of a signed-in account, which must hold
-// the claim on the purchase. It returns ErrNotClaimed otherwise.
-func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error) {
+// the claim on the purchase. It returns ErrNotClaimed otherwise. Like Decide,
+// a rejection can also blocklist the purchase's device, card and player.
+func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: username, BlockDevice: blockDevice, ClaimedBy: &username,
+		PurchaseID: purchaseID, Decision: decision, AnalystID: username, Blocks: blocks, ClaimedBy: &username,
 	})
 }
 
@@ -115,8 +116,8 @@ func (s *Service) decide(ctx context.Context, d models.ReviewDecision) (models.R
 	if d.Decision != "approve" && d.Decision != "reject" {
 		return models.Resolution{}, ErrInvalidDecision
 	}
-	if d.BlockDevice && d.Decision != "reject" {
-		return models.Resolution{}, ErrBlockDeviceNeedsReject
+	if d.Blocks.Any() && d.Decision != "reject" {
+		return models.Resolution{}, ErrBlockNeedsReject
 	}
 	result, err := s.store.Resolve(ctx, d)
 	if err != nil {

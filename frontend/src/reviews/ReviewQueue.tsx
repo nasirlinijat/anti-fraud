@@ -102,8 +102,8 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
 
   const nextCursor = page?.next_cursor ?? null
   const dialog = (
-    <DecisionDialog confirmation={decisions.confirmation} blockDevice={decisions.blockDevice}
-      onBlockDevice={decisions.setBlockDevice} onDismiss={decisions.dismiss}
+    <DecisionDialog confirmation={decisions.confirmation} blocks={decisions.blocks}
+      onBlocksChange={decisions.setBlocks} onDismiss={decisions.dismiss}
       onConfirm={action => void decisions.save(action)} />
   )
 

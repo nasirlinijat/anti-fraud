@@ -122,21 +122,23 @@ func TestScoreHandlerWithMockedService(t *testing.T) {
 	})
 }
 
-func TestReviewHandlerWithMockedService(t *testing.T) {
-	newMux := func(t *testing.T) (*http.ServeMux, *mocks.MockReviewService) {
-		service := mocks.NewMockReviewService(gomock.NewController(t))
-		keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"analyst-1","key":"`+mockAnalystKey+`"}]`, mockServiceKey)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mux := http.NewServeMux()
-		RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Analysts: keys})
-		return mux, service
+func newMockReviewMux(t *testing.T) (*http.ServeMux, *mocks.MockReviewService) {
+	t.Helper()
+	service := mocks.NewMockReviewService(gomock.NewController(t))
+	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"analyst-1","key":"`+mockAnalystKey+`"}]`, mockServiceKey)
+	if err != nil {
+		t.Fatal(err)
 	}
+	mux := http.NewServeMux()
+	RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Analysts: keys})
+	return mux, service
+}
+
+func TestReviewHandlerWithMockedService(t *testing.T) {
 	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
 
 	t.Run("queue page with a next cursor", func(t *testing.T) {
-		mux, service := newMux(t)
+		mux, service := newMockReviewMux(t)
 		next := models.QueueCursor{DecidedAt: at, PurchaseID: 5, ScoreKey: -60}
 		service.EXPECT().Queue(gomock.Any(), models.QueueByRuleScore, (*models.QueueCursor)(nil), (*string)(nil)).
 			Return(review.Page{Items: []models.QueueItem{{PurchaseID: 5, RuleScore: 60, DecidedAt: at}}, Next: &next}, nil)
@@ -144,7 +146,7 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 	})
 
 	t.Run("case not found", func(t *testing.T) {
-		mux, service := newMux(t)
+		mux, service := newMockReviewMux(t)
 		service.EXPECT().Case(gomock.Any(), int64(9)).Return(models.CaseItem{}, models.ErrReviewNotFound)
 		wantResponse(t, send(mux, http.MethodGet, "/reviews/9", mockAnalystKey, ""), http.StatusNotFound, "review case not found")
 	})
@@ -156,7 +158,7 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 	}{
 		{"saved", nil, http.StatusCreated},
 		{"invalid decision", review.ErrInvalidDecision, http.StatusBadRequest},
-		{"block device needs reject", review.ErrBlockDeviceNeedsReject, http.StatusBadRequest},
+		{"block needs reject", review.ErrBlockNeedsReject, http.StatusBadRequest},
 		{"purchase not found", review.ErrPurchaseNotFound, http.StatusNotFound},
 		{"not under review", review.ErrNotUnderReview, http.StatusConflict},
 		{"already decided", review.ErrAlreadyDecided, http.StatusConflict},
@@ -164,24 +166,67 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 	}
 	for _, tt := range decisions {
 		t.Run("decision "+tt.name, func(t *testing.T) {
-			mux, service := newMux(t)
-			service.EXPECT().Decide(gomock.Any(), int64(7), "reject", "analyst-1", true).
-				Return(models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at, DeviceBlocked: true}, tt.err)
+			mux, service := newMockReviewMux(t)
+			service.EXPECT().Decide(gomock.Any(), int64(7), "reject", "analyst-1", models.ReviewBlocks{Device: true}).
+				Return(models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at, Blocked: models.ReviewBlocks{Device: true}}, tt.err)
 			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, `{"decision":"reject","block_device":true}`)
 			wantResponse(t, rec, tt.status)
 			if tt.err == nil {
-				wantResponse(t, rec, tt.status, `"analyst_id":"analyst-1"`, `"device_blocked":true`)
+				wantResponse(t, rec, tt.status, `"analyst_id":"analyst-1"`, `"device_blocked":true`, `"card_blocked":false`, `"player_blocked":false`)
 			}
 		})
 	}
 
 	t.Run("requests without an analyst key never reach the service", func(t *testing.T) {
-		mux, _ := newMux(t)
+		mux, _ := newMockReviewMux(t)
 		for _, key := range []string{"", mockServiceKey, "wrong"} {
 			if rec := send(mux, http.MethodGet, "/reviews", key, ""); rec.Code != http.StatusUnauthorized {
 				t.Errorf("key %q: status %d, want 401", key, rec.Code)
 			}
 		}
+	})
+}
+
+func TestReviewDecisionMapsTheBlockFields(t *testing.T) {
+	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	blockRequests := []struct {
+		name, body string
+		blocks     models.ReviewBlocks
+		blocked    models.ReviewBlocks
+		want       []string
+	}{
+		{
+			"card and player", `{"decision":"reject","block_card":true,"block_player":true}`,
+			models.ReviewBlocks{Card: true, Player: true}, models.ReviewBlocks{Card: true, Player: true},
+			[]string{`"device_blocked":false`, `"card_blocked":true`, `"player_blocked":true`},
+		},
+		{
+			"every value, card already blocked", `{"decision":"reject","block_device":true,"block_card":true,"block_player":true}`,
+			models.ReviewBlocks{Device: true, Card: true, Player: true}, models.ReviewBlocks{Device: true, Player: true},
+			[]string{`"device_blocked":true`, `"card_blocked":false`, `"player_blocked":true`},
+		},
+		{
+			"no block fields", `{"decision":"reject"}`,
+			models.ReviewBlocks{}, models.ReviewBlocks{},
+			[]string{`"device_blocked":false`, `"card_blocked":false`, `"player_blocked":false`},
+		},
+	}
+	for _, tt := range blockRequests {
+		t.Run("decision blocks "+tt.name, func(t *testing.T) {
+			mux, service := newMockReviewMux(t)
+			service.EXPECT().Decide(gomock.Any(), int64(7), "reject", "analyst-1", tt.blocks).
+				Return(models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at, Blocked: tt.blocked}, nil)
+
+			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, tt.body)
+
+			wantResponse(t, rec, http.StatusCreated, tt.want...)
+		})
+	}
+
+	t.Run("decision with an unknown block field never reaches the service", func(t *testing.T) {
+		mux, _ := newMockReviewMux(t)
+		rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, `{"decision":"reject","block_ip":true}`)
+		wantResponse(t, rec, http.StatusBadRequest)
 	})
 }
 

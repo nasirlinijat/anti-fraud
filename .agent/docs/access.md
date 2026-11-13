@@ -31,6 +31,8 @@ Sign in with `POST /auth/login` and send the returned token as `Authorization: B
 
 A reviewer or admin claims a purchase with `POST /reviews/{purchase_id}/claim` before deciding it, so that two people never work on the same purchase. Only the account holding the claim can decide it. `GET /reviews?claimed=mine` lists your own claims, and every queue item shows who has claimed it. Analyst keys cannot claim and decide without a claim, as before.
 
+A reviewer, or an analyst key, who rejects a purchase can also blocklist that purchase's own device, card and player, in the same transaction as the rejection (`block_device`, `block_card` and `block_player` on `POST /reviews/{purchase_id}/decision`). That is the only blocklist change a reviewer or analyst key can make: it covers only the values of the purchase being rejected, a session needs the claim on it, and each entry's reason names who rejected it. Every other blocklist change needs an admin session or an operator key.
+
 Admins see what each reviewer is working on with `GET /admin/assignments`: every active reviewer, and any other account still holding a claim, with its open claims and the number of purchases it decided. An admin returns a stuck purchase to the shared queue with `DELETE /reviews/{purchase_id}/claim`, for example when a reviewer is away. Both endpoints need an admin session; no key works for them.
 
 Other endpoints answer a valid session of the wrong role with 403. Review decisions and configuration changes save the username. `POST /score` accepts only the service key. A request with an `Authorization` header is checked as a session and its `X-API-Key` is ignored; requests without one still use the keys described below, until the console signs in.

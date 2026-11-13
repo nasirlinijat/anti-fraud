@@ -20,26 +20,70 @@ func newService(t *testing.T) (*review.Service, *mocks.MockStore) {
 
 func TestDecideChecksTheDecisionBeforeSaving(t *testing.T) {
 	tests := []struct {
-		name        string
-		decision    string
-		blockDevice bool
-		want        error
+		name     string
+		decision string
+		blocks   models.ReviewBlocks
+		want     error
 	}{
-		{"unknown decision", "maybe", false, review.ErrInvalidDecision},
-		{"empty decision", "", false, review.ErrInvalidDecision},
-		{"block device on approve", "approve", true, review.ErrBlockDeviceNeedsReject},
+		{"unknown decision", "maybe", models.ReviewBlocks{}, review.ErrInvalidDecision},
+		{"empty decision", "", models.ReviewBlocks{}, review.ErrInvalidDecision},
+		{"block device on approve", "approve", models.ReviewBlocks{Device: true}, review.ErrBlockNeedsReject},
+		{"block card on approve", "approve", models.ReviewBlocks{Card: true}, review.ErrBlockNeedsReject},
+		{"block player on approve", "approve", models.ReviewBlocks{Player: true}, review.ErrBlockNeedsReject},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, store := newService(t)
 			store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Times(0)
 
-			_, err := svc.Decide(context.Background(), 1, tt.decision, "analyst-1", tt.blockDevice)
+			_, err := svc.Decide(context.Background(), 1, tt.decision, "analyst-1", tt.blocks)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
 		})
 	}
+}
+
+func TestDecideClaimedRejectsABlockWithApprove(t *testing.T) {
+	svc, store := newService(t)
+	store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Times(0)
+
+	_, err := svc.DecideClaimed(context.Background(), 1, "approve", "rita", models.ReviewBlocks{Card: true, Player: true})
+
+	if !errors.Is(err, review.ErrBlockNeedsReject) {
+		t.Fatalf("err = %v, want ErrBlockNeedsReject", err)
+	}
+}
+
+func TestDecidePassesTheBlocksToTheStore(t *testing.T) {
+	blocks := models.ReviewBlocks{Device: true, Card: true, Player: true}
+	username := "rita"
+
+	t.Run("analyst key", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
+			PurchaseID: 7, Decision: "reject", AnalystID: "key-analyst", Blocks: blocks,
+		}).Return(models.Resolution{Status: models.ResolutionSaved, Blocked: models.ReviewBlocks{Card: true, Player: true}}, nil)
+
+		got, err := svc.Decide(context.Background(), 7, "reject", "key-analyst", blocks)
+
+		if err != nil || got.Blocked != (models.ReviewBlocks{Card: true, Player: true}) {
+			t.Fatalf("Decide = %+v, %v; want card and player blocked", got, err)
+		}
+	})
+
+	t.Run("session", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
+			PurchaseID: 7, Decision: "reject", AnalystID: "rita", Blocks: blocks, ClaimedBy: &username,
+		}).Return(models.Resolution{Status: models.ResolutionSaved, Blocked: blocks}, nil)
+
+		got, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", blocks)
+
+		if err != nil || got.Blocked != blocks {
+			t.Fatalf("DecideClaimed = %+v, %v; want every value blocked", got, err)
+		}
+	})
 }
 
 func TestDecideMapsTheStoreStatus(t *testing.T) {
@@ -55,23 +99,24 @@ func TestDecideMapsTheStoreStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
 			svc, store := newService(t)
-			store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "reject", AnalystID: "analyst-1", BlockDevice: true}).
-				Return(models.Resolution{Status: tt.status, DeviceBlocked: true}, nil)
+			blocks := models.ReviewBlocks{Device: true}
+			store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "reject", AnalystID: "analyst-1", Blocks: blocks}).
+				Return(models.Resolution{Status: tt.status, Blocked: blocks}, nil)
 
-			got, err := svc.Decide(context.Background(), 1, "reject", "analyst-1", true)
+			got, err := svc.Decide(context.Background(), 1, "reject", "analyst-1", blocks)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
-			if tt.want == nil && !got.DeviceBlocked {
-				t.Fatal("saved resolution lost DeviceBlocked")
+			if tt.want == nil && !got.Blocked.Device {
+				t.Fatal("saved resolution lost Blocked.Device")
 			}
 		})
 	}
 
 	t.Run("unknown status", func(t *testing.T) {
 		svc, store := newService(t)
-		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1", BlockDevice: false}).Return(models.Resolution{Status: "unexpected"}, nil)
-		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", false); err == nil {
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1"}).Return(models.Resolution{Status: "unexpected"}, nil)
+		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", models.ReviewBlocks{}); err == nil {
 			t.Fatal("an unknown store status was accepted")
 		}
 	})
@@ -79,8 +124,8 @@ func TestDecideMapsTheStoreStatus(t *testing.T) {
 	t.Run("store error", func(t *testing.T) {
 		svc, store := newService(t)
 		storeErr := errors.New("database unavailable")
-		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1", BlockDevice: false}).Return(models.Resolution{}, storeErr)
-		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", false); !errors.Is(err, storeErr) {
+		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{PurchaseID: 1, Decision: "approve", AnalystID: "analyst-1"}).Return(models.Resolution{}, storeErr)
+		if _, err := svc.Decide(context.Background(), 1, "approve", "analyst-1", models.ReviewBlocks{}); !errors.Is(err, storeErr) {
 			t.Fatalf("err = %v, want the store error", err)
 		}
 	})
@@ -211,7 +256,7 @@ func TestDecideClaimedRequiresTheUsernameToHoldTheClaim(t *testing.T) {
 		PurchaseID: 7, Decision: "approve", AnalystID: "rita", ClaimedBy: &username,
 	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
 
-	if _, err := svc.DecideClaimed(context.Background(), 7, "approve", "rita", false); err != nil {
+	if _, err := svc.DecideClaimed(context.Background(), 7, "approve", "rita", models.ReviewBlocks{}); err != nil {
 		t.Fatalf("DecideClaimed: %v", err)
 	}
 }
@@ -222,7 +267,7 @@ func TestDecideWithAKeyNeedsNoClaim(t *testing.T) {
 		PurchaseID: 7, Decision: "approve", AnalystID: "key-analyst",
 	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
 
-	if _, err := svc.Decide(context.Background(), 7, "approve", "key-analyst", false); err != nil {
+	if _, err := svc.Decide(context.Background(), 7, "approve", "key-analyst", models.ReviewBlocks{}); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 }
@@ -231,7 +276,7 @@ func TestDecideClaimedReportsAMissingClaim(t *testing.T) {
 	svc, store := newService(t)
 	store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Return(models.Resolution{Status: models.ResolutionNotClaimed}, nil)
 
-	_, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", false)
+	_, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", models.ReviewBlocks{})
 
 	if !errors.Is(err, review.ErrNotClaimed) {
 		t.Fatalf("err = %v, want ErrNotClaimed", err)

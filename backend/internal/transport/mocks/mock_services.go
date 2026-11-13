@@ -169,33 +169,33 @@ func (mr *MockReviewServiceMockRecorder) Claim(ctx, purchaseID, username any) *g
 }
 
 // Decide mocks base method.
-func (m *MockReviewService) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
+func (m *MockReviewService) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Decide", ctx, purchaseID, decision, analystID, blockDevice)
+	ret := m.ctrl.Call(m, "Decide", ctx, purchaseID, decision, analystID, blocks)
 	ret0, _ := ret[0].(models.Resolution)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Decide indicates an expected call of Decide.
-func (mr *MockReviewServiceMockRecorder) Decide(ctx, purchaseID, decision, analystID, blockDevice any) *gomock.Call {
+func (mr *MockReviewServiceMockRecorder) Decide(ctx, purchaseID, decision, analystID, blocks any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Decide", reflect.TypeOf((*MockReviewService)(nil).Decide), ctx, purchaseID, decision, analystID, blockDevice)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Decide", reflect.TypeOf((*MockReviewService)(nil).Decide), ctx, purchaseID, decision, analystID, blocks)
 }
 
 // DecideClaimed mocks base method.
-func (m *MockReviewService) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error) {
+func (m *MockReviewService) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DecideClaimed", ctx, purchaseID, decision, username, blockDevice)
+	ret := m.ctrl.Call(m, "DecideClaimed", ctx, purchaseID, decision, username, blocks)
 	ret0, _ := ret[0].(models.Resolution)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // DecideClaimed indicates an expected call of DecideClaimed.
-func (mr *MockReviewServiceMockRecorder) DecideClaimed(ctx, purchaseID, decision, username, blockDevice any) *gomock.Call {
+func (mr *MockReviewServiceMockRecorder) DecideClaimed(ctx, purchaseID, decision, username, blocks any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideClaimed), ctx, purchaseID, decision, username, blockDevice)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideClaimed), ctx, purchaseID, decision, username, blocks)
 }
 
 // Network mocks base method.

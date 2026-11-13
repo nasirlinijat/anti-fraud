@@ -69,7 +69,7 @@ backend/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/
     │   ├── score/      Score flow: saved decision, IP lookup, blocklist, model inputs, model, rules, save
-    │   ├── review/     Review rules: queue pages, claims, one decision per purchase, reject can blocklist the device
+    │   ├── review/     Review rules: queue pages, claims, one decision per purchase, reject can blocklist the device, card and player
     │   ├── account/    Accounts: username and password checks, bcrypt hashing
     │   ├── auth/       Sign-in: password check, attempt limit, sessions stored by token hash
     │   ├── accountevent/ Login and password-reset events, recorded once per event ID
@@ -94,7 +94,7 @@ backend/
 
 Each feature registers its own routes, so `routes.go` contains only wiring and `main.go` only starts and stops the server.
 
-Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured. Chargebacks are labels too: only the webhook store (`storage/chargeback_store.go`), the training export and the mock bank handle them, and `services/chargeback/boundary_test.go` fails when any other backend code mentions them.
+Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, card and player, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured. Chargebacks are labels too: only the webhook store (`storage/chargeback_store.go`), the training export and the mock bank handle them, and `services/chargeback/boundary_test.go` fails when any other backend code mentions them.
 
 ### 3.3 Model Data Pipeline
 
@@ -172,7 +172,7 @@ The server listens on the port given by the `PORT` environment variable (default
 | `GET /admin/accounts` | Lists every account with its username, role, disabled flag, and creation time, never the password hash. Same authentication |
 | `POST /admin/accounts/{username}/disable` | Disables an account and ends all its sessions at once. Same authentication. Returns 404 for an unknown username and 409 for your own account |
 | `GET /admin/assignments` | Lists each active reviewer, and any other account still holding an open claim, with its open claims (purchase ID, amount, rule score, model score, claim time) and the number of purchases it decided. Requires an admin session; reviewers get 403 and keys 401 |
-| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. A session must hold the claim on the purchase; an analyst key decides without one. Returns 409 for a purchase that was already decided or that the session has not claimed |
+| `POST /reviews/{purchase_id}/decision` | Approves or rejects a purchase and saves the analyst and time. Same authentication. A session must hold the claim on the purchase; an analyst key decides without one. A rejection can also blocklist the purchase's device, card and player in the same transaction. Returns 409 for a purchase that was already decided or that the session has not claimed |
 
 `make test` defaults `TEST_DATABASE_URL` to the local database owner connection and `TEST_REDIS_URL` to local Redis for test fixtures. The backend runs as the restricted `antifraud_api` role. A direct `go test` skips the PostgreSQL tests unless `TEST_DATABASE_URL` is set. With it set, pass `-p 1`: test packages share one database, and packages running in parallel can deadlock on each other's rows.
 
