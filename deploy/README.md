@@ -138,17 +138,54 @@ The database administrator can inspect recent configuration changes. Each row id
 dc exec -T db psql -U antifraud -d antifraud -c   'SELECT recorded_at, actor_kind, actor_id, action, resource_id FROM configuration_audit_events ORDER BY id DESC LIMIT 25'
 ```
 
-Back up the database:
+### Backups
+
+There are two layers. Nightly database dumps protect against mistakes, such as a bad migration or deleted data. Disk snapshots in AWS protect against losing the server itself, because the dumps live on the same disk as the database.
+
+**Database dumps.** Back up the database now:
 
 ```bash
 bash ~/anti-fraud/app/deploy/backup.sh
 ```
 
-It writes a compressed `pg_dump` to `~/anti-fraud/backups/` and keeps the last 7. To run it every night at 03:00 UTC, add this line with `crontab -e`:
+It writes a compressed `pg_dump` to `~/anti-fraud/backups/` and keeps the last 7. The server runs it every night at 03:00 UTC from the `ubuntu` user's crontab (`crontab -e`), with the output in `backups/backup.log`:
 
 ```
-0 3 * * * bash ~/anti-fraud/app/deploy/backup.sh > /dev/null
+0 3 * * * bash /home/ubuntu/anti-fraud/app/deploy/backup.sh >> /home/ubuntu/anti-fraud/backups/backup.log 2>&1
 ```
+
+Check a dump without touching the live database by restoring it into a temporary database:
+
+```bash
+f=$(ls -1t ~/anti-fraud/backups/*.sql.gz | head -1)
+dc exec -T db createdb -U antifraud restore_check
+gunzip -c "$f" | dc exec -T db psql -q -U antifraud -d restore_check > /dev/null
+dc exec -T db psql -U antifraud -d restore_check -c 'SELECT count(*) FROM purchases'
+dc exec -T db dropdb -U antifraud restore_check
+```
+
+Restore a dump over the live database (this replaces all current data, so take a fresh backup first):
+
+```bash
+bash ~/anti-fraud/app/deploy/backup.sh
+f=~/anti-fraud/backups/<the dump to restore>.sql.gz
+dc stop backend
+dc exec -T db dropdb -U antifraud --force antifraud
+dc exec -T db createdb -U antifraud antifraud
+gunzip -c "$f" | dc exec -T db psql -q -U antifraud -d antifraud > /dev/null
+dc up -d --wait
+```
+
+`dc up` runs the migrations and `db-permissions` again, so the restricted roles get their rights back.
+
+**Disk snapshots.** An Amazon Data Lifecycle Manager policy takes a snapshot of the server's disk every day and keeps the last 7. AWS stores snapshots outside the instance, so they survive a lost server. Create it once in the AWS console:
+
+1. EC2, **Elastic Block Store, Lifecycle Manager**, **Create lifecycle policy**, type **EBS snapshot policy**.
+2. Target resource type **Volume**, target tag `Backup` = `daily`. Add the same tag to the server's volume (EC2, **Volumes**, the instance's volume, **Tags**).
+3. Schedule: every 24 hours at 03:30 UTC, after the nightly dump. Retention type **Count**, **7**.
+4. Keep the default IAM role, enable the policy, and create it.
+
+Snapshots store only the blocks that are in use and that changed, so for this disk they cost about 1 USD a month. To restore, create a volume from a snapshot (EC2, **Snapshots**, **Create volume from snapshot**, in the instance's availability zone), stop the instance, detach the old volume, attach the new one as the root device, and start the instance again.
 
 Roll back to the previous deploy:
 
