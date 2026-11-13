@@ -35,6 +35,7 @@ export interface Stats {
   since: string
   generated_at: string
   outcomes: { allow: number; review: number; block: number; total: number }
+  blocklist_blocks: number
   top_rules: { name: string; fired: number; points: number }[]
   review_queue: number
   model: { scored: number; flagged: number; cleared: number }

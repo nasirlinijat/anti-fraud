@@ -43,6 +43,57 @@
 .decision-figure :focus-visible { outline-offset: -2px; }
 .decision-legend-label { color: var(--text); }
 
+.pipeline-panel { margin-block-end: var(--space-lg); }
+.pipeline-figure { position: relative; margin: 0; overflow: clip; container-type: inline-size; }
+.pipeline-figure figcaption { margin-block-start: var(--space-md); }
+
+.pipeline-diagram {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  margin-inline: auto;
+  font-family: var(--font-body);
+}
+
+.pipeline-diagram-tall { max-inline-size: 30rem; }
+.pipeline-diagram-wide { display: none; max-inline-size: 54rem; }
+
+/* From 41rem the wide diagram is drawn at 0.86 of its size or more, which keeps its smallest text above 11px. */
+@container (min-width: 41rem) {
+  .pipeline-diagram-wide { display: block; }
+  .pipeline-diagram-tall { display: none; }
+}
+
+.pipeline-flow { color: color-mix(in srgb, var(--muted) 45%, var(--surface)); }
+.pipeline-flow path { fill: none; stroke: currentColor; }
+.pipeline-flow polygon { fill: currentColor; }
+.pipeline-flow-allow { color: color-mix(in srgb, var(--chart-allow) 80%, var(--surface)); }
+.pipeline-flow-review { color: color-mix(in srgb, var(--chart-review) 80%, var(--surface)); }
+.pipeline-flow-block { color: color-mix(in srgb, var(--chart-block) 80%, var(--surface)); }
+.pipeline-flow-empty { color: var(--muted); }
+.pipeline-flow-empty path { stroke-dasharray: 4 3; }
+.pipeline-stage rect { fill: var(--surface-subtle); stroke: var(--text); stroke-width: 2; }
+.pipeline-stage-idle rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 4 4; }
+.pipeline-stage-idle .pipeline-title { fill: var(--muted); }
+.pipeline-bin rect { stroke-width: 2; }
+.pipeline-bin-allow rect { fill: var(--allow-bg); stroke: var(--chart-allow); }
+.pipeline-bin-review rect { fill: var(--review-bg); stroke: var(--chart-review); }
+.pipeline-bin-block rect { fill: var(--block-bg); stroke: var(--chart-block); }
+.pipeline-title { fill: var(--text); font-size: 14px; font-weight: 600; }
+.pipeline-count { fill: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pipeline-note,
+.pipeline-share { fill: var(--muted); font-size: 12px; }
+.pipeline-diagram-wide .pipeline-title { font-size: 15px; }
+.pipeline-diagram-wide .pipeline-count { font-size: 14px; }
+.pipeline-diagram-wide .pipeline-note,
+.pipeline-diagram-wide .pipeline-share { font-size: 13px; }
+
+@media (forced-colors: active) {
+  .pipeline-diagram rect { fill: Canvas !important; stroke: CanvasText !important; }
+  .pipeline-flow { color: CanvasText !important; }
+  .pipeline-diagram text { fill: CanvasText !important; }
+}
+
 .decision-details,
 .network-details {
   margin-block-start: 20px;

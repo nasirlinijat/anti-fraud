@@ -6,6 +6,7 @@ import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { PipelinePanel } from './PipelinePanel'
 import { QualityPanel } from './QualityPanel'
 
 const DecisionChart = lazy(() => import('./DecisionChart'))
@@ -95,6 +96,8 @@ function DashboardPage() {
       {outcomes && (
         <>
           <OutcomeTiles stats={shown} />
+
+          <PipelinePanel stats={shown} />
 
           {shown.decision_series?.buckets.length > 0 && (
             <Suspense fallback={<LoadingSkeleton shape="chart" label="Loading decisions over time…" />}>

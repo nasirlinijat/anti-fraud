@@ -18,7 +18,7 @@ export function statistics(period: Period = '24h'): Stats {
   return {
     period, since: buckets[0].start, generated_at: now,
     outcomes: { total: sum('allow') + sum('review') + sum('block'), allow: sum('allow'), review: sum('review'), block: sum('block') },
-    review_queue: 42, p95_scoring_latency_us: 41390, blocked_value_minor: '2876499',
+    blocklist_blocks: Math.round(sum('block') * 0.4), review_queue: 42, p95_scoring_latency_us: 41390, blocked_value_minor: '2876499',
     top_rules: [{ name: 'card_velocity', fired: 368, points: 18400 }, { name: 'high_amount', fired: 241, points: 12050 },
       { name: 'new_account', fired: 156, points: 4680 }, { name: 'country_mismatch', fired: 89, points: 1780 }],
     model: { scored: 6048, flagged: 124, cleared: 87 }, decision_series: { bucket_seconds: 3600, buckets },
