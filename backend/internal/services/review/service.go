@@ -2,7 +2,6 @@ package review
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
@@ -11,17 +10,6 @@ import (
 //go:generate mockgen -destination=mocks/mock_store.go -package=mocks . Store
 
 const PageSize = 100
-
-var (
-	ErrInvalidDecision        = errors.New("decision must be approve or reject")
-	ErrBlockDeviceNeedsReject = errors.New("block_device is only allowed with a reject decision")
-	ErrPurchaseNotFound       = errors.New("purchase not found")
-	ErrNotUnderReview         = errors.New("purchase was not scored for review")
-	ErrAlreadyDecided         = errors.New("purchase has already been decided")
-	ErrNotClaimed             = errors.New("purchase must be claimed by you before you decide it")
-	ErrClaimedByOther         = errors.New("purchase is claimed by another account")
-	ErrNoOpenClaim            = errors.New("purchase has no open claim")
-)
 
 type Store interface {
 	Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error)

@@ -2,7 +2,6 @@ package account
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,13 +20,6 @@ const (
 
 // usernamePattern matches the check on accounts.username.
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,63}$`)
-
-var (
-	ErrInvalidUsername = errors.New("username must be 3 to 64 lowercase letters, digits, dots, hyphens or underscores, starting with a letter or digit")
-	ErrInvalidRole     = errors.New("role must be reviewer or admin")
-	ErrPasswordLength  = fmt.Errorf("password must be %d to %d bytes long", MinPasswordLength, maxPasswordLength)
-	ErrDisableSelf     = errors.New("you cannot disable your own account")
-)
 
 // Store saves and reads accounts.
 type Store interface {

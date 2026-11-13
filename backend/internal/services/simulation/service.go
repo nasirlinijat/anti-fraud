@@ -3,7 +3,6 @@ package simulation
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -21,11 +20,6 @@ import (
 //go:generate mockgen -destination=mocks/mock_controller.go -package=mocks github.com/nasirlinijat/anti-fraud/backend/internal/models SimulationController
 
 const defaultBackfillCount = 500
-
-var (
-	ErrShuttingDown  = errors.New("simulation service is shutting down")
-	ErrRequestReused = errors.New("request_id was used with different settings")
-)
 
 // ValidationError lists the problems found in the settings, keyed by field name.
 type ValidationError struct {

@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,9 +13,6 @@ const (
 	// different usernames. Above it, windows that have ended are dropped.
 	maxTracked = 10000
 )
-
-// ErrTooManyAttempts means the username has used up its sign-in attempts.
-var ErrTooManyAttempts = errors.New("too many sign-in attempts")
 
 // ThrottledError is returned while a username may not sign in. It matches
 // ErrTooManyAttempts with errors.Is.
