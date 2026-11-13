@@ -2,7 +2,7 @@
 
 The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases, `ml/testdata/account_events.csv` account events of their players, and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads all three and compares every value.
 
-This file describes 63 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, `lgbm-game-v5`, `v6` and `v7` the first 54, and `lgbm-game-v8` and `v9` all 63 (v9 was trained with the payment and IP inputs 55-59 masked, so it does not split on them). IEEE-CIS has none of the fields behind features 55-63, so they are `-1` for every IEEE-CIS purchase and the IEEE-CIS model does not use them.
+This file describes 63 features, which the service computes. The models `lgbm-ieee-v5*` take the first 50 of them, `lgbm-game-v5` the first 54, and `lgbm-game-v9` all 63 (v9 was trained with the payment and IP inputs 55-59 masked, so it does not split on them). IEEE-CIS has none of the fields behind features 55-63, so they are `-1` for every IEEE-CIS purchase and the IEEE-CIS model does not use them.
 
 ## General rules
 

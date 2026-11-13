@@ -15,7 +15,7 @@ Simulated game traffic written by the simulator's -dump option is replayed
 the same way, with the model trained on it. The account events written next to
 the dump are sent to POST /account-events before the first purchase that comes
 after them:
-    python replay.py --requests data/game/world1.jsonl --limit 10000 --model ../backend/models/lgbm-game-v2.json --api-key local-dev-key
+    python replay.py --requests data/game/world1.jsonl --limit 10000 --model ../backend/models/lgbm-game-v9.json --api-key local-dev-key
 
 Fraud labels never reach the score API. A separate database importer can load
 the labels CSV after the decisions have been saved.

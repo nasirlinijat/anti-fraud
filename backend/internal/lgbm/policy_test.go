@@ -9,17 +9,17 @@ import (
 )
 
 func TestReportPath(t *testing.T) {
-	if got := ReportPath("models/lgbm-ieee-v3.json"); got != "models/lgbm-ieee-v3.report.json" {
+	if got := ReportPath("models/lgbm-game-v9.json"); got != "models/lgbm-game-v9.report.json" {
 		t.Errorf("ReportPath = %q", got)
 	}
 }
 
-func TestLoadPolicyFromV3Report(t *testing.T) {
+func TestLoadPolicyFromExportedReport(t *testing.T) {
 	p, err := LoadPolicy(ReportPath(modelPath))
 	if err != nil {
 		t.Fatalf("LoadPolicy: %v", err)
 	}
-	want := scoring.ModelPolicy{FlagAt: 0.316019, ClearBelow: 0.004266}
+	want := scoring.ModelPolicy{FlagAt: 0.544632, ClearBelow: 0.011527}
 	if p != want {
 		t.Errorf("policy = %+v, want %+v", p, want)
 	}

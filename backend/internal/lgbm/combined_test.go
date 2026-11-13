@@ -12,7 +12,7 @@ import (
 )
 
 func TestCombinedMatchesGoldenRows(t *testing.T) {
-	for _, version := range []string{"lgbm-ieee-v5-combined", "lgbm-game-v7-combined"} {
+	for _, version := range []string{"lgbm-ieee-v5-combined"} {
 		t.Run(version, func(t *testing.T) {
 			combined := loadCombined(t, "../../models/"+version+".json")
 			if combined.Version() != version || combined.Trees() < 2 {

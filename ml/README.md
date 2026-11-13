@@ -2,7 +2,7 @@
 
 Trains the fraud models. Python is used only offline; the Go service loads the exported model.
 
-There are two models. **`lgbm-ieee-v5-combined`** is trained on the IEEE-CIS dataset and is the real-data benchmark: [Current results](#current-results) describes how it performs, and [History of changes](#history-of-changes) keeps the results of earlier versions. **`lgbm-game-v9`** is trained on the simulator's game traffic and six generator-written worlds, see [Game model](#game-model-simulated-traffic). The service loads `lgbm-game-v9` by default, because the demo traffic comes from the simulator and v9 catches the most of it (see [Account events in every scenario](#account-events-in-every-scenario-v9)). The earlier game models, from `lgbm-game-v5` (the previous default) to `lgbm-game-v8`, stay available as model files.
+There are two models. **`lgbm-ieee-v5-combined`** is trained on the IEEE-CIS dataset and is the real-data benchmark: [Current results](#current-results) describes how it performs, and [History of changes](#history-of-changes) keeps the results of earlier versions. **`lgbm-game-v9`** is trained on the simulator's game traffic and six generator-written worlds, see [Game model](#game-model-simulated-traffic). The service loads `lgbm-game-v9` by default, because the demo traffic comes from the simulator and v9 catches the most of it (see [Account events in every scenario](#account-events-in-every-scenario-v9)). `lgbm-game-v5`, the previous default, stays in `backend/models/`. The files of the other earlier models (`lgbm-ieee-v3`, `lgbm-game-v2`, `v6`, `v7`, `v7-combined` and `v8`) were removed to keep the service image small. Their results stay in this file, and `git checkout 8047033 -- 'backend/models/lgbm-game-v8.*'` (for example) restores one.
 
 ## Setup
 
@@ -302,7 +302,7 @@ Simulator, second world, later days: v5 catches 80.3% at 97.0% precision, `v7-co
 - Combining with v5 adds card testing but lowers the ranking on unfamiliar traffic (ROC-AUC 0.83 against 0.88 for v7 alone).
 - Disputes by the real cardholder (a child using a parent's card, serial refunders) are not separated at all (ROC-AUC 0.35-0.53). They look like normal customers when they buy; only chargebacks and review outcomes can label them.
 - Thresholds do not carry over: the combined model was set to flag 1% of legitimate purchases on the training worlds and flagged 0.5% in A, 0.6% in D and 2.7% in E. A deployment has to set `flag_at` on its own traffic, for example to a review budget after the first days.
-- The rule written before scoring E required at least 95% precision on the simulator's second world, the demo traffic. `v7-combined` reached 92.9%, so the service keeps `lgbm-game-v5` by default. Set `MODEL_PATH=models/lgbm-game-v7-combined.json` (or `lgbm-game-v7.json`) to run a multi-world model.
+- The rule written before scoring E required at least 95% precision on the simulator's second world, the demo traffic. `v7-combined` reached 92.9%, so the service keeps `lgbm-game-v5` by default.
 - All worlds are synthetic, and several were written by generators of the same model family, which share some vocabulary (card tiers such as `STD`, `GLD`, `PLT`). Real traffic is likely to be harder.
 
 ### Payment, IP and account event inputs (v8)
@@ -379,7 +379,7 @@ The numbers in this section were measured on the simulator of that time, before 
 | `lgbm-game-v7` | 0.84 | 0.623 | 47.5% | 86.8% | 0.5% |
 | `lgbm-game-v8` | 0.83 | 0.582 | 52.3% | 66.7% | 1.8% |
 
-v8 failed the rule written before the exam: its PR-AUC on F was below v7's. It does not change the default model. Set `MODEL_PATH=models/lgbm-game-v8.json` to run it.
+v8 failed the rule written before the exam: its PR-AUC on F was below v7's. It does not change the default model.
 
 What went wrong, measured on F after the exam:
 
@@ -477,7 +477,7 @@ These results are still optimistic. The simulator is easy for any model (PR-AUC 
 
 ### Earlier game models
 
-`lgbm-game-v1` was trained on days 14-84 only and was replaced (check 2). `lgbm-game-v2` is kept in `backend/models/`. It has the first 50 features and was trained on earlier traffic with 5 fraud scenarios, 6 legitimate edge cases and every field present. On that traffic its precision was 97.9% and it caught 91.9% of the fraud in the second world's later days. On the current traffic it reaches 81.8% precision and catches 65.5%, which is why it was replaced.
+`lgbm-game-v1` was trained on days 14-84 only and was replaced (check 2). `lgbm-game-v2` has the first 50 features and was trained on earlier traffic with 5 fraud scenarios, 6 legitimate edge cases and every field present. On that traffic its precision was 97.9% and it caught 91.9% of the fraud in the second world's later days. On the current traffic it reaches 81.8% precision and catches 65.5%, which is why it was replaced.
 
 ## Replay through the score API
 
