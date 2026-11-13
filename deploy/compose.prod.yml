@@ -22,8 +22,6 @@ services:
     environment:
       CONSOLE_HOST: ${CONSOLE_HOST:?set CONSOLE_HOST in .env}
       API_HOST: ${API_HOST:?set API_HOST in .env}
-      CONSOLE_USER: ${CONSOLE_USER:?set CONSOLE_USER in .env}
-      CONSOLE_PASSWORD_HASH: ${CONSOLE_PASSWORD_HASH:?set CONSOLE_PASSWORD_HASH in .env}
       BACKEND_PORT: ${PORT:?set PORT in .env}
     ports:
       - "80:80"

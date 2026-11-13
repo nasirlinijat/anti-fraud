@@ -161,12 +161,12 @@ export type ScoreResult =
   | { ok: false; status: number; error: ErrorResponse }
 
 // score sends one score request. POST /score accepts only the service key,
-// which the console proxy adds.
+// which the console proxy adds after checking the session.
 export async function score(purchase: Record<string, unknown>): Promise<ScoreResult> {
   try {
     const response = await request<ScoreResponse>('/score', {
       method: 'POST',
-      auth: 'service',
+      auth: 'session',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(purchase),
     })

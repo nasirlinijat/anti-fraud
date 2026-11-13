@@ -21,7 +21,11 @@
 		respond @foreignOrigin 403
 		respond @crossSiteWrite 403
 
-		# POST /score accepts only the service key, so the proxy adds it for the Tester page.
+		# POST /score accepts only the service key, so the proxy adds it for the Tester page
+		# after the backend confirms the caller's console session.
+		forward_auth @score backend:{$BACKEND_PORT} {
+			uri /auth/me
+		}
 		reverse_proxy @score backend:{$BACKEND_PORT} {
 			header_up X-API-Key {env.API_KEY}
 			header_down -X-API-Key

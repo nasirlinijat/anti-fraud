@@ -5,15 +5,15 @@ The whole stack runs on one EC2 server with Docker Compose: PostgreSQL, the back
 ```
 Internet ──► Caddy gateway (80, 443)
                ├── api.<ip>.sslip.io      ──► backend   POST /score, GET /health, GET /ready only
-               └── console.<ip>.sslip.io  ──► console   behind a team login
-                                               └── backend (the console adds the API key)
+               └── console.<ip>.sslip.io  ──► console   sign-in with a console account
+                                               └── backend (the console adds the API key for signed-in users)
              PostgreSQL is reachable only inside the server
 ```
 
 | Host | Who uses it | Protection |
 |---|---|---|
 | `api.<ip>.sslip.io` | Game shops, the simulator, `replay.py` | `X-API-Key` header with `API_KEY`. Only `/score`, `/health` and `/ready` are open |
-| `console.<ip>.sslip.io` | The team and analysts | Browser login (`CONSOLE_USER` and its password), plus individual keys for analyst decisions and operator configuration writes |
+| `console.<ip>.sslip.io` | The team and analysts | Each person signs in with their own console account (admin or reviewer). Every API call carries the session, and the Tester page's `/score` is forwarded only for a signed-in account |
 
 [sslip.io](https://sslip.io) is a free DNS service: `api.3-120-10-20.sslip.io` resolves to `3.120.10.20`, so no domain is needed. With a real domain, point two DNS records at the server and put those names in `CONSOLE_HOST` and `API_HOST`.
 
@@ -52,8 +52,6 @@ ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP
 ```bash
 cd ~/anti-fraud
 DASHED=$(curl -s https://checkip.amazonaws.com | tr . -)
-CONSOLE_PASSWORD=$(openssl rand -base64 18)
-HASH=$(docker run --rm caddy:2.11-alpine caddy hash-password --plaintext "$CONSOLE_PASSWORD")
 cat > .env <<EOF
 PORT=8080
 FRONTEND_PORT=3000
@@ -69,15 +67,19 @@ MODEL_FILE=lgbm-game-v5.json
 IP_INTEL_PROVIDER=off
 CONSOLE_HOST=console.$DASHED.sslip.io
 API_HOST=api.$DASHED.sslip.io
-CONSOLE_USER=team
-CONSOLE_PASSWORD_HASH='$HASH'
 EOF
 chmod 600 .env
-echo "$CONSOLE_PASSWORD" > console-password.txt
-chmod 600 console-password.txt
 ```
 
-`console-password.txt` holds the console login for the team. `API_KEY` and the individual analyst and operator keys are in `.env`; share them through a password manager, never in Git or chat. `deploy/env.production.example` lists every setting.
+`API_KEY` and the individual analyst and operator keys are in `.env`; share them through a password manager, never in Git or chat. `deploy/env.production.example` lists every setting.
+
+After the first deploy, create the first admin account. The backend image has no tools, so a temporary Go container runs `create-account` on the server's network and asks for the password without showing it:
+
+```bash
+ssh -t -i ~/.ssh/anti-fraud.pem ubuntu@$IP 'cd ~/anti-fraud && set -a && . ./.env && set +a && docker run --rm -it --network antifraud_default -v ~/anti-fraud/app/backend:/src:ro -w /src -e DATABASE_URL="postgres://antifraud_api:${RUNTIME_DB_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable" golang:1.26.11-alpine go run ./cmd/create-account -username <name>'
+```
+
+That admin adds the other accounts in the console. Older servers may still have `CONSOLE_USER` and `CONSOLE_PASSWORD_HASH` in `.env`; they are no longer used.
 
 ## 3. Deploy
 
