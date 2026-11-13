@@ -111,6 +111,121 @@ func TestSummary(t *testing.T) {
 	}
 }
 
+// saveRecentDecisions saves one decision per path and returns their purchase
+// IDs in order: allow, rules review, model flagged, model cleared, rules block,
+// blocklist block with a model score.
+func saveRecentDecisions(t *testing.T, tx pgx.Tx) []int64 {
+	t.Helper()
+	high := scoring.FiredRule{Name: scoring.RuleHighAmount, Points: 30}
+	velocity := scoring.FiredRule{Name: scoring.RuleCardVelocity, Points: 40}
+	blocklisted := scoring.BlocklistMatch("card")
+
+	// The default ruleset reviews at 50 and blocks at 80.
+	return []int64{
+		saveStatsDecision(t, tx, "r-allow", scoring.OutcomeAllow, 0, nil, ptr(0.01), time.Minute),
+		saveStatsDecision(t, tx, "r-review", scoring.OutcomeReview, 50, []scoring.FiredRule{high}, ptr(0.2), time.Minute),
+		saveStatsDecision(t, tx, "r-flagged", scoring.OutcomeReview, 0, nil, ptr(0.9), time.Minute),
+		saveStatsDecision(t, tx, "r-cleared", scoring.OutcomeAllow, 55, []scoring.FiredRule{high}, ptr(0.001), time.Minute),
+		saveStatsDecision(t, tx, "r-rules-block", scoring.OutcomeBlock, 95, []scoring.FiredRule{velocity, high}, ptr(0.5), time.Minute),
+		saveStatsDecision(t, tx, "r-blocklist-block", scoring.OutcomeBlock, 0, []scoring.FiredRule{blocklisted}, ptr(0.4), time.Minute),
+	}
+}
+
+func TestRecentPipelineCountsEveryPath(t *testing.T) {
+	tx := testTx(t)
+	start, err := readLatestDecisionID(t.Context(), tx)
+	if err != nil {
+		t.Fatalf("LatestDecisionID: %v", err)
+	}
+	ids := saveRecentDecisions(t, tx)
+
+	got, err := readRecentPipeline(t.Context(), tx, start, 100)
+	if err != nil {
+		t.Fatalf("RecentPipeline: %v", err)
+	}
+	want := models.RecentPipeline{
+		NextAfter:       ids[5],
+		Outcomes:        models.OutcomeCounts{Allow: 2, Review: 2, Block: 2, Total: 6},
+		BlocklistBlocks: 1,
+		Model:           models.PipelineModelEffects{Flagged: 1, Cleared: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("recent pipeline = %+v, want %+v", got, want)
+	}
+}
+
+func TestRecentPipelineCountsOnlyDecisionsAfterTheCursor(t *testing.T) {
+	tx := testTx(t)
+	ids := saveRecentDecisions(t, tx)
+
+	got, err := readRecentPipeline(t.Context(), tx, ids[2], 100)
+	if err != nil {
+		t.Fatalf("RecentPipeline: %v", err)
+	}
+	want := models.RecentPipeline{
+		NextAfter:       ids[5],
+		Outcomes:        models.OutcomeCounts{Allow: 1, Block: 2, Total: 3},
+		BlocklistBlocks: 1,
+		Model:           models.PipelineModelEffects{Cleared: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("recent pipeline after the third decision = %+v, want %+v", got, want)
+	}
+}
+
+func TestRecentPipelineKeepsTheCursorWhenNothingIsNew(t *testing.T) {
+	tx := testTx(t)
+	ids := saveRecentDecisions(t, tx)
+
+	got, err := readRecentPipeline(t.Context(), tx, ids[5], 100)
+	if err != nil {
+		t.Fatalf("RecentPipeline: %v", err)
+	}
+	if want := (models.RecentPipeline{NextAfter: ids[5]}); !reflect.DeepEqual(got, want) {
+		t.Errorf("recent pipeline after the last decision = %+v, want %+v", got, want)
+	}
+}
+
+func TestRecentPipelineCountsOnlyTheNewestDecisionsUpToTheLimit(t *testing.T) {
+	tx := testTx(t)
+	start, err := readLatestDecisionID(t.Context(), tx)
+	if err != nil {
+		t.Fatalf("LatestDecisionID: %v", err)
+	}
+	ids := saveRecentDecisions(t, tx)
+
+	got, err := readRecentPipeline(t.Context(), tx, start, 2)
+	if err != nil {
+		t.Fatalf("RecentPipeline: %v", err)
+	}
+	want := models.RecentPipeline{
+		NextAfter:       ids[5],
+		Outcomes:        models.OutcomeCounts{Block: 2, Total: 2},
+		BlocklistBlocks: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("recent pipeline limited to 2 = %+v, want %+v", got, want)
+	}
+}
+
+func TestLatestDecisionID(t *testing.T) {
+	tx := testTx(t)
+	ids := saveRecentDecisions(t, tx)
+
+	got, err := readLatestDecisionID(t.Context(), tx)
+	if err != nil || got != ids[5] {
+		t.Fatalf("LatestDecisionID = %d, %v; want %d", got, err, ids[5])
+	}
+}
+
+func TestLatestDecisionIDWithoutDecisions(t *testing.T) {
+	tx := testTx(t)
+	got, err := readLatestDecisionID(t.Context(), tx)
+	if err != nil || got != 0 {
+		t.Fatalf("LatestDecisionID = %d, %v; want 0", got, err)
+	}
+}
+
 func TestSummaryWithoutDecisions(t *testing.T) {
 	tx := testTx(t)
 	got, err := readSummary(t.Context(), tx, models.StatsWindow{Since: time.Unix(0, 0).UTC(), Until: statsNow}, 10)

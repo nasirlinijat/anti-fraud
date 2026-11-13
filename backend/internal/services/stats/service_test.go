@@ -40,6 +40,28 @@ func TestWindow(t *testing.T) {
 	}
 }
 
+func TestRecentCountsAtMostTheNewestFiveThousandDecisions(t *testing.T) {
+	store := mocks.NewMockStore(gomock.NewController(t))
+	store.EXPECT().RecentPipeline(gomock.Any(), int64(81200), 5000).Return(models.RecentPipeline{NextAfter: 81234}, nil)
+
+	after := int64(81200)
+	got, err := stats.NewService(store).Recent(context.Background(), &after)
+	if err != nil || got.NextAfter != 81234 || got.After == nil || *got.After != 81200 {
+		t.Fatalf("Recent = %+v, %v", got, err)
+	}
+}
+
+func TestRecentWithoutCursorStartsFromTheLatestDecision(t *testing.T) {
+	store := mocks.NewMockStore(gomock.NewController(t))
+	store.EXPECT().LatestDecisionID(gomock.Any()).Return(int64(81234), nil)
+
+	got, err := stats.NewService(store).Recent(context.Background(), nil)
+	want := models.RecentPipeline{NextAfter: 81234}
+	if err != nil || got != want {
+		t.Fatalf("Recent = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestSummaryAsksForTheTopTenRules(t *testing.T) {
 	store := mocks.NewMockStore(gomock.NewController(t))
 	window := models.StatsWindow{Since: time.Unix(0, 0).UTC(), Until: time.Now().UTC()}

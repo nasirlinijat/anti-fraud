@@ -17,9 +17,22 @@ import (
 
 type fakeSource struct {
 	sum      models.StatsSummary
+	recent   models.RecentPipeline
+	latest   int64
 	err      error
 	window   models.StatsWindow
 	maxRules int
+	after    int64
+	limit    int
+}
+
+func (f *fakeSource) RecentPipeline(_ context.Context, after int64, limit int) (models.RecentPipeline, error) {
+	f.after, f.limit = after, limit
+	return f.recent, f.err
+}
+
+func (f *fakeSource) LatestDecisionID(context.Context) (int64, error) {
+	return f.latest, f.err
 }
 
 func (f *fakeSource) Summary(_ context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error) {
@@ -31,11 +44,16 @@ var statsNow = time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 
 func getStats(t *testing.T, src stats.Store, key, query string) *httptest.ResponseRecorder {
 	t.Helper()
+	return getStatsPath(t, src, key, "/stats"+query)
+}
+
+func getStatsPath(t *testing.T, src stats.Store, key, path string) *httptest.ResponseRecorder {
+	t.Helper()
 	h := NewStatsHandler(stats.NewService(src))
 	h.now = func() time.Time { return statsNow }
 	mux := http.NewServeMux()
 	RegisterStatsRoutes(mux, h, platform.Access{ServiceKey: testKey})
-	req := httptest.NewRequest(http.MethodGet, "/stats"+query, nil)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	if key != "" {
 		req.Header.Set("X-API-Key", key)
 	}
@@ -115,6 +133,62 @@ func TestStatsRejectsUnknownPeriod(t *testing.T) {
 	rec := getStats(t, &fakeSource{}, testKey, "?period=2h")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"period"`) {
 		t.Fatalf("status %d body %s, want 400 naming period", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRecentPipelineResponseBody(t *testing.T) {
+	src := &fakeSource{recent: models.RecentPipeline{
+		NextAfter:       81234,
+		Outcomes:        models.OutcomeCounts{Allow: 30, Review: 3, Block: 1, Total: 34},
+		BlocklistBlocks: 0,
+		Model:           models.PipelineModelEffects{Flagged: 1},
+	}}
+	rec := getStatsPath(t, src, testKey, "/stats/pipeline/recent?after=81200")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	want := `{"after":81200,"next_after":81234,"outcomes":{"allow":30,"review":3,"block":1,"total":34},"blocklist_blocks":0,"model":{"flagged":1,"cleared":0}}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Errorf("body %s, want %s", got, want)
+	}
+	if src.after != 81200 || src.limit != 5000 {
+		t.Errorf("asked after %d with limit %d, want 81200 and 5000", src.after, src.limit)
+	}
+}
+
+func TestRecentPipelineWithoutCursorStartsFromNow(t *testing.T) {
+	rec := getStatsPath(t, &fakeSource{latest: 81234}, testKey, "/stats/pipeline/recent")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	want := `{"after":null,"next_after":81234,"outcomes":{"allow":0,"review":0,"block":0,"total":0},"blocklist_blocks":0,"model":{"flagged":0,"cleared":0}}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Errorf("body %s, want %s", got, want)
+	}
+}
+
+func TestRecentPipelineRejectsAnInvalidCursor(t *testing.T) {
+	for _, after := range []string{"-1", "abc", "", "1.5", "9223372036854775808"} {
+		t.Run(after, func(t *testing.T) {
+			rec := getStatsPath(t, &fakeSource{}, testKey, "/stats/pipeline/recent?after="+after)
+			want := `"fields":{"after":"must be a non-negative integer"}`
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("status %d body %s, want 400 containing %s", rec.Code, rec.Body.String(), want)
+			}
+		})
+	}
+}
+
+func TestRecentPipelineRequiresAPIKey(t *testing.T) {
+	if rec := getStatsPath(t, &fakeSource{}, "", "/stats/pipeline/recent"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestRecentPipelineInternalError(t *testing.T) {
+	rec := getStatsPath(t, &fakeSource{err: errors.New("database is down")}, testKey, "/stats/pipeline/recent?after=1")
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "database is down") {
+		t.Fatalf("status %d body %s, want 500 without the internal error", rec.Code, rec.Body.String())
 	}
 }
 

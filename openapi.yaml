@@ -877,6 +877,74 @@ paths:
         "503":
           $ref: "#/components/responses/DatabaseUnavailable"
 
+  /stats/pipeline/recent:
+    get:
+      tags: [Stats]
+      operationId: getRecentPipeline
+      summary: Recent decisions by pipeline path
+      description: |
+        Counts the decisions with a purchase ID above `after` by outcome, blocklist
+        block and model effect, for the live scoring pipeline. A client sends the
+        `next_after` of the last answer as `after` to count only what is new.
+        Without `after`, nothing is counted and `next_after` is the current
+        largest decision purchase ID, so a client starts from now instead of
+        replaying history.
+        At most the newest 5000 decisions above `after` are counted, so a client
+        that was away skips ahead. The response holds counts only, never a purchase.
+        A decision committed after a newer purchase ID was already counted can be
+        missed, so these counts are for live visualisation only. The totals come
+        from `GET /stats`.
+      security:
+        - ApiKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: Count only decisions with a purchase ID above this one.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        "200":
+          description: The counts since the cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecentPipelineResponse"
+        "400":
+          description: The cursor is not a non-negative integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: invalid request
+                fields:
+                  after: must be a non-negative integer
+        "401":
+          description: >-
+            The API key is missing or wrong. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid API key
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The counts could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal error
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
+
   /blocklist:
     get:
       tags: [Blocklist]
@@ -2889,6 +2957,41 @@ components:
               nullable: true
               enum: [starting, running, stopping, completed, stopped, failed, interrupted]
               description: Console lifecycle status, otherwise null. An active run or excluded data makes results partial.
+
+    RecentPipelineResponse:
+      type: object
+      description: Decision counts since a purchase ID, for the live scoring pipeline.
+      required: [after, next_after, outcomes, blocklist_blocks, model]
+      properties:
+        after:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: The `after` of the request. Null when the request had none.
+        next_after:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The largest purchase ID counted, or `after` when nothing was counted. Without `after`, the largest decision purchase ID, 0 when there are no decisions.
+        outcomes:
+          type: object
+          required: [allow, review, block, total]
+          properties:
+            allow: { type: integer, minimum: 0 }
+            review: { type: integer, minimum: 0 }
+            block: { type: integer, minimum: 0 }
+            total: { type: integer, minimum: 0 }
+        blocklist_blocks:
+          type: integer
+          minimum: 0
+          description: Blocked decisions that matched the blocklist. The rest of `outcomes.block` came from the rules.
+        model:
+          type: object
+          required: [flagged, cleared]
+          properties:
+            flagged: { type: integer, minimum: 0, description: Purchases the rules allowed and the model sent to review. }
+            cleared: { type: integer, minimum: 0, description: Purchases the rules sent to review and the model allowed. }
 
     StatsResponse:
       type: object

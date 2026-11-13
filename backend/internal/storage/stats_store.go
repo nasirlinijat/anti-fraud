@@ -104,6 +104,63 @@ JOIN rulesets r ON r.version = d.ruleset_version
 WHERE d.decided_at >= $1::timestamptz
   AND d.decided_at < $2::timestamptz`
 
+// RecentPipelineSQL counts the newest $3 decisions with a purchase ID above $1
+// by outcome, the blocks whose fired rules include the entry named $2, and the
+// decisions the model changed (see CountModelEffectsSQL). It also finds the
+// largest purchase ID counted, $1 when there are none.
+const RecentPipelineSQL = `
+SELECT
+    count(*) FILTER (WHERE d.outcome = 'allow') AS allowed,
+    count(*) FILTER (WHERE d.outcome = 'review') AS reviewed,
+    count(*) FILTER (WHERE d.outcome = 'block') AS blocked,
+    count(*) FILTER (WHERE d.outcome = 'block' AND d.fired_rules @> jsonb_build_array(jsonb_build_object('name', $2::text))) AS blocklist_blocked,
+    count(*) FILTER (WHERE d.outcome = 'review' AND d.rule_score < r.review_threshold) AS flagged,
+    count(*) FILTER (WHERE d.outcome = 'allow' AND d.rule_score >= r.review_threshold) AS cleared,
+    count(*) AS total,
+    coalesce(max(d.purchase_id), $1::bigint) AS next_after
+FROM (
+    SELECT purchase_id, outcome, rule_score, ruleset_version, fired_rules
+    FROM decisions
+    WHERE purchase_id > $1::bigint
+    ORDER BY purchase_id DESC
+    LIMIT $3
+) d
+JOIN rulesets r ON r.version = d.ruleset_version`
+
+// LatestDecisionIDSQL finds the largest purchase ID with a decision, 0 when
+// there are none.
+const LatestDecisionIDSQL = `SELECT coalesce(max(purchase_id), 0) FROM decisions`
+
+// RecentPipeline counts the newest limit decisions after a purchase ID.
+func (s *StatsStore) RecentPipeline(ctx context.Context, after int64, limit int) (models.RecentPipeline, error) {
+	return readRecentPipeline(ctx, s.pool, after, limit)
+}
+
+func readRecentPipeline(ctx context.Context, conn platform.DBTX, after int64, limit int) (models.RecentPipeline, error) {
+	var p models.RecentPipeline
+	err := conn.QueryRow(ctx, RecentPipelineSQL, after, string(scoring.RuleBlocklist), int32(limit)).Scan(
+		&p.Outcomes.Allow, &p.Outcomes.Review, &p.Outcomes.Block, &p.BlocklistBlocks,
+		&p.Model.Flagged, &p.Model.Cleared, &p.Outcomes.Total, &p.NextAfter,
+	)
+	if err != nil {
+		return models.RecentPipeline{}, fmt.Errorf("count recent decisions: %w", err)
+	}
+	return p, nil
+}
+
+// LatestDecisionID returns the largest purchase ID with a decision.
+func (s *StatsStore) LatestDecisionID(ctx context.Context) (int64, error) {
+	return readLatestDecisionID(ctx, s.pool)
+}
+
+func readLatestDecisionID(ctx context.Context, conn platform.DBTX) (int64, error) {
+	var id int64
+	if err := conn.QueryRow(ctx, LatestDecisionIDSQL).Scan(&id); err != nil {
+		return 0, fmt.Errorf("read latest decision: %w", err)
+	}
+	return id, nil
+}
+
 func readSummary(ctx context.Context, conn platform.DBTX, window models.StatsWindow, maxRules int) (models.StatsSummary, error) {
 	since, until := window.Since, window.Until
 	var o overview

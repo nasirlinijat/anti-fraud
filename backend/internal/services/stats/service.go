@@ -20,10 +20,15 @@ var periods = map[string]struct{ length, bucketWidth time.Duration }{
 const (
 	DefaultPeriod = "24h"
 	maxRules      = 10
+	// maxRecentDecisions bounds a recent pipeline count, so a console that was
+	// away skips ahead instead of making a large query.
+	maxRecentDecisions = 5000
 )
 
 type Store interface {
 	Summary(ctx context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error)
+	RecentPipeline(ctx context.Context, after int64, limit int) (models.RecentPipeline, error)
+	LatestDecisionID(ctx context.Context) (int64, error)
 }
 
 type Service struct {
@@ -50,4 +55,16 @@ func (s *Service) Window(period string, now time.Time) (models.StatsWindow, erro
 
 func (s *Service) Summary(ctx context.Context, window models.StatsWindow) (models.StatsSummary, error) {
 	return s.store.Summary(ctx, window, maxRules)
+}
+
+// Recent counts the decisions after a purchase ID. Without one it counts
+// nothing and returns the latest decision ID, so the caller starts from now.
+func (s *Service) Recent(ctx context.Context, after *int64) (models.RecentPipeline, error) {
+	if after == nil {
+		latest, err := s.store.LatestDecisionID(ctx)
+		return models.RecentPipeline{NextAfter: latest}, err
+	}
+	recent, err := s.store.RecentPipeline(ctx, *after, maxRecentDecisions)
+	recent.After = after
+	return recent, err
 }

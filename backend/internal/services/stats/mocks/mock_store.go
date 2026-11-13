@@ -41,6 +41,36 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 	return m.recorder
 }
 
+// LatestDecisionID mocks base method.
+func (m *MockStore) LatestDecisionID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestDecisionID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LatestDecisionID indicates an expected call of LatestDecisionID.
+func (mr *MockStoreMockRecorder) LatestDecisionID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestDecisionID", reflect.TypeOf((*MockStore)(nil).LatestDecisionID), ctx)
+}
+
+// RecentPipeline mocks base method.
+func (m *MockStore) RecentPipeline(ctx context.Context, after int64, limit int) (models.RecentPipeline, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecentPipeline", ctx, after, limit)
+	ret0, _ := ret[0].(models.RecentPipeline)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecentPipeline indicates an expected call of RecentPipeline.
+func (mr *MockStoreMockRecorder) RecentPipeline(ctx, after, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecentPipeline", reflect.TypeOf((*MockStore)(nil).RecentPipeline), ctx, after, limit)
+}
+
 // Summary mocks base method.
 func (m *MockStore) Summary(ctx context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error) {
 	m.ctrl.T.Helper()

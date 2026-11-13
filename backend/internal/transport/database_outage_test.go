@@ -54,6 +54,8 @@ func TestConsoleAnswers503WhenTheDatabaseIsUnreachable(t *testing.T) {
 		{"active ruleset with the service key", http.MethodGet, "/rulesets/active", "", ""},
 		{"blocklist with the service key", http.MethodGet, "/blocklist", "", ""},
 		{"stats with the service key", http.MethodGet, "/stats", "", ""},
+		{"recent pipeline with a cursor", http.MethodGet, "/stats/pipeline/recent?after=1", "", ""},
+		{"recent pipeline without a cursor", http.MethodGet, "/stats/pipeline/recent", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
