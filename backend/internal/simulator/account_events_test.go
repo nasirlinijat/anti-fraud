@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestTakeoversFollowALoginFromTheNewDevice(t *testing.T) {
 	cfg := simulator.DefaultConfig()
 	cfg.Scenarios = []simulator.Pattern{simulator.PatternAccountTakeover, simulator.PatternQuietTakeover}
 	cfg.MissingFieldShare = 0
-	purchases := generate(t, cfg, 400)
+	purchases := generate(t, cfg, 2000)
 
 	resets := 0
 	for _, p := range purchases {
@@ -54,12 +55,111 @@ func TestTakeoversFollowALoginFromTheNewDevice(t *testing.T) {
 			p.Request.EventTime.Sub(login.EventTime) > 15*time.Minute {
 			t.Fatalf("takeover %+v does not follow a login from its device and country: %+v", p.Request, p.AccountEvents)
 		}
-		if p.AccountEvents[0].EventType == "password_reset" {
+		if resetWithin(p, 2*time.Hour) {
 			resets++
 		}
 	}
-	if share := float64(resets) / float64(len(purchases)); share < 0.6 || share > 0.8 {
-		t.Errorf("%.2f of takeovers start with a password reset, want about 0.7", share)
+	if share := float64(resets) / float64(len(purchases)); share < 0.3 || share > 0.45 {
+		t.Errorf("%.2f of takeovers follow a password reset, want about 0.38", share)
+	}
+}
+
+// resetWithin reports whether the purchase's account events include a
+// password reset within d before it.
+func resetWithin(p simulator.Purchase, d time.Duration) bool {
+	for _, e := range p.AccountEvents {
+		if e.EventType == "password_reset" && p.Request.EventTime.Sub(e.EventTime) <= d {
+			return true
+		}
+	}
+	return false
+}
+
+// loginTimes returns every player's login times, sorted.
+func loginTimes(purchases []simulator.Purchase) map[string][]time.Time {
+	logins := map[string][]time.Time{}
+	for _, p := range purchases {
+		for _, e := range p.AccountEvents {
+			if e.EventType == "login" {
+				logins[e.PlayerID] = append(logins[e.PlayerID], e.EventTime)
+			}
+		}
+	}
+	for _, times := range logins {
+		slices.SortFunc(times, time.Time.Compare)
+	}
+	return logins
+}
+
+// TestEveryScenarioLogsInBeforeItsPurchases checks that no scenario, honest
+// or fraud, buys without a login in the 30 days before, so that having
+// account events says nothing about the scenario.
+func TestEveryScenarioLogsInBeforeItsPurchases(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	cfg.SuspiciousShare = 0.6
+	purchases := generate(t, cfg, 20000)
+	logins := loginTimes(purchases)
+
+	without, total := map[simulator.Pattern]int{}, map[simulator.Pattern]int{}
+	for _, p := range purchases {
+		total[p.Pattern]++
+		times := logins[p.Request.PlayerID]
+		i, _ := slices.BinarySearchFunc(times, p.Request.EventTime, time.Time.Compare)
+		if i == 0 || p.Request.EventTime.Sub(times[i-1]) >= 30*24*time.Hour {
+			without[p.Pattern]++
+		}
+	}
+	for _, pattern := range simulator.Patterns {
+		if total[pattern] == 0 || without[pattern] > 0 {
+			t.Errorf("%s: %d of %d purchases have no login in the 30 days before", pattern, without[pattern], total[pattern])
+		}
+	}
+}
+
+func TestRegularPlayersRarelyResetTheirPassword(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	cfg.Scenarios = []simulator.Pattern{simulator.PatternNormal}
+	cfg.MeanGap = 5 * time.Minute
+	purchases := generate(t, cfg, 20000)
+
+	resets := 0
+	for _, p := range purchases {
+		for _, e := range p.AccountEvents {
+			if e.EventType == "password_reset" {
+				resets++
+			}
+		}
+	}
+	months := purchases[len(purchases)-1].Request.EventTime.Sub(cfg.Start).Hours() / (30 * 24)
+	// The earlier logins of the 30 days before a player's first purchase can
+	// hold a reset too, so the run covers one month more than its length.
+	perPlayerMonth := float64(resets) / float64(cfg.Players) / (months + 1)
+	if perPlayerMonth < 0.01 || perPlayerMonth > 0.04 {
+		t.Errorf("%.3f password resets per player and month, want about 0.02", perPlayerMonth)
+	}
+}
+
+// TestHonestPlayersAlsoLogInFromNewDevicesAndCountries checks that a new
+// phone, an internet cafe's computer and a trip abroad each come with a login
+// from the purchase's device and country within the session before it.
+func TestHonestPlayersAlsoLogInFromNewDevicesAndCountries(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	cfg.Scenarios = []simulator.Pattern{simulator.PatternNewPhone, simulator.PatternInternetCafe, simulator.PatternTraveler}
+	cfg.MissingFieldShare = 0
+	purchases := generate(t, cfg, 600)
+	var logins []simulator.AccountEvent
+	for _, p := range purchases {
+		logins = append(logins, p.AccountEvents...)
+	}
+	for _, p := range purchases {
+		found := slices.ContainsFunc(logins, func(e simulator.AccountEvent) bool {
+			gap := p.Request.EventTime.Sub(e.EventTime)
+			return e.EventType == "login" && e.PlayerID == p.Request.PlayerID && *e.DeviceID == *p.Request.DeviceID &&
+				*e.IPCountry == *p.Request.IPCountry && gap > 0 && gap < 6*time.Hour
+		})
+		if !found {
+			t.Fatalf("%s purchase %s has no login from its device and country in the session before it", p.Pattern, p.Request.TransactionID)
+		}
 	}
 }
 

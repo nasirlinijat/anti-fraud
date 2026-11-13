@@ -40,18 +40,19 @@ func hashJSONL(t *testing.T, purchases []Purchase) string {
 }
 
 // The hashes are of the JSON lines the generator wrote for these seeds before
-// it sent verification results (base) and before it placed connections in the
-// IP intelligence ranges (verified). Each addition draws from its own seeded
-// stream, so removing it gives the earlier bytes and existing seeds keep their
-// traffic.
+// it sent verification results (base), and without the placement of
+// connections in the IP intelligence ranges (verified, recorded again when
+// saved cards and the countries of the address check changed the verification
+// results). Each addition draws from its own seeded stream, so removing it
+// gives the earlier bytes and existing seeds keep their traffic.
 func TestAdditionsLeaveTheEarlierTrafficUnchanged(t *testing.T) {
 	withoutNetworkPlacement(t)
 	tests := []struct {
 		seed           uint64
 		verified, base string
 	}{
-		{1, "d82ab196666ea65a824a7209cc5e6346752c3a4a24f8f6e563e7375b5bb16b75", "8a84902c5c79b65a13e07076730aa322d1e576815ea1e37e692e842a80ff3f13"},
-		{7, "2925c2e75fabc3ad9fa8e5aa3711e8b038b3ae449a3e82246e9d832a21352d33", "afdfde2ed32527a1ee5a6268e853e7124a013017048dfc3b9ec3f3f3865655d1"},
+		{1, "a3f2303c588d2126d066917a1dd8b60d84c2ddd2b43c51cea2bf9d8d31c368c0", "8a84902c5c79b65a13e07076730aa322d1e576815ea1e37e692e842a80ff3f13"},
+		{7, "a71c76708dbd44f609b5ac344409c4d3512d25f00eb12602b2b95fc14280bac4", "afdfde2ed32527a1ee5a6268e853e7124a013017048dfc3b9ec3f3f3865655d1"},
 	}
 	for _, tt := range tests {
 		purchases := goldenTraffic(t, tt.seed)

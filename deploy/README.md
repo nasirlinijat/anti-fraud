@@ -63,7 +63,7 @@ POSTGRES_USER=antifraud
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RUNTIME_DB_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=antifraud
-MODEL_FILE=lgbm-game-v5.json
+MODEL_FILE=lgbm-game-v9.json
 IP_INTEL_PROVIDER=off
 CONSOLE_HOST=console.$DASHED.sslip.io
 API_HOST=api.$DASHED.sslip.io
@@ -113,7 +113,8 @@ go run ./cmd/simulator -url https://api.<dashed-ip>.sslip.io -api-key <API_KEY> 
 
 | Value | Model |
 |---|---|
-| `lgbm-game-v5.json` | Trained on the simulator's game traffic, see `ml/README.md` (the default of the repository) |
+| `lgbm-game-v9.json` | Trained on the simulator's game traffic and six generator-written worlds, see `ml/README.md` (the default of the repository) |
+| `lgbm-game-v5.json` | The previous default, trained on the simulator's game traffic only |
 | `lgbm-ieee-v5-combined.json` | Trained on IEEE-CIS card data, the real-data benchmark |
 | `lgbm-game-v2.json` | The earlier game model, trained on easier simulated traffic |
 | empty | Rules only |

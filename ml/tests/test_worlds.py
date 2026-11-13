@@ -22,6 +22,7 @@ def world_rows(world, count, seed, history_start=0):
     rows["is_fraud"] = (rows["amount_to_avg"] + rng.normal(0, 2, count) > 9).astype(int)
     rows["world"] = world
     rows["history_start"] = history_start
+    rows["account_events_masked"] = False
     return rows
 
 
@@ -68,6 +69,45 @@ def test_history_variant_starts_without_history_and_keeps_its_window(tmp_path):
     assert variant["player_txn_count"].tolist() == [0.0, 1.0]
     assert variant["player_avg_amount"].tolist() == [features.MISSING, 3.0]
     assert variant["history_start"].tolist() == [5, 5]
+
+
+def write_account_events(dump, events):
+    """events holds (player ID, event type, day, hour, device ID)."""
+    lines = [json.dumps({"event_id": f"e{index}", "player_id": player_id, "event_type": event_type,
+                         "event_time": f"2026-01-{day + 1:02d}T{hour:02d}:00:00Z", "device_id": device_id})
+             for index, (player_id, event_type, day, hour, device_id) in enumerate(events)]
+    features.account_events_path(dump).write_text("\n".join(lines) + "\n")
+
+
+def test_history_variant_drops_the_account_events_before_its_start(tmp_path):
+    dump = tmp_path / "world.jsonl"
+    write_purchases(dump, [("t1", 0, "p1", 100), ("t2", 5, "p1", 200), ("t3", 6, "p1", 300)])
+    write_account_events(dump, [("p1", "password_reset", 4, 23, None), ("p1", "login", 5, 1, "d1")])
+    raw, events = features.load_requests(dump), features.load_account_events(dump)
+
+    full = worlds.history_variant(raw, 0, 3, events)
+    variant = worlds.history_variant(raw, 5, 3, events)
+
+    assert full["hours_since_password_reset"].tolist() == [features.MISSING, 13.0, 37.0]
+    assert variant["hours_since_password_reset"].tolist() == [features.MISSING, features.MISSING]
+    assert variant["login_devices_24h"].tolist() == [1.0, 0.0]
+
+
+def test_a_world_with_account_events_gets_a_copy_without_them_that_is_never_scored(tmp_path):
+    dump = tmp_path / "world.jsonl"
+    write_purchases(dump, [("t1", 0, "p1", 100), ("t2", 1, "p1", 200)])
+    write_account_events(dump, [("p1", "login", 1, 6, "d1")])
+    plain = tmp_path / "plain.jsonl"
+    write_purchases(plain, [("t1", 0, "p1", 100), ("t2", 1, "p1", 200)])
+
+    data, infos = worlds.load_worlds([dump, plain], [0], 14)
+
+    copy = data[data["account_events_masked"]]
+    assert set(copy["world"]) == {"world"} and len(copy) == 2
+    assert (copy[worlds.ACCOUNT_EVENT_INPUTS] == features.MISSING).all().all()
+    assert data.loc[~data["account_events_masked"] & (data["world"] == "world"), "login_devices_24h"].tolist() == [features.MISSING, 1.0]
+    assert len(worlds.held_out_rows(data, "world")) == 2 and not worlds.held_out_rows(data, "world")["account_events_masked"].any()
+    assert [info["account_events"] for info in infos] == [1, 0]
 
 
 def test_a_world_and_its_variants_stay_on_one_side_of_every_fold():
@@ -216,3 +256,53 @@ def test_equal_world_sample_takes_the_smallest_world_size_from_each():
 
     assert sample["world"].value_counts().to_dict() == {"a": 8, "b": 8, "c": 8}
     assert sample.index.is_unique
+
+
+def fake_result(candidate, pr_aucs):
+    held_out = {world: {"pr_auc": value} for world, value in pr_aucs.items()}
+    return worlds.CandidateResult(candidate, 25, min(pr_aucs.values()), held_out, [], None)
+
+
+def group_check_data():
+    """World a carries the account event inputs, world b has them missing."""
+    rows = pd.concat([world_rows("a", 20, 1), world_rows("b", 20, 2)], ignore_index=True)
+    rows.loc[rows["world"] == "b", worlds.ACCOUNT_EVENT_INPUTS] = features.MISSING
+    return rows
+
+
+def checked(monkeypatch, without_account, without_signals):
+    """Runs the group check with held-out PR-AUCs per world given for the
+    winner (a 0.80, b 0.60) and for the candidates without each group."""
+    scores = {"account_events": without_account, "signals": without_signals}
+
+    def evaluate(candidate, data, selection):
+        groups = [group for group in scores if candidate.name.endswith(group) or f"-{group}-" in candidate.name]
+        if len(groups) == 1:
+            return fake_result(candidate, scores[groups[0]])
+        return fake_result(candidate, {"a": 0.9, "b": 0.6})
+
+    monkeypatch.setattr(worlds, "evaluate_candidate", evaluate)
+    winner = fake_result(worlds.Candidate("codes/v5", worlds.CODE_INPUTS, {}), {"a": 0.80, "b": 0.60})
+    return winner, worlds.check_input_groups(group_check_data(), winner, None)
+
+
+def test_a_group_is_kept_when_only_worlds_without_its_inputs_score_better(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.79, "b": 0.70}, {"a": 0.70, "b": 0.50})
+
+    assert chosen is winner
+    assert checks[0].worlds == ["a"] and checks[0].with_group == 0.80 and checks[0].without_group == 0.79
+
+
+def test_a_group_is_dropped_when_the_worlds_with_its_inputs_score_better_without_it(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.85, "b": 0.55}, {"a": 0.70, "b": 0.50})
+
+    assert chosen.candidate.name == "codes/v5-account_events"
+    assert set(worlds.ACCOUNT_EVENT_INPUTS) <= set(chosen.candidate.masked)
+    assert not set(features.FEATURE_GROUPS["signals"]) & set(chosen.candidate.masked)
+
+
+def test_two_dropped_groups_are_evaluated_together(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.85, "b": 0.55}, {"a": 0.82, "b": 0.60})
+
+    assert chosen.candidate.name == "codes/v5-account_events-signals"
+    assert set(worlds.ACCOUNT_EVENT_INPUTS + features.FEATURE_GROUPS["signals"]) <= set(chosen.candidate.masked)

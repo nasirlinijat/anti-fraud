@@ -34,10 +34,14 @@ def test_requests_use_the_api_format():
         "device_name": "Windows",
         "device_id": "dev-a",
         "ip_country": "150",
+        "ip_address": "198.51.100.7",
         "client_os": "Windows 10",
         "client_browser": "chrome 63.0",
         "screen_resolution": "1920x1080",
         "account_created_at": "2017-12-11T00:00:00Z",
+        "cvv_result": "match",
+        "avs_result": "match",
+        "three_ds_result": "authenticated",
     }
     assert requests[4]["amount_minor"] == 10000
     assert "email_domain" not in requests[7] and "device_name" not in requests[7]
@@ -45,6 +49,8 @@ def test_requests_use_the_api_format():
     assert "device_id" not in requests[7] and "ip_country" not in requests[7]
     assert requests[3]["device_id"] == "dev-a" and "ip_country" not in requests[3]
     assert requests[5]["client_browser"] == "chrome 62.0" and "client_os" not in requests[5]
+    assert "ip_address" not in requests[5] and "cvv_result" not in requests[5]
+    assert "cvv_result" not in requests[3] and requests[3]["three_ds_result"] == "failed"
 
 
 def test_requests_keep_the_player_and_card_keys():
@@ -70,3 +76,27 @@ def test_labels_csv_keeps_truth_out_of_requests(tmp_path):
     saved = pd.read_csv(tmp_path / "labels.csv")
     assert list(saved) == ["transaction_id", "is_fraud", "scenario"]
     assert saved.loc[0, "scenario"] == "stolen_card"
+
+
+class RecordingClient:
+    def __init__(self):
+        self.sent = []
+
+    def record_account_event(self, event):
+        self.sent.append(("event", event["event_id"]))
+
+    def score(self, request):
+        self.sent.append(("score", request["transaction_id"]))
+        return {"outcome": "allow", "score": 0, "model_score": None}
+
+
+def test_account_events_are_recorded_before_the_purchases_that_follow_them():
+    purchases = [{"transaction_id": "t1"}, {"transaction_id": "t2"}, {"transaction_id": "t3"}]
+    events = [{"event_id": "e1"}, {"event_id": "e2"}, {"event_id": "e3"}]
+    # e2 happens at t2's time, so it only has to be recorded before t3.
+    queue = replay.AccountEventQueue(np.array([5, 20, 25]), np.array([10, 20, 30]), events)
+    client = RecordingClient()
+
+    replay.send(purchases, client, queue)
+
+    assert client.sent == [("event", "e1"), ("score", "t1"), ("score", "t2"), ("event", "e2"), ("event", "e3"), ("score", "t3")]

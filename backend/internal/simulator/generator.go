@@ -228,6 +228,10 @@ type generator struct {
 	// accountRng draws the account events only, so they never change the
 	// purchases that rng draws.
 	accountRng *rand.Rand
+	// accounts are the players' accounts by player ID, and eventAccounts the
+	// IDs registered since the last traffic event.
+	accounts      map[string]*account
+	eventAccounts []string
 }
 
 func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error) {
@@ -239,6 +243,7 @@ func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error
 		rng:        rand.New(rand.NewPCG(cfg.Seed, 0x5eed)),
 		accountRng: rand.New(rand.NewPCG(cfg.Seed, accountEventStream)),
 		recent:     map[string][]time.Time{},
+		accounts:   map[string]*account{},
 		clock:      cfg.Start,
 		live:       live,
 	}
@@ -256,8 +261,10 @@ func newGenerator(ctx context.Context, cfg Config, live bool) (*generator, error
 		}
 		p := g.newPlayer(cfg.Start.Add(-g.days(30, 900)))
 		p.country = g.otherCountry(p.card.country)
+		g.accounts[p.id].homeCountry = p.country
 		g.expats = append(g.expats, p)
 	}
+	g.keepAccounts()
 	return g, nil
 }
 
@@ -344,6 +351,7 @@ func compareIDs(a, b string) int {
 }
 
 func (g *generator) event(at time.Time) {
+	defer g.forgetEventAccounts()
 	if g.cfg.Scenarios != nil {
 		var choices []int
 		for i, s := range specialScenarios {
@@ -504,17 +512,24 @@ func (g *generator) usesLastHour(cardToken string, at time.Time) int {
 	return len(times)
 }
 
+// newScenarioPlayer creates a player whose account is age old at the
+// simulated time at. Live traffic sends the real creation time, while the
+// account events keep to the simulated timeline that their purchases move
+// with.
 func (g *generator) newScenarioPlayer(at time.Time, age time.Duration) player {
+	created := at.Add(-age)
 	if g.live {
-		at = time.Now()
+		created = time.Now().Add(-age)
 	}
-	return g.newPlayer(at.Add(-age))
+	p := g.newPlayer(created)
+	g.accounts[p.id].createdAt = at.Add(-age).UTC()
+	return p
 }
 
 func (g *generator) newPlayer(createdAt time.Time) player {
 	country := g.pick(countries)
 	deviceType, deviceName := g.device()
-	return player{
+	p := player{
 		id:         g.id("player"),
 		card:       g.newCard(country),
 		email:      g.pick(emailDomains),
@@ -526,6 +541,8 @@ func (g *generator) newPlayer(createdAt time.Time) player {
 		ipAddress:  g.ipAddress(),
 		createdAt:  createdAt.UTC(),
 	}
+	g.registerAccount(p)
+	return p
 }
 
 func (g *generator) newCard(country string) card {

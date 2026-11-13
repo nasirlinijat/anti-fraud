@@ -50,9 +50,10 @@ DEFAULT_MAX_MISSED_FRAUD = 0.02
 
 
 def load(path):
-    """Builds the features of a simulator dump and keeps each purchase's scenario."""
+    """Builds the features of a simulator dump with its account events and
+    keeps each purchase's scenario."""
     raw = features.load_requests(path)
-    data = features.build(raw.copy())
+    data = features.build(raw.copy(), features.load_account_events(path))
     data["pattern"] = raw["pattern"].to_numpy()
     return data
 
@@ -312,13 +313,18 @@ def train_on_worlds(parser, args):
     print(f"features built in {time.time() - started:.0f}s: {len(data)} rows")
     selection = worlds.Selection(args.max_trees, args.review_rate, checkpoints / "lowo")
     results, winner = worlds.select_candidate(data, worlds.candidate_grid(), selection)
+    checks, winner = worlds.check_input_groups(data, winner, selection)
+    evaluated = results + [check.result for check in checks]
+    if all(winner is not result for result in evaluated):
+        evaluated.append(winner)
     selection_seconds = time.time() - started
     policy = out_of_world_policy(args, data, winner)
     final = worlds.with_trees(winner.candidate, winner.trees)
     models = fit_final_models(final, data, args.models, checkpoints)
 
     report = worlds_report(args, infos, starts)
-    report["selection"] = selection_report(results, winner, selection, selection_seconds)
+    report["selection"] = selection_report(evaluated, winner, selection, selection_seconds)
+    report["selection"]["input_groups"] = input_group_report(checks)
     report["policy"] = policy
     report["lightgbm"] = final_model_report(models, final)
     if args.development:
@@ -396,6 +402,24 @@ def selection_report(results, winner, selection, seconds):
         "seconds": round(seconds),
         "candidates": [candidate_report(result) for result in results],
         "chosen": candidate_report(winner),
+    }
+
+
+def input_group_report(checks):
+    return {
+        "criterion": "a group is dropped when the held-out worlds that carry its inputs score a higher mean "
+                     "PR-AUC without it; a group that no world carries is not checked",
+        "checks": [
+            {
+                "group": check.group,
+                "worlds_with_inputs": check.worlds,
+                "mean_pr_auc_with_group": check.with_group,
+                "mean_pr_auc_without_group": check.without_group,
+                "dropped": check.without_group > check.with_group,
+                "without_group": candidate_report(check.result),
+            }
+            for check in checks
+        ],
     }
 
 
@@ -503,6 +527,10 @@ def print_worlds_summary(report):
     for row in report["selection"]["candidates"]:
         per_world = "  ".join(f"{result['pr_auc']:.4f}" for result in row["held_out"].values())
         print(f"{row['name']:50s} {row['trees']:5d}  {row['worst_pr_auc']:12.4f}  {per_world}")
+    for check in report["selection"]["input_groups"]["checks"]:
+        print(f"input group {check['group']} on {', '.join(check['worlds_with_inputs'])}: mean held-out "
+              f"PR-AUC {check['mean_pr_auc_with_group']} with, {check['mean_pr_auc_without_group']} without; "
+              f"{'dropped' if check['dropped'] else 'kept'}")
     policy = report["policy"]
     print(f"chosen {report['selection']['chosen']['name']}; flag_at {policy['flag_at']}, clear_below {policy['clear_below']}")
     print(json.dumps({"out_of_world_effect_per_world": policy["out_of_world_effect_per_world"]}, indent=2))

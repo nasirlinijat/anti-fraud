@@ -68,6 +68,15 @@ var Names = []string{
 	"device_id_is_new_for_player",
 	"device_distinct_players",
 	"billing_region_is_new_for_card",
+	"cvv_result_code",
+	"avs_result_code",
+	"three_ds_result_code",
+	"ip_is_hosting",
+	"ip_is_anonymous",
+	"hours_since_password_reset",
+	"device_first_login_hours",
+	"country_first_login_hours",
+	"login_devices_24h",
 }
 
 var (
@@ -81,7 +90,19 @@ var (
 		"chrome": 0, "mobile": 1, "safari": 2, "ie": 3, "edge": 4,
 		"firefox": 5, "samsung": 6, "android": 7, "opera": 8,
 	}
-	screenSize = regexp.MustCompile(`^(\d+)x(\d+)$`)
+	// The payment verification codes go from a pass (0) to a failure (the
+	// highest code), with a skipped check in between.
+	cvvResults     = map[string]float64{"match": 0, "not_checked": 1, "mismatch": 2}
+	avsResults     = map[string]float64{"match": 0, "partial": 1, "not_checked": 2, "mismatch": 3}
+	threeDSResults = map[string]float64{"authenticated": 0, "attempted": 1, "not_enrolled": 2, "failed": 3}
+	screenSize     = regexp.MustCompile(`^(\d+)x(\d+)$`)
+)
+
+// Account events count only within these windows before the purchase, so a
+// player's whole account history is never read.
+const (
+	AccountLookback    = 720 * time.Hour
+	LoginDevicesWindow = 24 * time.Hour
 )
 
 // NoEmail is the email domain key of a purchase without one.
@@ -116,6 +137,20 @@ type Input struct {
 	ClientOS             *string
 	ClientBrowser        *string
 	ScreenResolution     *string
+	CVVResult            *string
+	AVSResult            *string
+	ThreeDSResult        *string
+	// IPNetwork is what IP intelligence reported about the purchase's IP
+	// address. It is nil when the request has no address, the lookup is off,
+	// or it failed, so the model sees one missing value for all three.
+	IPNetwork *IPNetwork
+}
+
+// IPNetwork is the kind of network an IP address belongs to.
+type IPNetwork struct {
+	Hosting bool
+	// Anonymous is true for a VPN, a public proxy, or a Tor exit.
+	Anonymous bool
 }
 
 // EmailKey returns the purchaser email domain, or NoEmail when it is missing.
@@ -132,6 +167,22 @@ func (in Input) RegionKey() string {
 		return NoRegion
 	}
 	return *in.BillingRegion
+}
+
+// AccountCountry returns the purchase's IP country as account events store
+// it: upper case. Only ASCII letters change, so ml/features.py can match it
+// exactly.
+func (in Input) AccountCountry() *string {
+	if in.IPCountry == nil {
+		return nil
+	}
+	upper := strings.Map(func(r rune) rune {
+		if 'a' <= r && r <= 'z' {
+			return r - 'a' + 'A'
+		}
+		return r
+	}, *in.IPCountry)
+	return &upper
 }
 
 // PlayerHistory summarizes the player's earlier purchases.
@@ -175,7 +226,8 @@ type Count struct {
 	Players   int64
 }
 
-// History is everything the features need from earlier purchases.
+// History is everything the features need from earlier purchases and
+// account events.
 type History struct {
 	Player  PlayerHistory
 	Card    CardHistory
@@ -189,6 +241,25 @@ type History struct {
 	// DeviceIDPlayers counts the earlier players on this device ID; zero when
 	// it is missing.
 	DeviceIDPlayers int64
+	Account         AccountActivity
+}
+
+// AccountActivity summarizes the player's account events in the
+// AccountLookback before the purchase. Events at or after the purchase time
+// are never read.
+type AccountActivity struct {
+	// HasEvents is true when the player has any account event in the window.
+	HasEvents         bool
+	LastPasswordReset *time.Time
+	// DeviceFirstLogin is the first login in the window from the purchase's
+	// device ID; nil without a device ID or such a login.
+	DeviceFirstLogin *time.Time
+	// CountryFirstLogin is the first login in the window from the purchase's
+	// IP country, compared in upper case; nil without one.
+	CountryFirstLogin *time.Time
+	// LoginDevices24h counts the distinct device IDs of the player's logins
+	// in the LoginDevicesWindow before the purchase.
+	LoginDevices24h int64
 }
 
 // Vector returns the feature values in the order of Names. It is long because
@@ -264,6 +335,15 @@ func Vector(in Input, h History) []float64 {
 		flag(in.DeviceID != nil && hasHistory && p.DeviceIDUses == 0),
 		when(in.DeviceID != nil, func() float64 { return float64(h.DeviceIDPlayers) }),
 		flag(h.Card.Purchases > 0 && h.Card.RegionUses == 0),
+		code(cvvResults, in.CVVResult),
+		code(avsResults, in.AVSResult),
+		code(threeDSResults, in.ThreeDSResult),
+		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Hosting }),
+		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Anonymous }),
+		hoursSince(h.Account.LastPasswordReset, t),
+		hoursSince(h.Account.DeviceFirstLogin, t),
+		hoursSince(h.Account.CountryFirstLogin, t),
+		when(h.Account.HasEvents, func() float64 { return float64(h.Account.LoginDevices24h) }),
 	}
 }
 
@@ -282,6 +362,24 @@ func countryDiffers(ipCountry, cardCountry *string) float64 {
 		return Missing
 	}
 	return flag(*ipCountry != *cardCountry)
+}
+
+// ipFlag reads one kind of network from the IP intelligence result, or
+// returns Missing without one.
+func ipFlag(network *IPNetwork, is func(IPNetwork) bool) float64 {
+	if network == nil {
+		return Missing
+	}
+	return flag(is(*network))
+}
+
+// hoursSince returns the hours from an account event to the purchase, or
+// Missing without the event.
+func hoursSince(event *time.Time, at time.Time) float64 {
+	if event == nil {
+		return Missing
+	}
+	return at.Sub(*event).Hours()
 }
 
 // accountAge returns the whole days between account creation and the purchase.

@@ -160,9 +160,9 @@ def unseen_by_single(rows, single):
 
 
 def reference_rows(data, single):
-    """The same number of rows from every world, each purchase once (the
-    history start 0 rows), without the single-world model's training rows."""
-    rows = data[data["history_start"] == 0]
+    """The same number of rows from every world, each purchase once, without
+    the single-world model's training rows."""
+    rows = worlds.purchase_rows(data)
     return worlds.equal_world_sample(rows[unseen_by_single(rows, single)], train.SEED)
 
 

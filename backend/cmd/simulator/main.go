@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -59,7 +60,8 @@ func main() {
 		if err := writeDump(o.dump, purchases); err != nil {
 			fatalf("write %s: %v", o.dump, err)
 		}
-		infof("wrote %d purchases to %s (seed %d, run %s)", len(purchases), o.dump, o.cfg.Seed, o.cfg.Run)
+		infof("wrote %d purchases to %s and their account events to %s (seed %d, run %s)",
+			len(purchases), o.dump, simulator.AccountEventsPath(o.dump), o.cfg.Seed, o.cfg.Run)
 		return
 	}
 	if !o.send(purchases) {
@@ -186,12 +188,21 @@ func (o options) openLabels(ctx context.Context) *pgxpool.Pool {
 	return pool
 }
 
+// writeDump writes the purchases with their labels to path and their account
+// events to the file next to it that simulator.AccountEventsPath names.
 func writeDump(path string, purchases []simulator.Purchase) error {
+	if err := writeFile(path, purchases, simulator.WriteJSONL); err != nil {
+		return err
+	}
+	return writeFile(simulator.AccountEventsPath(path), purchases, simulator.WriteAccountEventsJSONL)
+}
+
+func writeFile(path string, purchases []simulator.Purchase, write func(io.Writer, []simulator.Purchase) error) error {
 	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
-	if err := simulator.WriteJSONL(f, purchases); err != nil {
+	if err := write(f, purchases); err != nil {
 		_ = f.Close()
 		return err
 	}

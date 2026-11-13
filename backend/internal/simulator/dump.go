@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // Fraud reports whether purchases of the pattern are fraud. It is the answer
@@ -31,6 +34,32 @@ func WriteJSONL(w io.Writer, purchases []Purchase) error {
 	enc := json.NewEncoder(buffered)
 	for _, p := range purchases {
 		if err := enc.Encode(labelledPurchase{Pattern: p.Pattern, Fraud: p.Pattern.Fraud(), Request: p.Request}); err != nil {
+			return err
+		}
+	}
+	return buffered.Flush()
+}
+
+// AccountEventsPath returns the file that the account events of the dump at
+// dumpPath are written to, next to it: world1.jsonl has
+// world1.account_events.jsonl. ml/features.py reads the same name.
+func AccountEventsPath(dumpPath string) string {
+	return strings.TrimSuffix(dumpPath, filepath.Ext(dumpPath)) + ".account_events.jsonl"
+}
+
+// WriteAccountEventsJSONL writes the account events of every purchase, one
+// POST /account-events request per line, in event time order. Like the
+// purchases they are training data; they carry no label.
+func WriteAccountEventsJSONL(w io.Writer, purchases []Purchase) error {
+	var events []AccountEvent
+	for _, p := range purchases {
+		events = append(events, p.AccountEvents...)
+	}
+	slices.SortStableFunc(events, func(a, b AccountEvent) int { return a.EventTime.Compare(b.EventTime) })
+	buffered := bufio.NewWriter(w)
+	enc := json.NewEncoder(buffered)
+	for _, e := range events {
+		if err := enc.Encode(e); err != nil {
 			return err
 		}
 	}

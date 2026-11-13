@@ -1,0 +1,13 @@
+event_id,player_transaction,event_type,event_seconds,device_id,ip_country
+e01,1,login,3455000,dev-a,150
+e02,,login,3455500,dev-a,150
+e03,1,password_reset,3456000,,
+e04,1,login,3459000,dev-b,185
+e05,1,login,3459800,,185
+e06,5,password_reset,3497000,,
+e07,9,login,3563600,dev-a,185
+e08,1,login,3633000,dev-c,150
+e09,10,login,3659000,dev-a,150
+e10,10,password_reset,3660000,dev-a,
+e11,10,login,3660500,dev-z,
+e12,12,login,1108000,dev-q,150

@@ -1,6 +1,6 @@
 // Package accountevent records the login and password-reset events that the
 // game's account system reports for players. The events feed the account
-// takeover rules and the review case, never the model inputs.
+// takeover rules, the review case, and the account activity model inputs.
 package accountevent
 
 import (

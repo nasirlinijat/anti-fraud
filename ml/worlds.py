@@ -24,8 +24,10 @@ TREE_STEP = 25
 DEFAULT_MAX_TREES = 1000
 # Days kept after a history start other than 0.
 DEFAULT_HISTORY_WINDOW = 14
+NANOS_PER_DAY = features.SECONDS_PER_DAY * features.NANOS_PER_SECOND
 
 CODE_INPUTS = ["card_issuer_code", "card_category", "billing_region_code", "billing_country", "card_country"]
+ACCOUNT_EVENT_INPUTS = features.FEATURE_GROUPS["account_events"]
 # Inputs set to features.MISSING in every training row, so that no tree splits
 # on them. The exported model still lists all features.FEATURES in order,
 # because the service requires that. Each set adds to the one before: the codes
@@ -36,6 +38,11 @@ MASK_SETS = {
     "codes": CODE_INPUTS,
     "codes+history_age": CODE_INPUTS + ["secs_since_first"],
     "codes+history_age+amount_levels": CODE_INPUTS + ["secs_since_first", "amount", "player_max_amount", "player_avg_amount"],
+}
+# Input groups that the selected candidate is checked without, one at a time.
+CHECKED_INPUT_GROUPS = {
+    "account_events": ACCOUNT_EVENT_INPUTS,
+    "signals": features.FEATURE_GROUPS["signals"],
 }
 # Changes to train.lightgbm_model(); "v5" keeps its settings.
 REGULARIZATION = {
@@ -51,6 +58,10 @@ Fold = namedtuple("Fold", ["world", "model"])
 # The largest tree count tried, the review rate of the per-world results (a
 # share of legitimate purchases) and the folder for finished models.
 Selection = namedtuple("Selection", ["max_trees", "review_rate", "checkpoints"])
+# The check of one input group: the candidate without it, the worlds whose
+# purchases carry the group's inputs, and the mean held-out PR-AUC of those
+# worlds with and without the group.
+GroupCheck = namedtuple("GroupCheck", ["group", "result", "worlds", "with_group", "without_group"])
 # A candidate's result: the tree count with the best worst-world PR-AUC, the
 # per-world results at that count, the fold models and the out-of-world scores.
 CandidateResult = namedtuple("CandidateResult", ["candidate", "trees", "worst_pr_auc", "held_out", "folds", "scores"])
@@ -99,54 +110,86 @@ def check_world_arguments(parser, args, paths):
     return starts
 
 
-def load_worlds(paths, starts, window):
+def load_worlds(paths, starts, window, account_events_masked_copy=True):
     """Builds the features of every world and its history variants. Returns
-    one frame with a world and a history_start column, and a description of
-    each world."""
+    one frame with a world, a history_start and an account_events_masked
+    column, and a description of each world. With account_events_masked_copy,
+    a world with account events also gets a copy without them (see
+    without_account_events)."""
     frames, infos = [], []
     for path in paths:
-        frame, info = load_world(path, starts, window)
+        frame, info = load_world(path, starts, window, account_events_masked_copy)
         frames.append(frame)
         infos.append(info)
         print(f"world {info['world']}: {info['purchases']} purchases, {len(frame)} rows with variants")
     return pd.concat(frames, ignore_index=True), infos
 
 
-def load_world(path, starts, window):
-    raw = features.load_requests(path)
+def load_world(path, starts, window, account_events_masked_copy):
+    raw, events = features.load_requests(path), features.load_account_events(path)
     last_day = int(raw["day"].max())
     # A start is used only when its whole window fits in the world.
     used = [start for start in starts if start == 0 or start + window - 1 <= last_day]
-    parts = [history_variant(raw, start, window) for start in used]
+    parts = [history_variant(raw, start, window, events) for start in used]
+    if account_events_masked_copy and len(events):
+        parts.append(without_account_events(parts[0]))
     frame = pd.concat(parts, ignore_index=True)
     frame["world"] = Path(path).stem
     skipped = [start for start in starts if start not in used]
-    return frame, world_info(path, raw, parts, skipped)
+    return frame, world_info(path, raw, events, parts, skipped)
 
 
-def history_variant(raw, start, window):
+def history_variant(raw, start, window, events=None):
     """The world's features as if the service had started on day start: the
-    purchases before it are dropped before features are built. Start 0 keeps
-    every day; a later start keeps window days."""
+    purchases and account events before it are dropped before features are
+    built. Start 0 keeps every day; a later start keeps window days."""
     kept = raw[raw["day"] >= start].reset_index(drop=True)
-    data = features.build(kept.copy())
+    data = features.build(kept.copy(), events_since(events, raw, start))
     data["pattern"] = kept["pattern"].to_numpy()
     data["history_start"] = start
+    data["account_events_masked"] = False
     if start == 0:
         return data
     return data[data["day"] < start + window].reset_index(drop=True)
 
 
-def world_info(path, raw, parts, skipped):
+def events_since(events, raw, start):
+    """The account events from midnight UTC of day start of the world on."""
+    if events is None:
+        return None
+    first_midnight = raw["event_ns"].min() // NANOS_PER_DAY * NANOS_PER_DAY
+    return events[events["event_ns"] >= first_midnight + start * NANOS_PER_DAY]
+
+
+def without_account_events(rows):
+    """The world as a service without account events would see it: the
+    account event inputs of every purchase are missing.
+
+    Only the simulator worlds have account events. Without this copy, missing
+    account inputs would mostly mean "another world", and a tree could split
+    on them to learn that world's fraud rate instead of fraud. The copy puts
+    the same purchases on both sides of the split, so the account inputs can
+    only add what the events say, and the model still learns the simulator's
+    scenarios for traffic without account events. The copy shares its world's
+    weight and is never scored."""
+    copy = rows.copy()
+    copy[ACCOUNT_EVENT_INPUTS] = features.MISSING
+    copy["account_events_masked"] = True
+    return copy
+
+
+def world_info(path, raw, events, parts, skipped):
     return {
         "file": Path(path).name,
         "world": Path(path).stem,
         "purchases": int(len(raw)),
+        "account_events": int(len(events)),
         "days": f"{int(raw['day'].min())}-{int(raw['day'].max())}",
         "fraud_rate": round(float(raw["isFraud"].mean()), 4),
         "history_variants": [
             {
                 "history_start": int(part["history_start"].iloc[0]),
+                "account_events_masked": bool(part["account_events_masked"].iloc[0]),
                 "days": f"{int(part['day'].min())}-{int(part['day'].max())}",
                 "rows": int(len(part)),
                 "fraud_rate": round(float(part["is_fraud"].mean()), 4),
@@ -208,10 +251,17 @@ def equal_world_sample(rows, seed):
     return rows.groupby("world", sort=False).sample(n=size, random_state=seed)
 
 
+def purchase_rows(data):
+    """Each purchase once, with the history and account events its world
+    gives it. The history variants and the copies without account events are
+    only trained on."""
+    return data[(data["history_start"] == 0) & ~data["account_events_masked"]]
+
+
 def held_out_rows(data, world):
-    """The rows a world is scored on: each purchase once, with the history the
-    world itself gives it. The history variants are only trained on."""
-    return data[(data["world"] == world) & (data["history_start"] == 0)]
+    """The rows a world is scored on."""
+    rows = purchase_rows(data)
+    return rows[rows["world"] == world]
 
 
 def lowo_folds(data):
@@ -301,3 +351,48 @@ def select_candidate(data, candidates, selection):
         results.append(result)
         print(f"{candidate.name}: {result.trees} trees, worst held-out PR-AUC {result.worst_pr_auc:.4f}")
     return results, max(results, key=lambda result: result.worst_pr_auc)
+
+
+def check_input_groups(data, winner, selection):
+    """Evaluates the selected candidate without each input group in
+    CHECKED_INPUT_GROUPS that some world carries. A group is dropped when the
+    worlds whose purchases carry its inputs score a higher mean held-out
+    PR-AUC without it; the other worlds see the inputs missing either way, so
+    they cannot judge the group. Returns the checks and the chosen result: the
+    winner, or the winner without every dropped group."""
+    checks = []
+    for group, names in CHECKED_INPUT_GROUPS.items():
+        carrying = worlds_with_inputs(data, names)
+        if carrying:
+            checks.append(group_check(data, winner, group, carrying, selection))
+    dropped = [check.group for check in checks if check.without_group > check.with_group]
+    if not dropped:
+        return checks, winner
+    if len(dropped) == 1:
+        return checks, next(check.result for check in checks if check.group == dropped[0])
+    return checks, evaluate_candidate(without_groups(winner.candidate, dropped), data, selection)
+
+
+def group_check(data, winner, group, carrying, selection):
+    result = evaluate_candidate(without_groups(winner.candidate, [group]), data, selection)
+    print(f"{result.candidate.name}: {result.trees} trees, worst held-out PR-AUC {result.worst_pr_auc:.4f}")
+
+    def mean_pr_auc(candidate_result):
+        return round(float(np.mean([candidate_result.held_out[world]["pr_auc"] for world in carrying])), 4)
+
+    return GroupCheck(group, result, carrying, mean_pr_auc(winner), mean_pr_auc(result))
+
+
+def without_groups(candidate, groups):
+    """The candidate with the inputs of the groups masked as well."""
+    masked = list(candidate.masked)
+    for group in groups:
+        masked += [name for name in CHECKED_INPUT_GROUPS[group] if name not in masked]
+    return Candidate(f"{candidate.name}-" + "-".join(groups), masked, candidate.params)
+
+
+def worlds_with_inputs(data, names):
+    """The worlds where some purchase has one of the inputs."""
+    rows = purchase_rows(data)
+    carrying = (rows[names] != features.MISSING).any(axis=1)
+    return list(rows.loc[carrying, "world"].unique())
