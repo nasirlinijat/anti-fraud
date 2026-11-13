@@ -36,7 +36,23 @@ test('session requests carry the token and a 401 reports the rejected session', 
   assert.equal(rejections, 1)
 })
 
-test('score and sign-in send no session token and their 401 keeps the session', async (t) => {
+test('score sends the session token for the console proxy to check', async (t) => {
+  const { mock } = t
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'missing or invalid session' }, { status: 401 }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  t.after(forgetSessionToken)
+  keepSessionToken('session-token')
+
+  const scored = await score({ amount_minor: 1 })
+  assert.equal(scored.status, 401)
+  const headers = fetch.mock.calls[0].arguments[1].headers
+  assert.equal(headers.get('Authorization'), 'Bearer session-token')
+  assert.equal(headers.has('X-API-Key'), false)
+  assert.equal(rejections, 1)
+})
+
+test('sign-in sends no session token and its 401 keeps the session', async (t) => {
   const { mock } = t
   const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ error: 'invalid key' }, { status: 401 }))
   let rejections = 0
@@ -44,8 +60,6 @@ test('score and sign-in send no session token and their 401 keeps the session', 
   t.after(forgetSessionToken)
   keepSessionToken('session-token')
 
-  const scored = await score({ amount_minor: 1 })
-  assert.match(scored.error.error, /Check API_KEY/)
   await assert.rejects(request('/auth/login', { method: 'POST', auth: 'none' }), { status: 401, message: 'invalid key' })
   for (const call of fetch.mock.calls) assert.equal(call.arguments[1].headers.has('Authorization'), false)
   assert.equal(rejections, 0)
