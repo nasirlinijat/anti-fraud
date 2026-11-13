@@ -2,7 +2,7 @@
 
 Trains the fraud models. Python is used only offline; the Go service loads the exported model.
 
-There are two models. **`lgbm-ieee-v5-combined`** is trained on the IEEE-CIS dataset and is the real-data benchmark: [Current results](#current-results) describes how it performs, and [History of changes](#history-of-changes) keeps the results of earlier versions. **`lgbm-game-v5`** is trained on the simulator's game traffic, see [Game model](#game-model-simulated-traffic). The service loads `lgbm-game-v5` by default, because the demo traffic comes from the simulator.
+There are two models. **`lgbm-ieee-v5-combined`** is trained on the IEEE-CIS dataset and is the real-data benchmark: [Current results](#current-results) describes how it performs, and [History of changes](#history-of-changes) keeps the results of earlier versions. **`lgbm-game-v5`** is trained on the simulator's game traffic, see [Game model](#game-model-simulated-traffic). The service loads `lgbm-game-v5` by default, because the demo traffic comes from the simulator. `lgbm-game-v8`, which adds the payment, IP and account event inputs, is an opt-in model file until it passes its exam (see [Payment, IP and account event inputs](#payment-ip-and-account-event-inputs-v8)).
 
 ## Setup
 
@@ -260,6 +260,7 @@ The model catches less than one point more on its training days than on later da
 | Some amounts only occur in fraud: under 2.00 almost only in card testing, above 1,200.00 only in account takeover | Not removed |
 | A field is missing for a player at random, not because of the platform or the integration | Accepted: the missing fields say nothing about the scenario, which is what the model must not learn from |
 | The traffic is easy: the logistic regression baseline reaches ROC-AUC 0.989 on the test days (LightGBM 0.997) | Accepted: the results show that the pipeline learns labelled patterns, not real-world accuracy |
+| The simulator sends account events only for regular players, takeovers, new phones and travelers: every other scenario, fraud or legitimate, has none, while 97% of normal purchases have some in the 30 days before | Reduced, not removed: the copy without account events keeps the scenarios learnable without them, and the ablation shows the legitimate edge cases are flagged about as often with the account inputs as without them. A real account system reports events for every player |
 | The model can clear a correct rule review | Open: it cleared none in the replay, but `clear_below` is still chosen on all purchases, not on rule-reviewed ones (AF-90) |
 
 ### Traffic from other generators
@@ -268,11 +269,11 @@ The model catches less than one point more on its training days than on later da
 
 | World | Purchases | Days | Fraud | Role |
 |---|---|---|---|---|
-| A | 19,873 | 14, from an empty history | 6.6% | trained `lgbm-game-v7` |
-| B | 100,000 | 60 | 5.2% | trained `lgbm-game-v6` and `v7` |
-| C | 99,377 | 60 | 5.6% | trained `lgbm-game-v6` and `v7` |
-| D | 40,066 | 28 | 5.7% | exam for `v6`, then trained `v7` |
-| E | 38,713 | 35 | 5.5% | exam for `v7` and `v7-combined`, scored once |
+| A | 19,873 | 14, from an empty history | 6.6% | trained `lgbm-game-v7` and `v8` |
+| B | 100,000 | 60 | 5.2% | trained `lgbm-game-v6`, `v7` and `v8` |
+| C | 99,377 | 60 | 5.6% | trained `lgbm-game-v6`, `v7` and `v8` |
+| D | 40,066 | 28 | 5.7% | exam for `v6`, then trained `v7` and `v8` |
+| E | 38,713 | 35 | 5.5% | exam for `v7` and `v7-combined`, scored once, then trained `v8` |
 
 On world A, `lgbm-game-v5` had ROC-AUC 0.59. A model trained on A itself reached 0.95, so the inputs carry the signal: v5 had learned the simulator's history lengths and amounts (`secs_since_first`, the most important input, has a median of 63 days in the simulator and 4 days in A).
 
@@ -300,6 +301,74 @@ Simulator, second world, later days: v5 catches 80.3% at 97.0% precision, `v7-co
 - Thresholds do not carry over: the combined model was set to flag 1% of legitimate purchases on the training worlds and flagged 0.5% in A, 0.6% in D and 2.7% in E. A deployment has to set `flag_at` on its own traffic, for example to a review budget after the first days.
 - The rule written before scoring E required at least 95% precision on the simulator's second world, the demo traffic. `v7-combined` reached 92.9%, so the service keeps `lgbm-game-v5` by default. Set `MODEL_PATH=models/lgbm-game-v7-combined.json` (or `lgbm-game-v7.json`) to run a multi-world model.
 - All worlds are synthetic, and several were written by generators of the same model family, which share some vocabulary (card tiers such as `STD`, `GLD`, `PLT`). Real traffic is likely to be harder.
+
+### Payment, IP and account event inputs (v8)
+
+`lgbm-game-v8` takes all 63 features: the 54 of v7, the payment verification codes and IP intelligence flags (55-59), and four inputs from the player's account events (60-63), defined in [FEATURES.md](FEATURES.md). The account inputs target the takeover scenarios: a takeover pays with the owner's saved card, so the payment checks look normal, but the account system has just seen a password reset or a login from a new device.
+
+Generate the simulator worlds again from `backend` (the dump now also writes `world1.account_events.jsonl` and `world2.account_events.jsonl`), then train from `ml` on the first simulator world and the five generator worlds. The second simulator world is only scored, as the demo-traffic check:
+
+```bash
+go run ./cmd/simulator -dump ../ml/data/game/world1.jsonl -count 600000 -players 6000 -seed 11 -start 2026-01-01T00:00:00Z -run w1
+go run ./cmd/simulator -dump ../ml/data/game/world2.jsonl -count 150000 -players 2500 -seed 23 -start 2026-01-01T00:00:00Z -run w2
+.venv/bin/python train_game.py data/game/world1.jsonl data/game/worldB.jsonl data/game/worldC.jsonl data/game/worldA.jsonl data/game/worldD.jsonl data/game/worldE.jsonl --history-starts 0,14,20,40,60,80,100 --history-window 14 --version lgbm-game-v8 --development data/game/world2.jsonl
+```
+
+Leaving one world out chose `codes/v5` (the v5 settings with the five code inputs masked) at 150 trees, with `flag_at` 0.514162 and `clear_below` 0.00982 from the out-of-world scores.
+
+**Worlds without account events.** Only the simulator worlds have account events; worlds A-E have none, so every one of their purchases has the four account inputs at `-1`. Left alone, `-1` would mostly mean "a generator world", and a tree could split on it to learn those worlds' lower fraud rate instead of fraud: "no events = honest". Two choices prevent that:
+
+- The inputs have no "account events available" value. A player without any account event in the 30 days before the purchase gets `-1` for all four, exactly like a world without account events, so the inputs cannot name the world. In the first simulator world 22% of purchases have no account event in the window.
+- A world with account events is also trained on a second time with the four inputs set to `-1` (`worlds.without_account_events`), as a service without account events would see it. The copy shares its world's weight and is never scored. The same simulator purchases are then on both sides of a split on the account inputs, so the inputs can only add what the events say, and the model still learns the simulator's takeovers for traffic without account events, such as worlds A-E.
+
+Leaving one world out cannot measure the account inputs: when the first simulator world is left out, no training world has account events. The candidate and the thresholds are therefore chosen without them, and the second simulator world is the only check of what they add.
+
+Second simulator world, later days (days 14-30, 80,207 purchases), each model with its own thresholds:
+
+| Model | ROC-AUC | PR-AUC | Fraud caught | Precision | Legitimate flagged |
+|---|---|---|---|---|---|
+| `lgbm-game-v5` | 0.983 | 0.905 | 55.5% | 97.2% | 0.24% |
+| `lgbm-game-v7` | 0.989 | 0.946 | 73.7% | 96.0% | 0.45% |
+| `lgbm-game-v8` | 0.996 | 0.977 | 87.2% | 95.8% | 0.56% |
+
+v5 catches far less than in its own results above because the current simulator has changed since: it now sends payment verification results, IP addresses and the device farm scenario, which v5 flags 15% of. On the first 14 days (an empty database) v8 catches 86.8% at 95.9% precision.
+
+Ablation: the same settings, tree count and data, each variant with its own out-of-world thresholds, the average of 3 models, on the same days:
+
+| Training | PR-AUC | Fraud caught | Precision | Legitimate flagged |
+|---|---|---|---|---|
+| v8 | 0.977 | 87.2% | 95.8% | 0.56% |
+| Without the 4 account event inputs | 0.975 | 85.9% | 95.9% | 0.54% |
+| Without the 9 new inputs (55-63) | 0.968 | 85.6% | 92.9% | 0.95% |
+
+Share of each scenario flagged on the same days (v8 is the exported model):
+
+| Scenario | v5 | v7 | v8 | v8 without account inputs | v8 without the 9 new inputs |
+|---|---|---|---|---|---|
+| Account takeover | 98% | 71% | 92% | 86% | 87% |
+| Quiet takeover | 67% | 30% | 58% | 38% | 47% |
+| Card testing | 99% | 92% | 98% | 98% | 99% |
+| Device farm | 15% | 88% | 97% | 97% | 97% |
+| Slow card testing | 75% | 55% | 76% | 75% | 66% |
+| Stolen card | 86% | 42% | 68% | 67% | 72% |
+| New account spend | 5% | 26% | 75% | 74% | 79% |
+| Low and slow | 0% | 0% | 4.0% | 2.7% | 0% |
+| New big spender (legitimate) | 5.2% | 23% | 42% | 41% | 73% |
+| New casual player (legitimate) | 4.9% | 25% | 22% | 20% | 42% |
+| New phone (legitimate) | 7.9% | 13% | 3.5% | 6.8% | 8.7% |
+| Internet cafe (legitimate) | 0% | 0.5% | 5.5% | 4.4% | 2.3% |
+| Session shopper (legitimate) | 6.4% | 1.8% | 2.1% | 2.3% | 8.8% |
+| Normal, expat, traveler (legitimate) | 0% | 0% | 0% | 0% | 0% |
+
+- The account inputs add the takeovers: quiet takeover from 38% to 58% and account takeover from 86% to 92%, while the new phone, the legitimate look-alike of a quiet takeover, drops from 6.8% to 3.5%. In the simulator a takeover starts with a password reset 70% of the time, and a new phone never does, so the reset is most of what they learn. That is a simulator choice, not a measured fact about real takeovers.
+- The payment and IP inputs mostly cut legitimate flags: without them, precision falls from 95.8% to 92.9% and new big spenders are flagged 73% instead of 42%.
+- v5 still catches more account takeovers (98%), because it learned the simulator's takeover amounts, which v7 and v8 mask or share with other worlds.
+
+Replay through the service (second simulator world, all 150,000 purchases and 40,130 account events on an empty database, `SCORE_RATE_LIMIT=0`): the live score equals the Python score for every purchase (largest difference 2.2e-16) with the same flag decisions, and the exported model inputs equal the Python features on all 63 columns (largest difference 7.1e-15). Latency p50 / p95 / p99 is 4.3 / 6.3 / 7.1 ms over the first 10,000 purchases and 4.8 / 26.1 / 29.8 ms over all of them. The growth comes from the card issuer history query for purchases without a `card_issuer` (a quarter of this world), which counts every earlier purchase without one: their p95 is 29.2 ms, against 6.0 ms for purchases with an issuer. The account event query is index seeks only (0.15 ms on the player with the most events). In the replay the rules alone stop 30.8% of the fraud at 93.1% precision, and the rules with v8 87.6% at 94.8%.
+
+Exam world F is written by a separate generator and scored once, after v8 was frozen: _result pending, to be added after the exam_.
+
+v8 does not change the default model. The rule written before exam F requires, on F, a higher PR-AUC than v5 and v7 and more fraud caught than v5 at no lower precision, and on the second simulator world at least 95% precision and at least as much fraud caught as v5. Set `MODEL_PATH=models/lgbm-game-v8.json` to run it.
 
 ### Earlier game models
 
