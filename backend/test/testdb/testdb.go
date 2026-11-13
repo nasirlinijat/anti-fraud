@@ -24,6 +24,7 @@ const (
 type Database struct {
 	OwnerURL   string
 	RuntimeURL string
+	LabelsURL  string
 	container  *postgres.PostgresContainer
 }
 
@@ -63,6 +64,11 @@ func Start(ctx context.Context) (*Database, error) {
 		return nil, err
 	}
 	if db.RuntimeURL, err = withUser(db.OwnerURL, "antifraud_api", runtimePassword); err != nil {
+		_ = db.Stop()
+		return nil, err
+	}
+	db.LabelsURL, err = withUser(db.OwnerURL, "antifraud_labels", labelsPassword)
+	if err != nil {
 		_ = db.Stop()
 		return nil, err
 	}

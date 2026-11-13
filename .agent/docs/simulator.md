@@ -118,4 +118,30 @@ Matching start retries with the same operator and request_id return the original
 
 History and counters are saved in PostgreSQL. `sent` counts saved decisions and is the sum of allowed, reviewed and blocked. The worker records an in-flight transaction before scoring and checkpoints its result afterwards. On recovery it reconciles that transaction against saved decisions and marks unfinished runs `interrupted`; it does not automatically continue their traffic. `pending: true` means an outcome still cannot be confirmed. A new run needs a new request_id. Database failures stop dispatch until recovery. Only console-managed runs share the active-run guard; separately launched CLI simulators are not controlled.
 
-A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results. This API does not reset data or expose fraud labels; the controller persists evaluation answers privately.
+A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results. This API does not expose fraud labels; the controller persists evaluation answers privately.
+
+## Reset demonstration data
+
+Pause external traffic, replay, label import/recovery, and mock-bank jobs and
+let in-flight work finish. With `SIMULATION_ENABLED=true`, an admin session or
+operator key can call `POST /simulations/reset`. Success returns 204; an active
+console simulation returns 409, and a disabled feature returns 404.
+
+`make reset` calls the same endpoint on the running backend. Set
+`RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN` in the environment; optionally set
+`RESET_URL` to override `http://127.0.0.1:$PORT` (port 8080 by default).
+Credentials are read from the environment and never passed as command arguments.
+
+Reset clears every purchase, decision, review claim/resolution, private finalized
+and pending evaluation answer, feature total, blocklist entry, account event,
+chargeback, and simulation run in this database. Start request IDs can be reused.
+Ruleset versions and their active selection, console accounts, sessions, audit
+records, and identity sequence positions remain. Model files, purchase dumps,
+and accompanying account-event JSONL files remain on disk. Replay sends account
+events and purchases; both flows must be paused.
+
+Scoring falls back to PostgreSQL until its Redis blocklist mirror is rebuilt.
+A cache rebuild failure does not undo a committed reset; database fallback stays
+active until a successful reload. Apply migrations and role grants before
+starting the backend with simulations enabled. Runtime and evaluation database
+connection targets must match, including fallback hosts.

@@ -74,6 +74,7 @@ type CachedBlocklistStore struct {
 	mu     sync.Mutex
 	reload reloadGate
 	health cacheHealth
+	bypass atomic.Bool
 }
 
 func NewCachedBlocklistStore(db *BlocklistStore, client *redis.Client) *CachedBlocklistStore {
@@ -86,6 +87,10 @@ func NewCachedBlocklistStore(db *BlocklistStore, client *redis.Client) *CachedBl
 // Match checks the cache first, falling back to PostgreSQL on any Redis error
 // or while the mirror is being rebuilt.
 func (s *CachedBlocklistStore) Match(ctx context.Context, sub models.BlocklistSubject) (models.BlocklistEntry, bool, error) {
+	if s.bypass.Load() {
+		s.triggerReload()
+		return s.db.Match(ctx, sub)
+	}
 	ok, entry, err := s.matchFromRedis(ctx, sub)
 	if err != nil {
 		s.health.recordFailure(err)
@@ -176,6 +181,7 @@ func (s *CachedBlocklistStore) reloadLocked(ctx context.Context) error {
 		_ = s.redis.Del(ctx, keyReady).Err()
 		return fmt.Errorf("rebuild blocklist cache in redis: %w", err)
 	}
+	s.bypass.Store(false)
 	s.health.recordSuccess()
 	return nil
 }
