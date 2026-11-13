@@ -4,22 +4,38 @@ A real-time fraud scoring and review console for in-game purchases. Each purchas
 
 ## Quick start
 
-You need Docker with the Compose plugin, and Go 1.26.11 or newer to create the first account.
+You need Docker with the Compose plugin, GNU Make, and Go 1.26.11 or newer. The demo setup also uses OpenSSL to generate local keys. Start Docker before running these commands from the repository root.
 
 ```bash
 cp .env.example .env
-docker compose up -d --build --wait
+make up
 ```
 
-Compose applies the database migrations before it starts the backend. Next, create the first admin account. Run this from `backend` with `DATABASE_URL` from `.env` set. The command asks for a password of 12 to 72 bytes:
+Compose applies the migrations and grants before starting the API and console. Create an admin account with a password of 12 to 72 bytes. This command reads the default database connection from the copied environment file:
 
 ```bash
-go run ./cmd/create-account -username alice
+(cd backend && DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ../.env)" go run ./cmd/create-account -username alice)
 ```
 
-Open the console at http://127.0.0.1:3000 and sign in. On **Tester**, fill in the normal purchase example and submit it. Then open **Dashboard** to see the saved decision.
+Open the console at http://127.0.0.1:3000 and sign in. On **Tester**, submit the normal purchase example. Then open **Dashboard** to see its decision.
 
-To stop the stack and keep the data, run `docker compose down`.
+### Populate the demo
+
+To enable seeding, set the following variables in your shell and apply them to the running stack. The generated analyst and operator keys are for this local session.
+
+```bash
+export SIMULATION_ENABLED=true
+export SEED_ANALYST_KEY="$(openssl rand -hex 32)"
+export RESET_OPERATOR_KEY="$(openssl rand -hex 32)"
+export REVIEW_ANALYST_KEYS="$(printf '[{"analyst_id":"demo-seed","key":"%s"}]' "$SEED_ANALYST_KEY")"
+export OPERATOR_API_KEYS="$(printf '[{"operator_id":"demo-seed","key":"%s"}]' "$RESET_OPERATOR_KEY")"
+docker compose up -d --wait
+make seed
+```
+
+`make seed` clears demonstration data in the running local stack, including purchases, reviews, blocklist entries, and simulation runs. Pause other ingestion and review work before running it. Console accounts and ruleset versions are retained. It then scores seven days of traffic with seed 42 and resolves all but the newest 10 reviews, if that many are available. Use **Dashboard → All time** for totals and **Review queue** for the remaining purchases. Run `make seed` again with the same model and ruleset to reproduce the outcome counts, blocked value, top rules, model effects, and queue size. Scoring latency and decision timestamps are measured on each run.
+
+To stop the stack and keep its data, run `make down`. See [the clean-start checklist](.agent/docs/testing.md#clean-demo-start) for the timed walkthrough.
 
 ## Development
 
@@ -37,6 +53,7 @@ The Make targets need GNU Make. The frontend needs Node.js 26 or newer.
 | `make lint-frontend` | Runs the frontend lint, type check, and unit tests |
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows the API spec (`openapi.yaml`) in Swagger UI at http://localhost:8090 |
+| `make seed` | Resets and populates the local demo with seven days of traffic and an open review queue |
 | `make reset` | Resets demo data through the enabled simulation API; pause external traffic first |
 | `make simulate` | Sends seeded demo purchases to the running backend |
 

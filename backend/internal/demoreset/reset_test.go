@@ -1,4 +1,4 @@
-package main
+package demoreset
 
 import (
 	"net/http"
@@ -14,10 +14,7 @@ func TestResetClientUsesCredentialsAndPropagatesStatuses(t *testing.T) {
 			}
 			w.WriteHeader(status)
 		}))
-		t.Setenv("RESET_URL", server.URL)
-		t.Setenv("RESET_OPERATOR_KEY", "operator")
-		t.Setenv("RESET_SESSION_TOKEN", "")
-		err := reset()
+		err := Reset(t.Context(), Config{BaseURL: server.URL, OperatorKey: "operator"})
 		server.Close()
 		if (err == nil) != (status == 204) {
 			t.Fatalf("status %d: %v", status, err)
@@ -26,9 +23,7 @@ func TestResetClientUsesCredentialsAndPropagatesStatuses(t *testing.T) {
 }
 
 func TestResetClientRequiresCredentials(t *testing.T) {
-	t.Setenv("RESET_OPERATOR_KEY", "")
-	t.Setenv("RESET_SESSION_TOKEN", "")
-	if err := reset(); err == nil {
+	if err := Reset(t.Context(), Config{}); err == nil {
 		t.Fatal("accepted absent credentials")
 	}
 }
@@ -38,9 +33,7 @@ func TestResetClientDoesNotFollowRedirects(t *testing.T) {
 	defer target.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
 	defer server.Close()
-	t.Setenv("RESET_URL", server.URL)
-	t.Setenv("RESET_SESSION_TOKEN", "secret")
-	if err := reset(); err == nil {
+	if err := Reset(t.Context(), Config{BaseURL: server.URL, SessionToken: "secret"}); err == nil {
 		t.Fatal("accepted redirect")
 	}
 }

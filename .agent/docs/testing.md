@@ -37,6 +37,12 @@ go test -race -tags=integration ./test/concurrency/...
 
 `make test-integration` runs both folders one after the other (`go test -p 1 -tags=integration ./test/...`).
 
+## Clean demo start
+
+Ask a teammate who did not write the change to start from a fresh checkout. With Docker already running and the README prerequisites installed, use a fresh Compose project with an empty volume. Start a timer before copying `.env.example`, follow the [quick start and demo seed instructions](../../README.md#quick-start), and stop the timer when an admin can sign in and see the populated dashboard and review queue. Record the elapsed time, whether it was under 10 minutes, and any corrections needed in the README.
+
+For repeatability, run `make seed` twice with the same model and ruleset. Compare **All time** outcomes, blocked value, top rules, model effects, and open reviews. The default demo should leave 10 open reviews. Scoring latency, timestamps, and generated database IDs vary by run.
+
 ## Scoring load test
 
 Run this from the repository root with a local Docker engine, Go, and curl:

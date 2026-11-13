@@ -64,7 +64,7 @@ backend/
 ├── cmd/
 │   ├── api/            main.go starts the server; routes.go wires stores → services → handlers
 │   ├── export-inputs/  Training export: saved model inputs and chargeback labels
-│   └── mock-bank/      Mock card networks: sends chargebacks for a simulator run
+│   ├── mock-bank/      Mock card networks: sends chargebacks for a simulator run
 └── internal/
     ├── transport/      HTTP handlers: decode, validate, map results to status codes
     ├── services/
@@ -148,6 +148,7 @@ Local setup is described in `README.md`. Create the environment file once with `
 | `make lint-frontend` | Runs the frontend lint, type check, and unit tests |
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows `openapi.yaml` in Swagger UI at http://localhost:8090 |
+| `make seed` | Resets the local demo, scores a seeded seven-day backfill, and leaves up to 10 reviews open |
 | `make simulate` | Sends seeded demo purchases to the running backend |
 
 The server listens on the port given by the `PORT` environment variable (default `8080`). `DATABASE_URL` and `API_KEY` are required, and the server exits with an error if either is missing. `REDIS_URL` is optional: when empty, the blocklist cache is disabled and lookups query PostgreSQL directly. `REVIEW_ANALYST_KEYS` is optional: a JSON array of `analyst_id` and `key` entries, each key different from `API_KEY` and from the others. While it is empty, the review endpoints return 503. `CHARGEBACK_WEBHOOK_SECRET` is optional: the shared secret, at least 32 bytes and different from `API_KEY` and every analyst and operator key, that signs `POST /chargebacks`. While it is empty, that endpoint returns 503. `IP_INTEL_PROVIDER` selects the IP intelligence provider: `mock` (the default in `.env.example` and local Docker Compose; `deploy/compose.prod.yml` defaults to `off`) or `off`, `none`, or empty for no lookup. `IP_INTEL_MOCK_RANGES` optionally names a JSON file of ranges that replaces the mock's defaults; any other provider value or an invalid file stops the server.
