@@ -24,6 +24,8 @@ Raw and replay-derived label files stay in ignored `ml/data/` or `ml/output/` an
 
 Pending simulator answers now include a private purchase snapshot, normalized to scoring's string, IP and timestamp conventions. Recovery requires the saved purchase to match that snapshot, not just its ID. Definitive HTTP rejections and snapshot mismatches are quarantined. Legacy intents without snapshots are not automatically labelled; verify their source before any explicit CSV import.
 
+The [demo seed command](simulator.md#seed-the-demo) reads only the finalized labels of its own simulator run after scoring completes. It uses them to submit ordinary analyst decisions through the review API. The API receives the decision and analyst credential, and the evaluation role retains the labels.
+
 ## Chargebacks (mocked)
 
 A real merchant learns that a purchase was fraud only when the cardholder's bank disputes it: the processor sends a chargeback days or weeks later. The backend receives these on `POST /chargebacks`, a signed webhook, and stores them as training labels. In this project the processor is mocked by `cmd/mock-bank`, which charges back simulator purchases. Chargebacks never change a decision and are never read by scoring, model inputs, rules, or reviews.

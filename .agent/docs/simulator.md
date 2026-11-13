@@ -51,6 +51,12 @@ $env:API_KEY="local-dev-key"; $env:PORT="8080"; go run ./cmd/simulator -count 10
 
 Backfill simulates event times, so a day of traffic can be sent in a few minutes. Every ID starts with the run prefix. Repeating a backfill with the same prefix, seed, start time, and settings returns saved decisions for matching purchases. Reusing an ID with different fields, including a different event time, returns 409. Use a new run prefix to send new purchases.
 
+## Seed the demo
+
+Follow [Populate the demo](../../README.md#populate-the-demo) and run `make seed`. It targets the local API at `127.0.0.1:$PORT`, uses the reset endpoint with `RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN`, and uses `API_KEY` for scoring. `SEED_ANALYST_KEY` must match a configured analyst key. `LABELS_DATABASE_URL` must point to the same database as the backend, using the evaluation role. Pause other traffic and review work while it runs.
+
+The command generates purchases from January 5 through January 11, 2026 UTC with seed 42. It uses the active ruleset and loaded model. After scoring completes, it uses finalized simulator labels to approve legitimate purchases and reject fraud through the review API, leaving up to 10 of the newest reviews open. It adds no blocklist entries. If a run fails after reset, fix the reported error and rerun `make seed` to start from empty demo data.
+
 ## Scenarios
 
 The scenario descriptions below are for a player whose client sends every field. A rule that needs a missing field does not fire.
