@@ -136,6 +136,64 @@
 
 .inline-field select { inline-size: auto; }
 
+.select-menu-anchor { position: relative; }
+
+.select-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-block-size: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.select-menu-button:hover { border-color: var(--text); }
+
+/* The list hangs from the bottom edge of its button, above the sticky table header. */
+.select-menu-list {
+  position: absolute;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-start: 0;
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  min-inline-size: 100%;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.select-menu-list:focus { outline: none; }
+
+.select-menu-list button {
+  min-block-size: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.select-menu-list button:hover { background: var(--surface-hover); }
+.select-menu-list button[aria-checked='true'] { font-weight: 600; box-shadow: inset 3px 0 var(--accent); }
+
+@media (pointer: coarse) {
+  .select-menu-list button { min-block-size: var(--control-height); }
+}
+
 :where(input:not([type='checkbox'], [type='radio']), select, textarea) {
   inline-size: 100%;
   min-inline-size: 0;

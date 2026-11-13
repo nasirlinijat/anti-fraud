@@ -90,6 +90,53 @@ test('a purchase claimed by another account offers no decision', async ({ page }
   await expect(page.getByRole('button', { name: /^(Claim|Approve|Reject) demo-transaction$/ })).toHaveCount(0)
 })
 
+const wideRow = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction-with-a-long-identifier', player_id: 'demo-player',
+  device_id: null, amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model',
+  fired_rules: [{ name: 'high_amount', points: 40, message: 'Amount is above the limit for a new account' }],
+  claimed_by: null, claimed_at: null }
+
+test('row actions stay in view when the review table is wider than the page', async ({ page }) => {
+  const rows = [wideRow, { ...wideRow, purchase_id: 'mine', transaction_id: 'demo-mine', claimed_by: 'demo-user', claimed_at: now }]
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: rows, next_cursor: null, model_enabled: true } }))
+  for (const width of [1024, 1280]) {
+    await page.setViewportSize({ width, height: 800 })
+    await page.goto('/#/reviews')
+    const region = page.getByRole('region', { name: 'Purchases awaiting review' })
+    await expect(region).toBeVisible()
+    expect(await region.evaluate(element => element.scrollWidth > element.clientWidth), `table overflows at ${width}`).toBe(true)
+    for (const name of ['Claim demo-transaction-with-a-long-identifier', 'Approve demo-mine', 'Reject demo-mine']) {
+      await expect(page.getByRole('button', { name }), `${name} at ${width}`).toBeInViewport({ ratio: 1 })
+    }
+  }
+})
+
+test('the sort menu opens below its button and changes the queue order', async ({ page }) => {
+  const sorts: (string | null)[] = []
+  await page.route('**/reviews?*', route => {
+    sorts.push(new URL(route.request().url()).searchParams.get('sort'))
+    return route.fulfill({ json: { items: [wideRow], next_cursor: null, model_enabled: true } })
+  })
+  // A short window leaves no room below the button, which is where a native list would move on top of it.
+  await page.setViewportSize({ width: 1280, height: 300 })
+  await page.goto('/#/reviews')
+  const button = page.getByRole('button', { name: 'Sort by Rule score', exact: true })
+  await button.press('ArrowDown')
+  const menu = page.getByRole('menu', { name: 'Sort by' })
+  await expect(menu.getByRole('menuitemradio', { name: 'Rule score' })).toBeFocused()
+  const [buttonBox, menuBox] = [await button.boundingBox(), await menu.boundingBox()]
+  expect(menuBox!.y).toBeGreaterThanOrEqual(buttonBox!.y + buttonBox!.height)
+
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(button).toBeFocused()
+
+  await button.click()
+  await menu.getByRole('menuitemradio', { name: 'Model risk' }).click()
+  await expect(page.getByRole('button', { name: 'Sort by Model risk', exact: true })).toBeFocused()
+  await expect(page.getByRole('columnheader', { name: 'Model risk' })).toHaveAttribute('aria-sort', 'descending')
+  await expect.poll(() => sorts.at(-1)).toBe('model_score')
+})
+
 test('Blocklist entries are added with the session and removed after confirmation', async ({ page }) => {
   let saved = false
   const writes: (string | undefined)[] = []
