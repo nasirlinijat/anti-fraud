@@ -6,6 +6,8 @@ import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
+import { ModelSettingsFields } from './ModelSettingsFields'
+import { toModelConfig, toModelDraft, type FieldErrors, type ModelDraft } from './modelSettingsDraft'
 
 const ruleDetails = [
   {
@@ -121,14 +123,15 @@ type RulesetDraft = {
   block_threshold: string
   note: string
   rules: Record<string, RuleDraft>
+  model?: ModelDraft
 }
-type FieldErrors = Record<string, string>
 
 function toDraft(ruleset: Ruleset): RulesetDraft {
   return {
     review_threshold: String(ruleset.review_threshold),
     block_threshold: String(ruleset.block_threshold),
     note: '',
+    model: ruleset.model && toModelDraft(ruleset.model),
     rules: Object.fromEntries(Object.entries(ruleset.rules).map(([name, rule]) => [
       name,
       {
@@ -168,6 +171,7 @@ function toConfig(draft: RulesetDraft, errors: FieldErrors): RulesetConfig {
     review_threshold: Number(integer(draft.review_threshold, 'review_threshold', threshold, errors)),
     block_threshold: Number(integer(draft.block_threshold, 'block_threshold', threshold, errors)),
     note,
+    model: draft.model && toModelConfig(draft.model, errors),
     rules: {},
   }
   for (const [name, rule] of Object.entries(draft.rules)) {
@@ -289,6 +293,9 @@ function RulesetForm({ initial, history, time, onPublished }: {
         {(!readOnly || selected.ruleset !== null) && (
           <form onSubmit={save} noValidate>
             <ThresholdFields draft={displayDraft} errors={shownErrors} disabled={saving || readOnly} onChange={updateDraft} />
+            <ModelSettingsFields draft={displayDraft.model} errors={shownErrors} disabled={saving || readOnly}
+              showEffectiveThresholds={!readOnly && initial.model?.clear_below === null && initial.model.flag_at === null}
+              onChange={model => updateDraft({ model })} />
             {ruleDetails.map((detail) => (
               <RuleFieldset
                 key={detail.name}

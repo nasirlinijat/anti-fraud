@@ -254,3 +254,63 @@ test('the review queue can retry model status and shows when the model is off', 
   await model.getByRole('button', { name: 'Retry' }).click()
   await expect(model.getByRole('status')).toHaveText('Model is off')
 })
+
+test('Rulesets publishes edited model settings and retains inputs after validation errors', async ({ page }) => {
+  const active = { version: 3, created_at: now, note: '', review_threshold: 30, block_threshold: 80, rules: {},
+    model: { mode: 'assist', clear_below: 0.1, flag_at: 0.5 } }
+  await page.route('**/rulesets/active', route => route.fulfill({ json: active }))
+  let rejected = false
+  await page.route('**/rulesets', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { versions: [active] } })
+    const config = route.request().postDataJSON()
+    if (!rejected) {
+      rejected = true
+      return route.fulfill({ status: 400, json: { error: 'invalid request', fields: { 'model.flag_at': 'Check the flag threshold.' } } })
+    }
+    expect(config.model).toEqual({ mode: 'shadow', clear_below: 0.15, flag_at: 0.7 })
+    return route.fulfill({ status: 201, json: { ...active, model: config.model, version: 4 } })
+  })
+  await page.goto('/#/rulesets')
+  const mode = page.getByLabel('Model mode')
+  const clearBelow = page.getByLabel('Clear review below')
+  const flagAt = page.getByLabel('Flag for review at or above')
+  const publish = page.getByRole('button', { name: 'Publish new version' })
+  await expect(mode).toHaveValue('assist')
+  await expect(clearBelow).toHaveValue('0.1')
+  await expect(flagAt).toHaveValue('0.5')
+  await mode.selectOption('shadow')
+  await clearBelow.fill('0.8')
+  await publish.click()
+  await expect(clearBelow).toHaveAccessibleDescription('Enter a value lower than the flag threshold.')
+  await expect(clearBelow).toHaveValue('0.8')
+  await clearBelow.fill('0.15')
+  await flagAt.fill('0.7')
+  await publish.click()
+  await expect(flagAt).toHaveAccessibleDescription('Check the flag threshold.')
+  await expect(flagAt).toHaveValue('0.7')
+  await expect(mode).toHaveValue('shadow')
+  await publish.click()
+  await expect(page.getByText('Published ruleset version 4.')).toBeVisible()
+})
+
+test('Rulesets shows when there is no model loaded', async ({ page }) => {
+  await page.route('**/model', route => route.fulfill({ json: {
+    loaded: false, version: null, mode: 'off', clear_below: null, flag_at: null, evaluation: null,
+  } }))
+  await page.goto('/#/rulesets')
+  await expect(page.getByText('No model is loaded.')).toBeVisible()
+})
+
+test('Rulesets shows effective thresholds for a version that uses the model report', async ({ page }) => {
+  await page.route('**/rulesets/active', route => route.fulfill({ json: {
+    version: 3, created_at: now, note: '', review_threshold: 30, block_threshold: 80, rules: {},
+    model: { mode: 'assist', clear_below: null, flag_at: null },
+  } }))
+  await page.goto('/#/rulesets')
+  const clearBelow = page.getByLabel('Clear review below')
+  const flagAt = page.getByLabel('Flag for review at or above')
+  await expect(clearBelow).toHaveAttribute('placeholder', '0.011527')
+  await expect(flagAt).toHaveAttribute('placeholder', '0.544632')
+  await expect(clearBelow).toHaveValue('')
+  await expect(flagAt).toHaveValue('')
+})

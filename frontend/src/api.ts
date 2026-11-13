@@ -22,10 +22,12 @@ export interface ScoreResponse {
   model_version: string | null
 }
 
+export type ModelMode = 'off' | 'shadow' | 'assist'
+
 export interface ModelStatus {
   loaded: boolean
   version: string | null
-  mode: 'off' | 'shadow' | 'assist'
+  mode: ModelMode
   clear_below: number | null
   flag_at: number | null
   evaluation: { dataset: string; roc_auc: number; pr_auc: number } | null
@@ -106,11 +108,18 @@ export interface RuleSettings {
   amount_multiplier?: number
 }
 
+export interface ModelSettings {
+  mode: ModelMode
+  clear_below: number | null
+  flag_at: number | null
+}
+
 export interface RulesetConfig {
   review_threshold: number
   block_threshold: number
   note?: string
   rules: Record<string, RuleSettings>
+  model?: ModelSettings
 }
 
 export interface Ruleset extends RulesetConfig {
