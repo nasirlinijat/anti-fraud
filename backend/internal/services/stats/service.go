@@ -2,7 +2,6 @@ package stats
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
@@ -22,8 +21,6 @@ const (
 	DefaultPeriod = "24h"
 	maxRules      = 10
 )
-
-var ErrUnknownPeriod = errors.New("must be one of 15m, 1h, 24h, 7d, all")
 
 type Store interface {
 	Summary(ctx context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error)

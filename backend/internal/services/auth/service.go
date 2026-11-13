@@ -25,10 +25,6 @@ const tokenBytes = 32
 // with a wrong password, so the response time does not reveal which usernames exist.
 const unknownAccountHash = "$2a$12$5QnowLIxTIQdmUyo6vxuG.3xBRGj5WSQoCiGaQr0AvqzZNbkBGY/W"
 
-// ErrInvalidCredentials covers an unknown username, a wrong password, and a
-// disabled account alike, so that a failed sign-in reveals nothing about the account.
-var ErrInvalidCredentials = errors.New("invalid username or password")
-
 // Accounts reads the credentials saved for a username.
 type Accounts interface {
 	Credentials(ctx context.Context, username string) (models.Account, string, error)
