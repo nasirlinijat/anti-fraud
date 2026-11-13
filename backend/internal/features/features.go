@@ -68,6 +68,11 @@ var Names = []string{
 	"device_id_is_new_for_player",
 	"device_distinct_players",
 	"billing_region_is_new_for_card",
+	"cvv_result_code",
+	"avs_result_code",
+	"three_ds_result_code",
+	"ip_is_hosting",
+	"ip_is_anonymous",
 }
 
 var (
@@ -81,7 +86,12 @@ var (
 		"chrome": 0, "mobile": 1, "safari": 2, "ie": 3, "edge": 4,
 		"firefox": 5, "samsung": 6, "android": 7, "opera": 8,
 	}
-	screenSize = regexp.MustCompile(`^(\d+)x(\d+)$`)
+	// The payment verification codes go from a pass (0) to a failure (the
+	// highest code), with a skipped check in between.
+	cvvResults     = map[string]float64{"match": 0, "not_checked": 1, "mismatch": 2}
+	avsResults     = map[string]float64{"match": 0, "partial": 1, "not_checked": 2, "mismatch": 3}
+	threeDSResults = map[string]float64{"authenticated": 0, "attempted": 1, "not_enrolled": 2, "failed": 3}
+	screenSize     = regexp.MustCompile(`^(\d+)x(\d+)$`)
 )
 
 // NoEmail is the email domain key of a purchase without one.
@@ -116,6 +126,20 @@ type Input struct {
 	ClientOS             *string
 	ClientBrowser        *string
 	ScreenResolution     *string
+	CVVResult            *string
+	AVSResult            *string
+	ThreeDSResult        *string
+	// IPNetwork is what IP intelligence reported about the purchase's IP
+	// address. It is nil when the request has no address, the lookup is off,
+	// or it failed, so the model sees one missing value for all three.
+	IPNetwork *IPNetwork
+}
+
+// IPNetwork is the kind of network an IP address belongs to.
+type IPNetwork struct {
+	Hosting bool
+	// Anonymous is true for a VPN, a public proxy, or a Tor exit.
+	Anonymous bool
 }
 
 // EmailKey returns the purchaser email domain, or NoEmail when it is missing.
@@ -264,6 +288,11 @@ func Vector(in Input, h History) []float64 {
 		flag(in.DeviceID != nil && hasHistory && p.DeviceIDUses == 0),
 		when(in.DeviceID != nil, func() float64 { return float64(h.DeviceIDPlayers) }),
 		flag(h.Card.Purchases > 0 && h.Card.RegionUses == 0),
+		code(cvvResults, in.CVVResult),
+		code(avsResults, in.AVSResult),
+		code(threeDSResults, in.ThreeDSResult),
+		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Hosting }),
+		ipFlag(in.IPNetwork, func(n IPNetwork) bool { return n.Anonymous }),
 	}
 }
 
@@ -282,6 +311,15 @@ func countryDiffers(ipCountry, cardCountry *string) float64 {
 		return Missing
 	}
 	return flag(*ipCountry != *cardCountry)
+}
+
+// ipFlag reads one kind of network from the IP intelligence result, or
+// returns Missing without one.
+func ipFlag(network *IPNetwork, is func(IPNetwork) bool) float64 {
+	if network == nil {
+		return Missing
+	}
+	return flag(is(*network))
 }
 
 // accountAge returns the whole days between account creation and the purchase.

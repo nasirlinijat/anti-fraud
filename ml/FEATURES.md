@@ -2,7 +2,7 @@
 
 The scoring service must compute these features exactly as `ml/features.py` does, or the model gives wrong scores. `ml/testdata/transactions.csv` holds synthetic purchases and `ml/testdata/expected_features.csv` the values each feature must have for them; a Go test loads both and compares every value.
 
-This file describes 54 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, and `lgbm-game-v5` takes all 54.
+This file describes 59 features, which the service computes. The models `lgbm-ieee-v5*` and `lgbm-game-v2` take the first 50 of them, `lgbm-game-v5` the first 54, and a game model trained after features 55-59 were added takes all 59. IEEE-CIS has none of the fields behind features 55-59, so they are `-1` for every IEEE-CIS purchase and the IEEE-CIS model does not use them.
 
 ## General rules
 
@@ -31,8 +31,11 @@ This file describes 54 features, which the service computes. The models `lgbm-ie
 | `product_code` | W 0, H 1, C 2, S 3, R 4 |
 | `card_network` | visa 0, mastercard 1, american express 2, discover 3 |
 | `card_type` | debit 0, credit 1, debit or credit 2, charge card 3 |
+| `cvv_result` | match 0, not_checked 1, mismatch 2 |
+| `avs_result` | match 0, partial 1, not_checked 2, mismatch 3 |
+| `three_ds_result` | authenticated 0, attempted 1, not_enrolled 2, failed 3 |
 
-Any other or missing value is `-1`.
+Any other or missing value is `-1`. The verification codes go from a pass (0) to a failure (the highest code), with a skipped check in between.
 
 ## Features
 
@@ -92,6 +95,11 @@ Any other or missing value is `-1`.
 | 52 | `device_id_is_new_for_player` | 1 if the request has a `device_id`, the player has earlier purchases, and none used this device ID, else 0 |
 | 53 | `device_distinct_players` | Distinct players who used this `device_id` before (the current player counts if they used it before); `-1` when the device ID is missing |
 | 54 | `billing_region_is_new_for_card` | 1 if the card ID has earlier purchases and none had this billing region (a missing region counts as `none`), else 0 |
+| 55 | `cvv_result_code` | Code table above |
+| 56 | `avs_result_code` | Code table above |
+| 57 | `three_ds_result_code` | Code table above |
+| 58 | `ip_is_hosting` | 1 if IP intelligence placed `ip_address` in a hosting or data-centre range, 0 if it was looked up and is not in one, `-1` without a lookup result |
+| 59 | `ip_is_anonymous` | 1 if IP intelligence placed `ip_address` in a VPN, public proxy or Tor range, 0 if it was looked up and is not in one, `-1` without a lookup result |
 
 Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service needs running totals per email domain, device name, client OS, browser and screen, and overall, not only per player.
 
@@ -119,8 +127,18 @@ Features 18, 26, 29, 30, 42, 43 and 44 count over all players, so the service ne
 | `device_name` | `DeviceInfo` | Identity file, joined on `TransactionID` |
 | `ip_country` | None | Always missing in IEEE-CIS; present in game traffic and in the test rows |
 | `device_id` | None | Always missing in IEEE-CIS; present in game traffic and in the test rows |
+| `ip_address` | None | Always missing in IEEE-CIS. Only its IP intelligence result is a model input (features 58 and 59) |
+| `cvv_result`, `avs_result`, `three_ds_result` | None | Always missing in IEEE-CIS; present in game traffic and in the test rows |
 
-`ip_address` is not a model input. IEEE-CIS has no IP country or device ID, so for IEEE-CIS rows features 51 and 53 are `-1` and feature 52 is 0. The test rows in `ml/testdata/transactions.csv` have two extra columns, `ip_country` and `device_id`, to test these features. Feature 51 compares `ip_country` with `card_country` as text, so training writes `card3` the way the request sends it (`150.0` becomes `150`). `account_created_at` gives `account_age_days`, which IEEE-CIS approximates with `D1` (days since the client began). The client OS, browser and screen come from the identity file's `id_30`, `id_31` and `id_33` (values such as `Windows 10`, `chrome 63.0` and `1920x1080`); the score request gets matching optional fields in ML-3. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number, or is infinite (such as `inf`), becomes `-1`.
+`ip_address` itself is not a model input. IEEE-CIS has no IP country or device ID, so for IEEE-CIS rows features 51 and 53 are `-1` and feature 52 is 0. The test rows in `ml/testdata/transactions.csv` have six extra columns, `ip_country`, `device_id`, `ip_address`, `cvv_result`, `avs_result` and `three_ds_result`, to test these features. Feature 51 compares `ip_country` with `card_country` as text, so training writes `card3` the way the request sends it (`150.0` becomes `150`). `account_created_at` gives `account_age_days`, which IEEE-CIS approximates with `D1` (days since the client began). The client OS, browser and screen come from the identity file's `id_30`, `id_31` and `id_33` (values such as `Windows 10`, `chrome 63.0` and `1920x1080`); the score request gets matching optional fields in ML-3. `card_country`, `card_category` and `billing_country` are numeric codes in IEEE-CIS; a value that is not a number, or is infinite (such as `inf`), becomes `-1`.
+
+### IP intelligence inputs
+
+Features 58 and 59 are the IP intelligence provider's answer for `ip_address`, never the address. The service looks the address up before scoring (`IP_INTEL_PROVIDER`). Both features are `-1` when the request has no address, when lookups are off, and when the lookup failed or timed out, so a model treats all three the same way. Hosting and anonymous are separate flags, because a range can be both (a VPN in a data centre).
+
+Training must classify an address exactly as the service does. The mock provider's default ranges are in `backend/internal/ipintel/default_ranges.json`: the Go service embeds the file, and `ml/features.py` reads the same file. Training follows the mock's lookup: an IPv4 address written in IPv6 form (`::ffff:192.0.2.1`) is looked up as IPv4, an address with an IPv6 zone matches no range, and every range that contains the address counts. Training assumes the lookup succeeds for every address, so a model trained on simulator traffic expects the default ranges; a deployment with `IP_INTEL_MOCK_RANGES` or another provider must train on its own lookups, for example from the inputs it saves (see "Train on the service's own data" in `README.md`).
+
+Inputs added later, such as account events, are appended after feature 59 with `-1` for a missing value, so models with 54 or 59 features keep loading.
 
 `hour_of_day` was removed in model v4: IEEE-CIS times start at an unknown moment, so the hour was shifted for live traffic, and the model loses nothing without it.
 
@@ -135,6 +153,7 @@ The service reads the thresholds at startup from the report next to `MODEL_PATH`
 `backend/internal/features` computes the features for every scored purchase, and the decision saves them in `model_inputs`, blocked purchases included.
 
 - Player, card and card issuer features read the earlier purchases from the `purchases` table, in `(event_time, transaction_id)` order, using the indexes from migration 000006. Transaction IDs are compared as text. The player query also counts earlier purchases with the same device ID, and the card query also returns the card's earlier purchase count and how many had the same billing region.
+- Features 55-57 come from the request. Features 58 and 59 come from the IP intelligence result that `Score` looks up before the rules run; `models.IPNetworkInput` turns it into `features.IPNetwork`, nil without a usable result. None of them reads history.
 - Feature 53 reads the distinct earlier players on the device ID with the `DeviceIDHistorySQL` query, which is served by the partial index on `device_id` from migration 000014. It only runs when the request has a device ID.
 - `UseModel` in `backend/internal/services/score/service.go` accepts a model whose `feature_names` are the first features of `Names` and scores it with only those features.
 - Features 18, 26, 29, 30, 42, 43 and 44 read running totals from the `feature_counts` table: all purchases, and purchases per email domain, device name, client OS, browser and screen, each with its number of distinct players. Saving a purchase adds to them in the same transaction. The totals count every saved purchase, so purchases must be scored in event time order, as live traffic, the simulator and the replay do. Two purchases scored at the same moment do not see each other.

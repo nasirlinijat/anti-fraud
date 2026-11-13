@@ -34,10 +34,14 @@ def test_requests_use_the_api_format():
         "device_name": "Windows",
         "device_id": "dev-a",
         "ip_country": "150",
+        "ip_address": "198.51.100.7",
         "client_os": "Windows 10",
         "client_browser": "chrome 63.0",
         "screen_resolution": "1920x1080",
         "account_created_at": "2017-12-11T00:00:00Z",
+        "cvv_result": "match",
+        "avs_result": "match",
+        "three_ds_result": "authenticated",
     }
     assert requests[4]["amount_minor"] == 10000
     assert "email_domain" not in requests[7] and "device_name" not in requests[7]
@@ -45,6 +49,8 @@ def test_requests_use_the_api_format():
     assert "device_id" not in requests[7] and "ip_country" not in requests[7]
     assert requests[3]["device_id"] == "dev-a" and "ip_country" not in requests[3]
     assert requests[5]["client_browser"] == "chrome 62.0" and "client_os" not in requests[5]
+    assert "ip_address" not in requests[5] and "cvv_result" not in requests[5]
+    assert "cvv_result" not in requests[3] and requests[3]["three_ds_result"] == "failed"
 
 
 def test_requests_keep_the_player_and_card_keys():

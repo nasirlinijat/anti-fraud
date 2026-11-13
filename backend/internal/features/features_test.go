@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"math"
+	"net/netip"
 	"os"
 	"reflect"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/lgbm"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
@@ -101,6 +103,12 @@ func TestVectorWithoutHistory(t *testing.T) {
 		"device_id_is_new_for_player":    0,
 		"device_distinct_players":        features.Missing,
 		"billing_region_is_new_for_card": 0,
+		// No verification results and no IP intelligence result.
+		"cvv_result_code":      features.Missing,
+		"avs_result_code":      features.Missing,
+		"three_ds_result_code": features.Missing,
+		"ip_is_hosting":        features.Missing,
+		"ip_is_anonymous":      features.Missing,
 	}
 	if len(got) != len(features.Names) {
 		t.Fatalf("got %d features, want %d", len(got), len(features.Names))
@@ -170,6 +178,57 @@ func TestVectorGameFeatures(t *testing.T) {
 	if got["device_id_is_new_for_player"] != 0 || got["billing_region_is_new_for_card"] != 0 || got["device_distinct_players"] != 0 {
 		t.Errorf("first purchase: %v", got)
 	}
+}
+
+func TestVectorPaymentVerificationCodes(t *testing.T) {
+	tests := []struct {
+		cvv, avs, threeDS *string
+		want              [3]float64
+	}{
+		{ptr("match"), ptr("match"), ptr("authenticated"), [3]float64{0, 0, 0}},
+		{ptr("not_checked"), ptr("partial"), ptr("attempted"), [3]float64{1, 1, 1}},
+		{ptr("mismatch"), ptr("not_checked"), ptr("not_enrolled"), [3]float64{2, 2, 2}},
+		{nil, ptr("mismatch"), ptr("failed"), [3]float64{features.Missing, 3, 3}},
+		{ptr("unknown"), nil, nil, [3]float64{features.Missing, features.Missing, features.Missing}},
+	}
+	for _, tt := range tests {
+		in := features.Input{AmountMinor: 100, CVVResult: tt.cvv, AVSResult: tt.avs, ThreeDSResult: tt.threeDS}
+		got := features.Map(features.Vector(in, features.History{}))
+		codes := [3]float64{got["cvv_result_code"], got["avs_result_code"], got["three_ds_result_code"]}
+		if codes != tt.want {
+			t.Errorf("codes for %v, %v, %v = %v, want %v", deref(tt.cvv), deref(tt.avs), deref(tt.threeDS), codes, tt.want)
+		}
+	}
+}
+
+func TestVectorIPNetworkFlags(t *testing.T) {
+	tests := []struct {
+		name                       string
+		network                    *features.IPNetwork
+		wantHosting, wantAnonymous float64
+	}{
+		{"no lookup result", nil, features.Missing, features.Missing},
+		{"ordinary address", &features.IPNetwork{}, 0, 0},
+		{"hosting", &features.IPNetwork{Hosting: true}, 1, 0},
+		{"anonymous", &features.IPNetwork{Anonymous: true}, 0, 1},
+		{"VPN in a data centre", &features.IPNetwork{Hosting: true, Anonymous: true}, 1, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := features.Map(features.Vector(features.Input{AmountMinor: 100, IPNetwork: tt.network}, features.History{}))
+			if got["ip_is_hosting"] != tt.wantHosting || got["ip_is_anonymous"] != tt.wantAnonymous {
+				t.Errorf("ip_is_hosting %v, ip_is_anonymous %v; want %v, %v",
+					got["ip_is_hosting"], got["ip_is_anonymous"], tt.wantHosting, tt.wantAnonymous)
+			}
+		})
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }
 
 func testTx(t *testing.T) pgx.Tx {
@@ -314,6 +373,13 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) models.Purchase {
 		ClientOS:             optional("id_30"),
 		ClientBrowser:        optional("id_31"),
 		ScreenResolution:     optional("id_33"),
+		CVVResult:            (*scoring.CVVResult)(optional("cvv_result")),
+		AVSResult:            (*scoring.AVSResult)(optional("avs_result")),
+		ThreeDSResult:        (*scoring.ThreeDSResult)(optional("three_ds_result")),
+	}
+	if row["ip_address"] != "" {
+		addr := netip.MustParseAddr(row["ip_address"]).Unmap()
+		p.IPAddress = &addr
 	}
 	// D1 counts the days since the client began, the IEEE stand-in for account age.
 	if row["D1"] != "" {
@@ -336,7 +402,9 @@ func purchaseFromIEEE(t *testing.T, row map[string]string) models.Purchase {
 
 // TestHistoryMatchesExpectedFeatures scores the AF-15 test rows one by one,
 // saving each after it is scored, and compares every feature with the values
-// ml/features.py computed for the same rows.
+// ml/features.py computed for the same rows. The IP addresses are classified
+// by the mock provider with its default ranges, which ml/features.py reads
+// from the same file.
 func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
@@ -359,6 +427,7 @@ func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 		}
 
 		in := p.FeatureInput()
+		in.IPNetwork = models.IPNetworkInput(lookupIP(t, p))
 		history, err := store.FeatureHistory(ctx, in)
 		if err != nil {
 			t.Fatalf("transaction %s: FeatureHistory: %v", p.TransactionID, err)
@@ -384,6 +453,20 @@ func TestHistoryMatchesExpectedFeatures(t *testing.T) {
 			t.Fatalf("transaction %s: Save: %v", p.TransactionID, err)
 		}
 	}
+}
+
+// lookupIP classifies the purchase's IP address as the service does with the
+// mock provider, or returns nil for a purchase without one.
+func lookupIP(t *testing.T, p models.Purchase) *ipintel.Result {
+	t.Helper()
+	if p.IPAddress == nil {
+		return nil
+	}
+	result, err := ipintel.NewMock(ipintel.DefaultRanges).Lookup(t.Context(), *p.IPAddress)
+	if err != nil {
+		t.Fatalf("transaction %s: Lookup: %v", p.TransactionID, err)
+	}
+	return &result
 }
 
 type countRow struct {

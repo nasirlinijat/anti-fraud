@@ -123,7 +123,7 @@ Most model variants in [History of changes](#history-of-changes) were compared o
 
 ## Game model (simulated traffic)
 
-IEEE-CIS is card data from 2017 with no game signals. On the simulator's game traffic the IEEE-CIS model flags 0.06% of purchases and catches 0.2% of the fraud, so it adds almost nothing to what the demo shows. `lgbm-game-v5` is trained on the simulator's own traffic with the 54 features in [FEATURES.md](FEATURES.md) and the same LightGBM settings. **Every number in this section is for simulated traffic. It says how well the model learns the simulator's scenarios, not how it would do on real fraud;** the real-data result is the IEEE-CIS model above.
+IEEE-CIS is card data from 2017 with no game signals. On the simulator's game traffic the IEEE-CIS model flags 0.06% of purchases and catches 0.2% of the fraud, so it adds almost nothing to what the demo shows. `lgbm-game-v5` is trained on the simulator's own traffic with the first 54 features in [FEATURES.md](FEATURES.md) and the same LightGBM settings. **Every number in this section is for simulated traffic. It says how well the model learns the simulator's scenarios, not how it would do on real fraud;** the real-data result is the IEEE-CIS model above.
 
 The traffic has normal purchases, 10 legitimate edge cases and 7 fraud scenarios, listed in the simulator section of the main `README.md`. Each player's client also leaves out each of seven groups of optional request fields with a probability of 25% (`-missing`), on every purchase of that player and whatever the scenario. The model therefore also learns from requests without an IP country, a device ID or an account creation time.
 
@@ -504,6 +504,7 @@ All history features use only transactions that happened before the current one,
 | `has_client_info`, `os_family`, `browser_family`, `screen_area` | Client details sent, OS and browser family, screen size |
 | `os_share`, `browser_share`, `screen_share` | How common the OS, browser and screen are among earlier purchases |
 | `os_is_new_for_player`, `browser_is_new_for_player`, `player_distinct_browsers` | OS and browsers the player used before |
+| `cvv_result_code`, `avs_result_code`, `three_ds_result_code`, `ip_is_hosting`, `ip_is_anonymous` | Payment verification results and the IP intelligence answer (game traffic only) |
 
 Player ID: `card1 + addr1 + (day - D1)`. Card ID: `card1` to `card6` combined. Missing values are `-1`.
 

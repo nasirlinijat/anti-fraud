@@ -3,6 +3,7 @@
 Every history feature uses only transactions that happened before the current one,
 so the same values can be computed by the live scoring service.
 """
+import ipaddress
 import json
 from pathlib import Path
 
@@ -22,7 +23,11 @@ DEVICE_COLUMNS = ["DeviceType", "DeviceInfo"]
 CLIENT_COLUMNS = ["id_30", "id_31", "id_33"]
 # Score request fields IEEE-CIS has no column for. They are missing in the
 # dataset and present in game traffic and in the test rows.
-GAME_COLUMNS = ["ip_country", "device_id"]
+GAME_COLUMNS = ["ip_country", "device_id", "ip_address", "cvv_result", "avs_result", "three_ds_result"]
+# The IP intelligence mock's default ranges, which the service embeds. The IP
+# network inputs are the mock's answer, so training reads the same file.
+IP_RANGES_PATH = Path(__file__).resolve().parent.parent / "backend" / "internal" / "ipintel" / "default_ranges.json"
+ANONYMOUS_KINDS = {"vpn", "proxy", "tor"}
 
 PRODUCT_CODES = {"W": 0, "H": 1, "C": 2, "S": 3, "R": 4}
 CARD_NETWORKS = {"visa": 0, "mastercard": 1, "american express": 2, "discover": 3}
@@ -34,6 +39,11 @@ BROWSER_FAMILIES = {
     "chrome": 0, "mobile": 1, "safari": 2, "ie": 3, "edge": 4,
     "firefox": 5, "samsung": 6, "android": 7, "opera": 8,
 }
+# The payment verification codes go from a pass (0) to a failure (the highest
+# code), with a skipped check in between.
+CVV_RESULTS = {"match": 0, "not_checked": 1, "mismatch": 2}
+AVS_RESULTS = {"match": 0, "partial": 1, "not_checked": 2, "mismatch": 3}
+THREE_DS_RESULTS = {"authenticated": 0, "attempted": 1, "not_enrolled": 2, "failed": 3}
 
 BASE_FEATURES = [
     "amount",
@@ -112,10 +122,19 @@ FEATURE_GROUPS = {
         "device_distinct_players",
         "billing_region_is_new_for_card",
     ],
+    # Payment verification results and the IP intelligence answer. IEEE-CIS
+    # has none of them, so they are missing for every IEEE-CIS purchase.
+    "signals": [
+        "cvv_result_code",
+        "avs_result_code",
+        "three_ds_result_code",
+        "ip_is_hosting",
+        "ip_is_anonymous",
+    ],
 }
 
 ALL_FEATURES = BASE_FEATURES + [name for group in FEATURE_GROUPS.values() for name in group]
-SELECTED_GROUPS = ["device", "shared", "distance", "account", "client", "codes", "game"]
+SELECTED_GROUPS = ["device", "shared", "distance", "account", "client", "codes", "game", "signals"]
 FEATURES = BASE_FEATURES + [name for group in SELECTED_GROUPS for name in FEATURE_GROUPS[group]]
 
 WARM_UP_DAYS = 30
@@ -234,8 +253,7 @@ def load_requests(path):
         "card1_key": column("card_issuer").astype(str).fillna("none"),
         "address": column("billing_region").astype(str).fillna("none"),
         "card_country_text": column("card_country"),
-        "ip_country": column("ip_country"),
-        "device_id": column("device_id"),
+        **{name: column(name) for name in GAME_COLUMNS},
     })
     for field, name in REQUEST_TEXT_COLUMNS.items():
         df[name] = column(field)
@@ -290,6 +308,46 @@ def game_features(df, player_has_history):
         "device_id_is_new_for_player": (first_device_id_use & known_device_id & player_has_history).astype(int),
         "device_distinct_players": distinct_before(df, "device_id", "player_id").where(known_device_id),
         "billing_region_is_new_for_card": (first_region_use & card_has_history).astype(int),
+    }
+
+
+def ip_ranges(path=IP_RANGES_PATH):
+    """Reads a ranges file in the format the IP intelligence mock reads:
+    (network, kind) pairs."""
+    entries = json.loads(Path(path).read_text())
+    return [(ipaddress.ip_network(entry["cidr"]), entry["kind"]) for entry in entries]
+
+
+def ip_kinds(text, ranges):
+    """The kinds of every range that contains the address, as the mock looks
+    it up: an IPv4 address written in IPv6 form is looked up as IPv4. None for
+    a missing or invalid address, which the service would not look up."""
+    if not isinstance(text, str):
+        return None
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    if address.version == 6 and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    if address.version == 6 and address.scope_id:
+        # Go's netip never places an address with an IPv6 zone in a range.
+        return set()
+    return {kind for network, kind in ranges if address in network}
+
+
+def signal_features(df, ranges):
+    """Returns the payment verification codes and the IP network flags. A
+    flag is missing when the purchase has no IP address, as when the service
+    makes no lookup or the lookup fails."""
+    kinds = df["ip_address"].map(lambda text: ip_kinds(text, ranges))
+    looked_up = kinds.notna()
+    return {
+        "cvv_result_code": df["cvv_result"].map(CVV_RESULTS),
+        "avs_result_code": df["avs_result"].map(AVS_RESULTS),
+        "three_ds_result_code": df["three_ds_result"].map(THREE_DS_RESULTS),
+        "ip_is_hosting": kinds.map(lambda found: "hosting" in found, na_action="ignore").astype(float).where(looked_up),
+        "ip_is_anonymous": kinds.map(lambda found: bool(found & ANONYMOUS_KINDS), na_action="ignore").astype(float).where(looked_up),
     }
 
 
@@ -393,6 +451,8 @@ def build(df):
             out["player_distinct_browsers"] = first_known.groupby(df["player_id"], sort=False).cumsum() - first_known
 
     for name, values in game_features(df, out["player_txn_count"] > 0).items():
+        out[name] = values
+    for name, values in signal_features(df, ip_ranges()).items():
         out[name] = values
 
     out = out[ALL_FEATURES].astype(float).fillna(MISSING)

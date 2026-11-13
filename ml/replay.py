@@ -80,10 +80,14 @@ def requests_from(df):
             "device_name": code(row.DeviceInfo),
             "device_id": code(row.device_id),
             "ip_country": code(row.ip_country),
+            "ip_address": code(row.ip_address),
             "client_os": code(row.id_30),
             "client_browser": code(row.id_31),
             "screen_resolution": code(row.id_33),
             "account_created_at": created,
+            "cvv_result": code(row.cvv_result),
+            "avs_result": code(row.avs_result),
+            "three_ds_result": code(row.three_ds_result),
         }
         requests.append({name: value for name, value in request.items() if value is not None})
     return requests

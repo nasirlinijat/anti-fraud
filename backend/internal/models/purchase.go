@@ -38,11 +38,9 @@ type Purchase struct {
 	ClientOS             *string
 	ClientBrowser        *string
 	ScreenResolution     *string
-	// The gateway verification results are rule inputs only, never model
-	// inputs, so FeatureInput leaves them out.
-	CVVResult     *scoring.CVVResult
-	AVSResult     *scoring.AVSResult
-	ThreeDSResult *scoring.ThreeDSResult
+	CVVResult            *scoring.CVVResult
+	AVSResult            *scoring.AVSResult
+	ThreeDSResult        *scoring.ThreeDSResult
 }
 
 // Decision is the scoring result saved with a purchase.
@@ -69,14 +67,16 @@ type Decision struct {
 	FeatureHistory features.History
 	// IPIntel is the IP intelligence lookup the rules saw. It is nil when no
 	// lookup was made: the provider is off or the purchase had no IP address.
-	// It is evidence and a rule input only, never a model input.
+	// It is evidence and a rule input; the model sees only the kind of
+	// network, never the address.
 	IPIntel *ipintel.Result
 }
 
 // ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.
 var ErrDuplicateTransaction = errors.New("transaction ID is already saved")
 
-// FeatureInput returns the request fields the model features use.
+// FeatureInput returns the request fields the model features use. The IP
+// network comes from the IP intelligence lookup instead, see IPNetworkInput.
 func (p Purchase) FeatureInput() features.Input {
 	return features.Input{
 		TransactionID:        p.TransactionID,
@@ -103,7 +103,20 @@ func (p Purchase) FeatureInput() features.Input {
 		ClientOS:             p.ClientOS,
 		ClientBrowser:        p.ClientBrowser,
 		ScreenResolution:     p.ScreenResolution,
+		CVVResult:            (*string)(p.CVVResult),
+		AVSResult:            (*string)(p.AVSResult),
+		ThreeDSResult:        (*string)(p.ThreeDSResult),
 	}
+}
+
+// IPNetworkInput returns the model input for an IP intelligence lookup. A
+// missing or unavailable lookup gives nil, the same as a request without an
+// IP address.
+func IPNetworkInput(r *ipintel.Result) *features.IPNetwork {
+	if r == nil || !r.Available {
+		return nil
+	}
+	return &features.IPNetwork{Hosting: r.Hosting, Anonymous: r.VPN || r.Proxy || r.Tor}
 }
 
 // Verification returns the gateway verification results the rules check. A

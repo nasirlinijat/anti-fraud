@@ -177,6 +177,7 @@ func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipinte
 	// Model inputs are computed for every purchase, blocked ones too, so that
 	// all saved purchases can be exported for training.
 	in := p.FeatureInput()
+	in.IPNetwork = models.IPNetworkInput(ipIntel)
 	history, err := s.purchases.FeatureHistory(ctx, in)
 	if err != nil {
 		return models.Decision{}, err
