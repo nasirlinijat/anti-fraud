@@ -342,21 +342,49 @@ export function releaseClaim(purchaseId: string): Promise<Saved<null>> {
   return save(() => request(`/reviews/${encodeURIComponent(purchaseId)}/claim`, { method: 'DELETE', read: async () => null }))
 }
 
+// The purchase values a rejection adds to the blocklist.
+export interface ReviewBlocks {
+  device: boolean
+  card: boolean
+  player: boolean
+}
+
+export const noReviewBlocks: ReviewBlocks = { device: false, card: false, player: false }
+
+interface DecisionSaved {
+  device_blocked?: boolean
+  card_blocked?: boolean
+  player_blocked?: boolean
+}
+
+// Returns the blocklist entries the rejection added, which leaves out values
+// that were already blocked.
 export async function submitReviewDecision(purchaseId: string, decision: Decision,
-  blockDevice: boolean, signal: AbortSignal): Promise<boolean> {
+  blocks: ReviewBlocks, signal: AbortSignal): Promise<ReviewBlocks> {
   try {
-    const result = await request<{ device_blocked?: boolean } | null>(`/reviews/${encodeURIComponent(purchaseId)}/decision`, {
+    const result = await request<DecisionSaved | null>(`/reviews/${encodeURIComponent(purchaseId)}/decision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(decision === 'reject' && blockDevice ? { decision, block_device: true } : { decision }),
+      body: JSON.stringify(decisionBody(decision, blocks)),
       expectedStatus: 201,
       signal,
     })
-    return result?.device_blocked === true
+    return { device: result?.device_blocked === true, card: result?.card_blocked === true, player: result?.player_blocked === true }
   } catch (error) {
     // A 201 confirms the save even if the optional feedback could not be read.
-    if (error instanceof ApiError && error.status === 201) return false
+    if (error instanceof ApiError && error.status === 201) return noReviewBlocks
     throw error
+  }
+}
+
+// The API accepts block fields only with a rejection, so only the chosen ones are sent.
+function decisionBody(decision: Decision, blocks: ReviewBlocks) {
+  if (decision === 'approve') return { decision }
+  return {
+    decision,
+    ...(blocks.device && { block_device: true }),
+    ...(blocks.card && { block_card: true }),
+    ...(blocks.player && { block_player: true }),
   }
 }
 

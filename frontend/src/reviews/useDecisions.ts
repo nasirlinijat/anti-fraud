@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { claimReview, submitReviewDecision, type Decision, type Review } from '../api'
+import { claimReview, noReviewBlocks, submitReviewDecision, type Decision, type Review, type ReviewBlocks } from '../api'
 import { ApiError } from '../request'
+import { decisionFeedback } from './decisionFeedback'
 
 export type ReviewAction = { item: Review; decision: Decision }
 export type Feedback = { text: string; failed?: boolean }
@@ -15,12 +16,12 @@ interface DecisionOptions {
 // reports that result as feedback.
 export function useDecisions({ refresh, onFeedback, onDecided }: DecisionOptions) {
   const [confirmation, setConfirmation] = useState<ReviewAction | null>(null)
-  const [blockDevice, setBlockDevice] = useState(false)
+  const [blocks, setBlocks] = useState<ReviewBlocks>(noReviewBlocks)
   const requests = useReviewRequests()
 
   function choose(item: Review, decision: Decision) {
     if (requests.has(item.purchase_id)) return
-    setBlockDevice(false)
+    setBlocks(noReviewBlocks)
     setConfirmation({ item, decision })
   }
 
@@ -33,10 +34,10 @@ export function useDecisions({ refresh, onFeedback, onDecided }: DecisionOptions
     const isCurrent = () => requests.isCurrent(id, controller)
     let unconfirmed = false
     try {
-      const deviceBlocked = await submitReviewDecision(id, decision, blockDevice, controller.signal)
+      const blocked = await submitReviewDecision(id, decision, blocks, controller.signal)
       if (!isCurrent()) return
       onDecided(id)
-      onFeedback({ text: `${decision === 'approve' ? 'Approved' : 'Rejected'} ${item.transaction_id}${deviceBlocked ? ' and blocked its device' : ''}.` })
+      onFeedback({ text: decisionFeedback(item.transaction_id, decision, blocked) })
     } catch (error) {
       if (!isCurrent()) return
       const failure = describeDecisionFailure(error, item.transaction_id)
@@ -52,7 +53,7 @@ export function useDecisions({ refresh, onFeedback, onDecided }: DecisionOptions
   }
 
   const dismiss = () => setConfirmation(null)
-  return { requests, confirmation, blockDevice, setBlockDevice, choose, save, dismiss }
+  return { requests, confirmation, blocks, setBlocks, choose, save, dismiss }
 }
 
 // Claims a purchase for the signed-in account. The queue read that follows

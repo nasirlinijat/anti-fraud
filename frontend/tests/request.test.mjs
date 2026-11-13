@@ -125,17 +125,49 @@ test('ruleset limits round trip as exact JSON integers', async ({ mock }) => {
   assert.match(fetch.mock.calls[1].arguments[1].body, /"limit":9223372036854775807[},]/)
 })
 
+const noBlocks = { device: false, card: false, player: false }
+const allBlocks = { device: true, card: true, player: true }
+
 test('a review save remains confirmed on 201 and preserves conflict status on 409', async ({ mock }) => {
   const fetch = mock.method(globalThis, 'fetch', async (path) => path.includes('/saved/')
     ? new Response(null, { status: 201 })
     : Response.json({ error: 'purchase has already been decided' }, { status: 409 }))
   const { signal } = new AbortController()
-  assert.equal(await submitReviewDecision('saved', 'reject', true, signal), false)
+  assert.deepEqual(await submitReviewDecision('saved', 'reject', { ...noBlocks, device: true }, signal), noBlocks)
   assert.deepEqual(JSON.parse(fetch.mock.calls[0].arguments[1].body), { decision: 'reject', block_device: true })
-  await assert.rejects(submitReviewDecision('conflict', 'approve', false, signal), {
+  await assert.rejects(submitReviewDecision('conflict', 'approve', noBlocks, signal), {
     status: 409, message: 'purchase has already been decided',
   })
   assert.equal(fetch.mock.callCount(), 2)
+})
+
+test('a review decision sends only the chosen block fields, and none with an approval', async ({ mock }) => {
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({}, { status: 201 }))
+  const { signal } = new AbortController()
+  await submitReviewDecision('1', 'approve', allBlocks, signal)
+  await submitReviewDecision('1', 'reject', noBlocks, signal)
+  await submitReviewDecision('1', 'reject', { device: false, card: true, player: true }, signal)
+  await submitReviewDecision('1', 'reject', allBlocks, signal)
+  const bodies = fetch.mock.calls.map(call => JSON.parse(call.arguments[1].body))
+  assert.deepEqual(bodies, [
+    { decision: 'approve' },
+    { decision: 'reject' },
+    { decision: 'reject', block_card: true, block_player: true },
+    { decision: 'reject', block_device: true, block_card: true, block_player: true },
+  ])
+})
+
+test('a review decision returns the blocklist entries the response reports as added', async ({ mock }) => {
+  mock.method(globalThis, 'fetch', async () => Response.json(
+    { device_blocked: false, card_blocked: true, player_blocked: true }, { status: 201 }))
+  const { signal } = new AbortController()
+  assert.deepEqual(await submitReviewDecision('1', 'reject', allBlocks, signal), { device: false, card: true, player: true })
+})
+
+test('an unreadable 201 confirms the review decision with no blocklist entries reported', async ({ mock }) => {
+  mock.method(globalThis, 'fetch', async () => new Response('{', { status: 201 }))
+  const { signal } = new AbortController()
+  assert.deepEqual(await submitReviewDecision('1', 'reject', allBlocks, signal), noBlocks)
 })
 
 test('the review network is read with the session and a 401 reports the rejected session', async (t) => {

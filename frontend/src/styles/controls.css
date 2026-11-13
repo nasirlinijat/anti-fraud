@@ -359,6 +359,21 @@ input[type='checkbox'] {
 .dialog-body { color: var(--muted); }
 .dialog-body .check { color: var(--text); }
 
+.review-blocks {
+  display: grid;
+  margin: var(--space-md) 0 var(--space-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+}
+
+.review-blocks legend {
+  margin-block-end: var(--space-sm);
+  font-family: var(--font-body);
+  font-size: var(--type-label);
+}
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
