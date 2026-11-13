@@ -53,3 +53,35 @@ func TestWriteServerError(t *testing.T) {
 		})
 	}
 }
+
+func TestLogServerErrorOnlyLogs(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(NewLogger(&logs))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	tests := []struct {
+		name  string
+		err   error
+		level string
+		msg   string
+	}{
+		{"unreachable database", fmt.Errorf("claim review: %w", unreachableDatabaseError(t)), "WARN", "claim review: database unavailable"},
+		{"any other error", errors.New("claim review: bad row"), "ERROR", "claim review"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs.Reset()
+
+			LogServerError(context.Background(), "claim review", tt.err, "purchase_id", 7)
+
+			var line map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &line); err != nil {
+				t.Fatalf("log %q: %v", logs.String(), err)
+			}
+			if line["level"] != tt.level || line["msg"] != tt.msg || line["purchase_id"] != float64(7) || line["error"] == nil {
+				t.Fatalf("log line %v, want %s %q with purchase_id and error", line, tt.level, tt.msg)
+			}
+		})
+	}
+}

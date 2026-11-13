@@ -353,9 +353,103 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   list-style: none;
 }
 
-.network-legend li { display: inline-flex; align-items: center; gap: var(--space-xs); }
+.network-figure .network-legend { align-items: flex-start; }
+
+/* A chosen status keeps its symbol and gains a border and weight, so the
+   filter never depends on color alone. */
+.network-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-block-size: 36px;
+  padding: 0 var(--space-sm) 0 var(--space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.network-legend-item:hover { background: var(--surface-hover); }
+.network-legend-item[aria-pressed='true'] { border-color: var(--text); background: var(--surface-subtle); font-weight: 600; }
+.network-show-all { align-self: center; padding-inline: var(--space-xs); }
+
+/* Each linked value is a button. Its focus ring is drawn around the mark,
+   because an outline around the rotated label would cover its neighbours. */
+.network-node { cursor: pointer; }
+.network-node:focus-visible { outline: none; }
+.network-node .network-edge { pointer-events: none; }
+.network-focus-ring { fill: none; stroke: none; }
+.network-node:focus-visible .network-focus-ring { stroke: var(--focus); stroke-width: 2; }
+.network-selected-ring { fill: none; stroke: var(--text); stroke-width: 3; }
+
+.network-node:is(:hover, :focus-visible) .network-edge,
+.network-node-selected .network-edge { stroke: var(--text); stroke-width: 2.5; }
+
+.network-node:is(:hover, :focus-visible) .network-label,
+.network-node-selected .network-label { font-weight: 700; }
+
+.network-node-dimmed :is(.network-mark, .network-edge) { opacity: 0.35; }
+.network-node-dimmed .network-label { opacity: 0.6; }
+.network-node-dimmed:is(:hover, :focus-visible) :is(.network-mark, .network-edge, .network-label) { opacity: 1; }
+
+.network-selection {
+  display: grid;
+  gap: var(--space-md);
+  margin-block-start: 20px;
+  padding-block-start: var(--space-md);
+  border-block-start: 1px solid var(--border);
+}
+
+.network-selection-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.network-selection-head > div:first-child { flex: 1 1 18rem; min-inline-size: 0; }
+.network-selection h4 { margin: 0; font-size: var(--type-body); overflow-wrap: anywhere; }
+.network-selection h4:focus { outline: none; }
+.network-selection-head p { margin: var(--space-xs) 0 0; }
+.network-selection-head .button-row { align-items: center; }
+.network-selection > p { margin: 0; }
+
 .network-details .table-scroll { margin-block-start: var(--space-sm); }
+.linked-reviews { display: grid; gap: var(--space-md); }
+.linked-reviews > h3,
+.linked-reviews > p { margin: 0; }
+
+.linked-review-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.linked-review-table .cell-select { inline-size: 1%; }
+.linked-review-table .cell-select input { display: block; }
+
+/* A selected row keeps its checked box and gains an edge mark, so selection never depends on color alone. */
+.linked-review-table tr.is-selected { background: var(--surface-subtle); }
+.linked-review-table tr.is-selected > :first-child { box-shadow: inset 4px 0 var(--text); }
+
+@media (max-width: 47.999rem) {
+  .linked-review-table .cell-select:empty { display: none; }
+  .linked-review-table .cell-select { inline-size: auto; padding-block-end: var(--space-sm); }
+  .linked-review-table tr.is-selected > :first-child { box-shadow: none; }
+  .linked-review-table tr.is-selected { box-shadow: inset 4px 0 var(--text); }
+}
+
+@media (forced-colors: active) {
+  .linked-review-table tr.is-selected > :first-child,
+  .linked-review-table tr.is-selected { box-shadow: none; outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
 .network-anchor-row > th { background: var(--surface-subtle); overflow-wrap: anywhere; }
+.network-anchor-row:focus { outline: none; }
+.network-anchor-row:focus > th { box-shadow: inset 0 0 0 2px var(--focus); }
 .network-badge { border-color: transparent; background: var(--allow-bg); }
 .network-badge.network-status-in-review { background: var(--review-bg); }
 .network-badge:is(.network-status-blocklisted, .network-status-rejected, .network-status-blocked) { background: var(--block-bg); }
@@ -364,8 +458,12 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   .network-badge { border: 1px solid CanvasText; }
   :is(.network-diagram, .network-legend) :is(circle, rect) { fill: Canvas !important; stroke: CanvasText !important; }
   :is(.network-diagram, .network-legend) :is(circle, rect).network-outer-ring { fill: none !important; }
+  .network-diagram circle:is(.network-focus-ring, .network-selected-ring) { fill: none !important; }
+  .network-diagram circle.network-focus-ring { stroke: none !important; }
+  .network-diagram .network-node:focus-visible circle.network-focus-ring { stroke: Highlight !important; }
   .network-diagram line { stroke: CanvasText; }
   :is(.network-diagram, .network-legend) text { fill: CanvasText; }
+  .network-legend-item[aria-pressed='true'] { border-color: Highlight; }
 }
 
 .reviewer-list {

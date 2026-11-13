@@ -35,7 +35,8 @@ func NewReviewStore(conn Conn) *ReviewStore {
 	return &ReviewStore{conn: conn}
 }
 
-// UseBlocklistCache registers a cache to refresh when a review decision blocklists a device.
+// UseBlocklistCache registers a cache to refresh when a review decision
+// blocklists a device, card or player.
 func (s *ReviewStore) UseBlocklistCache(r BlocklistRefresher) *ReviewStore {
 	s.refresher = r
 	return s
@@ -79,54 +80,128 @@ SELECT CASE
 END::text AS status,
 (SELECT resolved_at FROM saved)::timestamptz AS resolved_at`
 
-const getPurchaseDeviceID = `SELECT device_id FROM purchases WHERE id = $1`
+const getPurchaseBlockValues = `SELECT device_id, card_token, player_id FROM purchases WHERE id = $1`
 
-// Resolve saves the decision. When the decision is a saved rejection and
-// BlockDevice is set, it also blocklists the purchase's device in the same
-// transaction. Any other outcome adds no blocklist entry, and a device that is
-// already blocked is left as it is.
+// Resolve saves the decision. When the decision is a saved rejection, it also
+// blocklists the purchase's device, card and player that d.Blocks asks for, in
+// the same transaction. Any other outcome adds no blocklist entry, and a value
+// that is already blocked is left as it is.
 func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
-	purchaseID, decision, analystID := d.PurchaseID, d.Decision, d.AnalystID
 	tx, err := s.conn.Begin(ctx)
 	if err != nil {
 		return models.Resolution{}, fmt.Errorf("begin review decision: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
+	result, err := saveResolution(ctx, tx, d)
+	if err != nil {
+		return models.Resolution{}, err
+	}
+	var added []models.BlocklistEntry
+	if result.Status == models.ResolutionSaved && d.Decision == "reject" && d.Blocks.Any() {
+		if added, err = blockPurchaseValues(ctx, tx, d); err != nil {
+			return models.Resolution{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Resolution{}, fmt.Errorf("commit review decision: %w", err)
+	}
+	result.Blocked = blockedValues(added)
+	s.refreshBlocklist(ctx, added)
+	return result, nil
+}
+
+func saveResolution(ctx context.Context, tx pgx.Tx, d models.ReviewDecision) (models.Resolution, error) {
 	var result models.Resolution
 	var resolvedAt *time.Time
-	if err := tx.QueryRow(ctx, resolveReview, purchaseID, decision, analystID, d.ClaimedBy).Scan(&result.Status, &resolvedAt); err != nil {
+	err := tx.QueryRow(ctx, resolveReview, d.PurchaseID, d.Decision, d.AnalystID, d.ClaimedBy).Scan(&result.Status, &resolvedAt)
+	if err != nil {
 		return models.Resolution{}, fmt.Errorf("resolve review: %w", err)
 	}
 	if resolvedAt != nil {
 		result.ResolvedAt = *resolvedAt
 	}
-
-	var blockedDevice *string
-	if result.Status == models.ResolutionSaved && decision == "reject" && d.BlockDevice {
-		if err := tx.QueryRow(ctx, getPurchaseDeviceID, purchaseID).Scan(&blockedDevice); err != nil {
-			return models.Resolution{}, fmt.Errorf("get device of purchase %d: %w", purchaseID, err)
-		}
-		if blockedDevice != nil {
-			_, added, err := NewBlocklistStore(tx).AddIfAbsent(ctx, models.BlocklistEntry{
-				Type:   models.BlocklistDevice,
-				Value:  *blockedDevice,
-				Reason: fmt.Sprintf("Blocked when %s rejected purchase %d", analystID, purchaseID),
-			}, analystID)
-			if err != nil {
-				return models.Resolution{}, err
-			}
-			result.DeviceBlocked = added
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return models.Resolution{}, fmt.Errorf("commit review decision: %w", err)
-	}
-	if result.DeviceBlocked && s.refresher != nil && blockedDevice != nil {
-		s.refresher.Refresh(ctx, models.BlocklistDevice, *blockedDevice)
-	}
 	return result, nil
+}
+
+// blockPurchaseValues adds the requested values of the purchase to the
+// blocklist and returns the entries it added.
+func blockPurchaseValues(ctx context.Context, tx pgx.Tx, d models.ReviewDecision) ([]models.BlocklistEntry, error) {
+	values, err := purchaseBlockValues(ctx, tx, d.PurchaseID)
+	if err != nil {
+		return nil, err
+	}
+	blocklist := NewBlocklistStore(tx)
+	var added []models.BlocklistEntry
+	for _, entry := range requestedEntries(d, values) {
+		_, isNew, err := blocklist.AddIfAbsent(ctx, entry, d.AnalystID)
+		if err != nil {
+			return nil, err
+		}
+		if isNew {
+			added = append(added, entry)
+		}
+	}
+	return added, nil
+}
+
+// blockValues are the values of a purchase that a rejection can blocklist.
+type blockValues struct {
+	// DeviceID is nil when the purchase carried no device ID.
+	DeviceID  *string
+	CardToken string
+	PlayerID  string
+}
+
+func purchaseBlockValues(ctx context.Context, tx pgx.Tx, purchaseID int64) (blockValues, error) {
+	var v blockValues
+	if err := tx.QueryRow(ctx, getPurchaseBlockValues, purchaseID).Scan(&v.DeviceID, &v.CardToken, &v.PlayerID); err != nil {
+		return blockValues{}, fmt.Errorf("get blocklist values of purchase %d: %w", purchaseID, err)
+	}
+	return v, nil
+}
+
+// requestedEntries lists the entries the decision asks for. A purchase
+// without a device has no device entry.
+func requestedEntries(d models.ReviewDecision, v blockValues) []models.BlocklistEntry {
+	reason := fmt.Sprintf("Blocked when %s rejected purchase %d", d.AnalystID, d.PurchaseID)
+	var entries []models.BlocklistEntry
+	if d.Blocks.Device && v.DeviceID != nil {
+		entries = append(entries, models.BlocklistEntry{Type: models.BlocklistDevice, Value: *v.DeviceID, Reason: reason})
+	}
+	if d.Blocks.Card {
+		entries = append(entries, models.BlocklistEntry{Type: models.BlocklistCard, Value: v.CardToken, Reason: reason})
+	}
+	if d.Blocks.Player {
+		entries = append(entries, models.BlocklistEntry{Type: models.BlocklistPlayer, Value: v.PlayerID, Reason: reason})
+	}
+	return entries
+}
+
+func blockedValues(added []models.BlocklistEntry) models.ReviewBlocks {
+	var blocked models.ReviewBlocks
+	for _, entry := range added {
+		switch entry.Type {
+		case models.BlocklistDevice:
+			blocked.Device = true
+		case models.BlocklistCard:
+			blocked.Card = true
+		case models.BlocklistPlayer:
+			blocked.Player = true
+		}
+	}
+	return blocked
+}
+
+// refreshBlocklist runs only after the commit, so that the cache never holds
+// an entry that was rolled back.
+func (s *ReviewStore) refreshBlocklist(ctx context.Context, added []models.BlocklistEntry) {
+	if s.refresher == nil {
+		return
+	}
+	for _, entry := range added {
+		s.refresher.Refresh(ctx, entry.Type, entry.Value)
+	}
 }
 
 // queueItemColumns are the columns scanQueueItem reads, in order. They need

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -132,6 +133,61 @@ func TestTwoAnalystsDecidingOneReviewSaveOneDecision(t *testing.T) {
 		}
 		if got := count(t, `SELECT count(*) FROM review_resolutions WHERE purchase_id = $1`, purchaseID); got != 1 {
 			t.Fatalf("%s: %d decisions saved, want 1", transactionID, got)
+		}
+	}
+}
+
+type batchDecisionResponse struct {
+	Results []struct {
+		PurchaseID string `json:"purchase_id"`
+		Status     string `json:"status"`
+	} `json:"results"`
+}
+
+func TestTwoAnalystsDecidingOverlappingBatchesSaveOneDecisionEach(t *testing.T) {
+	const purchases = 10
+	if r, err := send(http.MethodPost, "/rulesets", operatorKey, highAmountRule); err != nil || r.status != http.StatusCreated {
+		t.Fatalf("publish: %v %+v", err, r)
+	}
+	ids := make([]string, purchases)
+	for p := range purchases {
+		transactionID := unique(fmt.Sprintf("race-batch-%d", p))
+		r, err := send(http.MethodPost, "/score", serviceKey, purchase(transactionID, 20000))
+		if err != nil || r.status != http.StatusOK || decode[decision](t, r).Outcome != "review" {
+			t.Fatalf("score %s: %v %+v", transactionID, err, r)
+		}
+		ids[p] = fmt.Sprint(count(t, `SELECT id FROM purchases WHERE transaction_id = $1`, transactionID))
+	}
+	// The first analyst decides purchases 0 to 7 and the second 2 to 9, so
+	// purchases 2 to 7 are decided by both at the same moment.
+	batches := [][]string{ids[:8], ids[2:]}
+
+	responses := sendAll(t, 2, func(i int) (string, string, string, string) {
+		body := fmt.Sprintf(`{"decision":"approve","purchase_ids":["%s"]}`, strings.Join(batches[i], `","`))
+		return http.MethodPost, "/reviews/decisions", []string{firstAnalyst, secondAnalyst}[i], body
+	})
+
+	statuses := map[string][]string{}
+	for i, r := range responses {
+		if r.status != http.StatusOK {
+			t.Fatalf("analyst %d: status %d, body %s", i+1, r.status, r.body)
+		}
+		for _, result := range decode[batchDecisionResponse](t, r).Results {
+			statuses[result.PurchaseID] = append(statuses[result.PurchaseID], result.Status)
+		}
+	}
+	for p, id := range ids {
+		got := statuses[id]
+		slices.Sort(got)
+		want := []string{"already_decided", "saved"}
+		if p < 2 || p > 7 {
+			want = []string{"saved"}
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("purchase %d: statuses %v, want %v", p, got, want)
+		}
+		if saved := count(t, `SELECT count(*) FROM review_resolutions WHERE purchase_id = $1::bigint`, id); saved != 1 {
+			t.Errorf("purchase %d: %d decisions saved, want 1", p, saved)
 		}
 	}
 }

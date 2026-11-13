@@ -28,7 +28,7 @@ go test -tags=integration ./test/integration/...
 
 To use an existing, migrated database instead, set `TEST_DATABASE_URL`, and `TEST_RUNTIME_DATABASE_URL` for the role checks.
 
-The concurrency tests in `backend/test/concurrency` send requests at the same moment to a real HTTP server and check that the database stays correct: 20 scores of one transaction save one decision, 10 ruleset publishes leave one active version with consecutive numbers, and two analysts deciding one review save one decision. They always start their own PostgreSQL, because they commit data and change the active ruleset. CI runs them with the race detector:
+The concurrency tests in `backend/test/concurrency` send requests at the same moment to a real HTTP server and check that the database stays correct: 20 scores of one transaction save one decision, 10 ruleset publishes leave one active version with consecutive numbers, two analysts deciding one review save one decision, and two analysts sending batch decisions over overlapping purchases save one decision per purchase, with one `saved` and one `already_decided` result for each shared purchase. They always start their own PostgreSQL, because they commit data and change the active ruleset. CI runs them with the race detector:
 
 ```bash
 cd backend
