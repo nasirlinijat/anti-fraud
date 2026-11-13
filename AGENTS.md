@@ -62,7 +62,7 @@ The backend, frontend, and ML code live in one repository. The system is a **mod
 ```
 backend/
 ├── cmd/
-│   ├── api/main.go     Wiring only: stores → services → handlers
+│   ├── api/            main.go starts the server; routes.go wires stores → services → handlers
 │   ├── export-inputs/  Training export: saved model inputs and chargeback labels
 │   └── mock-bank/      Mock card networks: sends chargebacks for a simulator run
 └── internal/
@@ -92,7 +92,7 @@ backend/
     └── platform/       Config, database pool, error helper
 ```
 
-Each feature registers its own routes, so `main.go` contains only wiring.
+Each feature registers its own routes, so `routes.go` contains only wiring and `main.go` only starts and stops the server.
 
 Dependencies point one way: `transport` → `services` → `storage`. A handler only does HTTP and calls a service through a small interface; a service holds the business rules and depends only on small interfaces it defines (for example `Rulesets`, `Blocklist`, `Purchases` and `Model` in `services/score`), which the stores implement; a store only runs SQL. Services never import `transport`, and stores never import `services`. Steps that must be atomic, such as publishing a ruleset or rejecting a review and blocklisting its device, stay in one store transaction. Fraud labels stay in `labels`, outside `storage`, so the scoring path cannot reach them; `labels.SimulationStore` adds them to simulation runs when the evaluation database is configured. Chargebacks are labels too: only the webhook store (`storage/chargeback_store.go`), the training export and the mock bank handle them, and `services/chargeback/boundary_test.go` fails when any other backend code mentions them.
 
@@ -123,7 +123,7 @@ anti-fraud/
 ├── backend/
 │   ├── Dockerfile            Multi-stage backend image build
 │   ├── go.mod                Module github.com/nasirlinijat/anti-fraud/backend
-│   ├── cmd/api/main.go       HTTP server entry point
+│   ├── cmd/api/              HTTP server entry point (main.go) and wiring (routes.go)
 │   ├── migrations/           Versioned SQL migrations
 │   └── internal/             Feature packages (see section 3.2)
 ├── frontend/                 React app built with Vite

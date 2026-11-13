@@ -70,7 +70,7 @@ go generate ./internal/...
 
 Tests that read or write the database are skipped unless `TEST_DATABASE_URL` is set; `make test` sets it and runs them all.
 
-The integration tests in `backend/test/integration` run the API the way `cmd/api/main.go` wires it, against a real PostgreSQL, as the restricted `antifraud_api` role. They start their own PostgreSQL 18 in Docker with [Testcontainers](https://golang.testcontainers.org/), apply every migration and `runtime-role.sql`, so they need only Docker running:
+The integration tests in `backend/test/integration` run the API the way `cmd/api/routes.go` wires it, against a real PostgreSQL, as the restricted `antifraud_api` role. They start their own PostgreSQL 18 in Docker with [Testcontainers](https://golang.testcontainers.org/), apply every migration and `runtime-role.sql`, so they need only Docker running:
 
 ```bash
 cd backend
