@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/stats"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/trainingdata"
@@ -51,7 +52,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"DeviceIDHistory", features.DeviceIDHistorySQL, []any{"device-1", at, "txn-1"}},
 		{"IssuerHistory", features.IssuerHistorySQL, []any{"1001", at, "txn-1"}},
 		{"FeatureCounts", features.FeatureCountsSQL, []any{"gmail.com", device, client, client, client}},
-		{"DecisionOverview", storage.DecisionOverviewSQL, []any{at, until}},
+		{"DecisionOverview", storage.DecisionOverviewSQL, []any{at, until, string(scoring.RuleBlocklist)}},
 		{"BlockedValue", storage.BlockedValueSQL, []any{at, until}},
 		{"CountDecisionBuckets", storage.CountDecisionBucketsSQL, []any{width, at, until}},
 		{"TopFiredRules", storage.TopFiredRulesSQL, []any{at, until, int32(10)}},

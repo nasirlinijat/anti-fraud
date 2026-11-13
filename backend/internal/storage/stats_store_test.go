@@ -50,6 +50,7 @@ func TestSummary(t *testing.T) {
 	newAccount := scoring.FiredRule{Name: scoring.RuleNewAccount, Points: 20}
 	mismatch := scoring.FiredRule{Name: scoring.RuleCountryMismatch, Points: 25}
 	velocity := scoring.FiredRule{Name: scoring.RuleCardVelocity, Points: 40}
+	blocklisted := scoring.BlocklistMatch("card")
 
 	// The default ruleset reviews at 50 and blocks at 80.
 	saveStatsDecision(t, tx, "a", scoring.OutcomeAllow, 0, nil, ptr(0.01), time.Minute)
@@ -58,7 +59,9 @@ func TestSummary(t *testing.T) {
 	saveStatsDecision(t, tx, "d", scoring.OutcomeReview, 0, nil, ptr(0.9), time.Minute)                                           // flagged by the model
 	saveStatsDecision(t, tx, "e", scoring.OutcomeAllow, 55, []scoring.FiredRule{high, mismatch}, ptr(0.001), time.Minute)         // cleared by the model
 	saveStatsDecision(t, tx, "f", scoring.OutcomeBlock, 95, []scoring.FiredRule{velocity, high, mismatch}, ptr(0.5), time.Minute) // blocked by the rules
+	saveStatsDecision(t, tx, "g", scoring.OutcomeBlock, 0, []scoring.FiredRule{blocklisted}, ptr(0.4), time.Minute)               // blocked by the blocklist, still model scored
 	saveStatsDecision(t, tx, "old", scoring.OutcomeReview, 50, []scoring.FiredRule{high, newAccount}, nil, 3*time.Hour)
+	saveStatsDecision(t, tx, "old-blocklist", scoring.OutcomeBlock, 0, []scoring.FiredRule{blocklisted}, nil, 3*time.Hour)
 
 	window := models.StatsWindow{Since: statsNow.Add(-time.Hour), Until: statsNow, BucketWidth: 5 * time.Minute}
 	got, err := readSummary(ctx, tx, window, 10)
@@ -66,23 +69,25 @@ func TestSummary(t *testing.T) {
 		t.Fatalf("Summary: %v", err)
 	}
 	want := models.StatsSummary{
-		Outcomes: models.OutcomeCounts{Allow: 3, Review: 2, Block: 1, Total: 6},
+		Outcomes:        models.OutcomeCounts{Allow: 3, Review: 2, Block: 2, Total: 7},
+		BlocklistBlocks: 1,
 		TopRules: []models.RuleCount{
 			{Name: "high_amount", Fired: 4, Points: 120},
 			{Name: "country_mismatch", Fired: 2, Points: 50},
+			{Name: "blocklist", Fired: 1, Points: 0},
 			{Name: "card_velocity", Fired: 1, Points: 40},
 			{Name: "new_account", Fired: 1, Points: 20},
 		},
 		ReviewQueue:         3,
-		Model:               models.ModelEffects{Scored: 6, Flagged: 1, Cleared: 1},
+		Model:               models.ModelEffects{Scored: 7, Flagged: 1, Cleared: 1},
 		P95ScoringLatencyUs: ptr(int64(0)),
-		BlockedValueMinor:   "1000",
+		BlockedValueMinor:   "2000",
 		DecisionSeries:      models.DecisionSeries{BucketSeconds: 300, Buckets: make([]models.DecisionBucket, 12)},
 	}
 	for i := range want.DecisionSeries.Buckets {
 		want.DecisionSeries.Buckets[i].Start = window.Since.Add(time.Duration(i) * window.BucketWidth)
 	}
-	want.DecisionSeries.Buckets[11] = models.DecisionBucket{Start: statsNow.Add(-5 * time.Minute), Allow: 3, Review: 2, Block: 1}
+	want.DecisionSeries.Buckets[11] = models.DecisionBucket{Start: statsNow.Add(-5 * time.Minute), Allow: 3, Review: 2, Block: 2}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("last hour summary =\n%+v\nwant\n%+v", got, want)
 	}
@@ -91,8 +96,11 @@ func TestSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
-	if all.Outcomes.Total != 7 || all.Outcomes.Review != 3 || all.Model.Scored != 6 {
-		t.Errorf("all time outcomes %+v, model %+v; want 7 decisions, 3 reviews, 6 scored", all.Outcomes, all.Model)
+	if all.Outcomes.Total != 9 || all.Outcomes.Review != 3 || all.Model.Scored != 7 {
+		t.Errorf("all time outcomes %+v, model %+v; want 9 decisions, 3 reviews, 7 scored", all.Outcomes, all.Model)
+	}
+	if all.Outcomes.Block != 3 || all.BlocklistBlocks != 2 {
+		t.Errorf("all time blocks %d, blocklist blocks %d; want 3 and 2", all.Outcomes.Block, all.BlocklistBlocks)
 	}
 	if len(all.TopRules) != 2 || all.TopRules[0].Name != "high_amount" || all.TopRules[0].Fired != 5 {
 		t.Errorf("all time top rules = %+v, want 2 rules led by high_amount fired 5 times", all.TopRules)

@@ -2888,7 +2888,7 @@ components:
     StatsResponse:
       type: object
       description: Decision statistics for a period.
-      required: [period, since, generated_at, outcomes, top_rules, review_queue, model, p95_scoring_latency_us, blocked_value_minor, decision_series]
+      required: [period, since, generated_at, outcomes, blocklist_blocks, top_rules, review_queue, model, p95_scoring_latency_us, blocked_value_minor, decision_series]
       properties:
         period:
           type: string
@@ -2909,6 +2909,10 @@ components:
             review: { type: integer, minimum: 0 }
             block: { type: integer, minimum: 0 }
             total: { type: integer, minimum: 0 }
+        blocklist_blocks:
+          type: integer
+          minimum: 0
+          description: Blocked decisions that matched the blocklist. The rest of `outcomes.block` came from the rules.
         top_rules:
           type: array
           description: Up to 10 rules, the most often fired first.
