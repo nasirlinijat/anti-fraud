@@ -25,9 +25,9 @@ var chargebackReaders = []string{
 	"internal/transport/chargeback_handler.go",
 }
 
-// mainWiring is the only chargeback code main.go may hold: wiring the store,
+// routeWiring is the only chargeback code routes.go may hold: wiring the store,
 // service and handler together.
-var mainWiring = []string{
+var routeWiring = []string{
 	`"github.com/nasirlinijat/anti-fraud/backend/internal/services/chargeback"`,
 	`chargebacks := chargeback.NewService(storage.NewChargebackStore(pool))`,
 	`transport.RegisterChargebackRoutes(mux, transport.NewChargebackHandler(chargebacks, cfg.ChargebackWebhookSecret))`,
@@ -68,7 +68,7 @@ func checkChargebackMentions(t *testing.T, rel, path string) {
 		if !strings.Contains(strings.ToLower(line), "chargeback") {
 			continue
 		}
-		if rel == "cmd/api/main.go" && isMainWiring(line) {
+		if rel == "cmd/api/routes.go" && isRouteWiring(line) {
 			continue
 		}
 		t.Errorf("%s:%d mentions chargebacks; only the webhook, the export and the mock bank may", rel, i+1)
@@ -84,8 +84,8 @@ func isChargebackReader(rel string) bool {
 	return false
 }
 
-func isMainWiring(line string) bool {
-	for _, wiring := range mainWiring {
+func isRouteWiring(line string) bool {
+	for _, wiring := range routeWiring {
 		if strings.TrimSpace(line) == wiring {
 			return true
 		}
