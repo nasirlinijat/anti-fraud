@@ -39,6 +39,11 @@ MASK_SETS = {
     "codes+history_age": CODE_INPUTS + ["secs_since_first"],
     "codes+history_age+amount_levels": CODE_INPUTS + ["secs_since_first", "amount", "player_max_amount", "player_avg_amount"],
 }
+# Input groups that the selected candidate is checked without, one at a time.
+CHECKED_INPUT_GROUPS = {
+    "account_events": ACCOUNT_EVENT_INPUTS,
+    "signals": features.FEATURE_GROUPS["signals"],
+}
 # Changes to train.lightgbm_model(); "v5" keeps its settings.
 REGULARIZATION = {
     "v5": {},
@@ -53,6 +58,10 @@ Fold = namedtuple("Fold", ["world", "model"])
 # The largest tree count tried, the review rate of the per-world results (a
 # share of legitimate purchases) and the folder for finished models.
 Selection = namedtuple("Selection", ["max_trees", "review_rate", "checkpoints"])
+# The check of one input group: the candidate without it, the worlds whose
+# purchases carry the group's inputs, and the mean held-out PR-AUC of those
+# worlds with and without the group.
+GroupCheck = namedtuple("GroupCheck", ["group", "result", "worlds", "with_group", "without_group"])
 # A candidate's result: the tree count with the best worst-world PR-AUC, the
 # per-world results at that count, the fold models and the out-of-world scores.
 CandidateResult = namedtuple("CandidateResult", ["candidate", "trees", "worst_pr_auc", "held_out", "folds", "scores"])
@@ -342,3 +351,48 @@ def select_candidate(data, candidates, selection):
         results.append(result)
         print(f"{candidate.name}: {result.trees} trees, worst held-out PR-AUC {result.worst_pr_auc:.4f}")
     return results, max(results, key=lambda result: result.worst_pr_auc)
+
+
+def check_input_groups(data, winner, selection):
+    """Evaluates the selected candidate without each input group in
+    CHECKED_INPUT_GROUPS that some world carries. A group is dropped when the
+    worlds whose purchases carry its inputs score a higher mean held-out
+    PR-AUC without it; the other worlds see the inputs missing either way, so
+    they cannot judge the group. Returns the checks and the chosen result: the
+    winner, or the winner without every dropped group."""
+    checks = []
+    for group, names in CHECKED_INPUT_GROUPS.items():
+        carrying = worlds_with_inputs(data, names)
+        if carrying:
+            checks.append(group_check(data, winner, group, carrying, selection))
+    dropped = [check.group for check in checks if check.without_group > check.with_group]
+    if not dropped:
+        return checks, winner
+    if len(dropped) == 1:
+        return checks, next(check.result for check in checks if check.group == dropped[0])
+    return checks, evaluate_candidate(without_groups(winner.candidate, dropped), data, selection)
+
+
+def group_check(data, winner, group, carrying, selection):
+    result = evaluate_candidate(without_groups(winner.candidate, [group]), data, selection)
+    print(f"{result.candidate.name}: {result.trees} trees, worst held-out PR-AUC {result.worst_pr_auc:.4f}")
+
+    def mean_pr_auc(candidate_result):
+        return round(float(np.mean([candidate_result.held_out[world]["pr_auc"] for world in carrying])), 4)
+
+    return GroupCheck(group, result, carrying, mean_pr_auc(winner), mean_pr_auc(result))
+
+
+def without_groups(candidate, groups):
+    """The candidate with the inputs of the groups masked as well."""
+    masked = list(candidate.masked)
+    for group in groups:
+        masked += [name for name in CHECKED_INPUT_GROUPS[group] if name not in masked]
+    return Candidate(f"{candidate.name}-" + "-".join(groups), masked, candidate.params)
+
+
+def worlds_with_inputs(data, names):
+    """The worlds where some purchase has one of the inputs."""
+    rows = purchase_rows(data)
+    carrying = (rows[names] != features.MISSING).any(axis=1)
+    return list(rows.loc[carrying, "world"].unique())

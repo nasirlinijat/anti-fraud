@@ -256,3 +256,53 @@ def test_equal_world_sample_takes_the_smallest_world_size_from_each():
 
     assert sample["world"].value_counts().to_dict() == {"a": 8, "b": 8, "c": 8}
     assert sample.index.is_unique
+
+
+def fake_result(candidate, pr_aucs):
+    held_out = {world: {"pr_auc": value} for world, value in pr_aucs.items()}
+    return worlds.CandidateResult(candidate, 25, min(pr_aucs.values()), held_out, [], None)
+
+
+def group_check_data():
+    """World a carries the account event inputs, world b has them missing."""
+    rows = pd.concat([world_rows("a", 20, 1), world_rows("b", 20, 2)], ignore_index=True)
+    rows.loc[rows["world"] == "b", worlds.ACCOUNT_EVENT_INPUTS] = features.MISSING
+    return rows
+
+
+def checked(monkeypatch, without_account, without_signals):
+    """Runs the group check with held-out PR-AUCs per world given for the
+    winner (a 0.80, b 0.60) and for the candidates without each group."""
+    scores = {"account_events": without_account, "signals": without_signals}
+
+    def evaluate(candidate, data, selection):
+        groups = [group for group in scores if candidate.name.endswith(group) or f"-{group}-" in candidate.name]
+        if len(groups) == 1:
+            return fake_result(candidate, scores[groups[0]])
+        return fake_result(candidate, {"a": 0.9, "b": 0.6})
+
+    monkeypatch.setattr(worlds, "evaluate_candidate", evaluate)
+    winner = fake_result(worlds.Candidate("codes/v5", worlds.CODE_INPUTS, {}), {"a": 0.80, "b": 0.60})
+    return winner, worlds.check_input_groups(group_check_data(), winner, None)
+
+
+def test_a_group_is_kept_when_only_worlds_without_its_inputs_score_better(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.79, "b": 0.70}, {"a": 0.70, "b": 0.50})
+
+    assert chosen is winner
+    assert checks[0].worlds == ["a"] and checks[0].with_group == 0.80 and checks[0].without_group == 0.79
+
+
+def test_a_group_is_dropped_when_the_worlds_with_its_inputs_score_better_without_it(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.85, "b": 0.55}, {"a": 0.70, "b": 0.50})
+
+    assert chosen.candidate.name == "codes/v5-account_events"
+    assert set(worlds.ACCOUNT_EVENT_INPUTS) <= set(chosen.candidate.masked)
+    assert not set(features.FEATURE_GROUPS["signals"]) & set(chosen.candidate.masked)
+
+
+def test_two_dropped_groups_are_evaluated_together(monkeypatch):
+    winner, (checks, chosen) = checked(monkeypatch, {"a": 0.85, "b": 0.55}, {"a": 0.82, "b": 0.60})
+
+    assert chosen.candidate.name == "codes/v5-account_events-signals"
+    assert set(worlds.ACCOUNT_EVENT_INPUTS + features.FEATURE_GROUPS["signals"]) <= set(chosen.candidate.masked)
