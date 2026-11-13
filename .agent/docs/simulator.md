@@ -130,7 +130,11 @@ console simulation returns 409, and a disabled feature returns 404.
 `make reset` calls the same endpoint on the running backend. Set
 `RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN` in the environment; optionally set
 `RESET_URL` to override `http://127.0.0.1:$PORT` (port 8080 by default).
-Credentials are read from the environment and never passed as command arguments.
+`RESET_URL` must be an absolute HTTP or HTTPS URL. A base path is supported;
+user information, query strings, fragments, and invalid ports are rejected.
+This CLI sends its credentials to the operator-selected backend, so configure
+only a trusted destination. Redirects are never followed. Credentials are read
+from the environment and never passed as command arguments.
 
 Reset clears every purchase, decision, review claim/resolution, private finalized
 and pending evaluation answer, feature total, blocklist entry, account event,
