@@ -83,6 +83,7 @@ func TestStatsResponseBody(t *testing.T) {
 	p95 := int64(1234)
 	src := &fakeSource{sum: models.StatsSummary{
 		Outcomes:            models.OutcomeCounts{Allow: 8, Review: 1, Block: 1, Total: 10},
+		BlocklistBlocks:     1,
 		TopRules:            []models.RuleCount{{Name: "high_amount", Fired: 2, Points: 60}},
 		ReviewQueue:         3,
 		Model:               models.ModelEffects{Scored: 10, Flagged: 1, Cleared: 2},
@@ -96,6 +97,7 @@ func TestStatsResponseBody(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`"outcomes":{"allow":8,"review":1,"block":1,"total":10}`,
+		`"blocklist_blocks":1`,
 		`"top_rules":[{"name":"high_amount","fired":2,"points":60}]`,
 		`"review_queue":3`,
 		`"model":{"scored":10,"flagged":1,"cleared":2}`,
