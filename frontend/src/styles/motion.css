@@ -120,6 +120,18 @@
 
   .network-diagram .network-label { animation: fade-in var(--motion-slow) ease 160ms both; }
 
+  /* The live pipeline moves dots along each path at a speed set by its recent
+     traffic, and a bin that received decisions pulses once per poll. */
+  .pipeline-figure-live .pipeline-diagram { overflow: visible; }
+  .pipeline-figure-live .pipeline-flow-dash,
+  .pipeline-figure-live .pipeline-bin-pulse { display: inline; }
+
+  .pipeline-bin .pipeline-bin-pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: bin-pulse 600ms var(--ease-out) both;
+  }
+
   .status-pill::before { transition: background-color var(--motion) ease, border-radius var(--motion) ease; }
 
   .login-hero > * { animation: rise-in var(--motion-slow) var(--ease-out) both; }
@@ -150,6 +162,11 @@
 
   @keyframes mark-in {
     from { opacity: 0; transform: scale(0.6); }
+  }
+
+  @keyframes bin-pulse {
+    from { opacity: 0.9; transform: scale(1); }
+    to { opacity: 0; transform: scale(1.12); stroke-width: 6; }
   }
 
   @keyframes grow-in {

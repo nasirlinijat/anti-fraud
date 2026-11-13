@@ -48,7 +48,22 @@ export function getStats(period: Period, signal?: AbortSignal): Promise<Stats> {
   return request(`/stats?period=${period}`, { signal })
 }
 
-export const entryTypes = ['card', 'device', 'player', 'ip'] as const
+export interface RecentPipeline {
+  after: number | null
+  next_after: number | null
+  outcomes: Stats['outcomes']
+  blocklist_blocks: number
+  model: Pick<Stats['model'], 'flagged' | 'cleared'>
+}
+
+// Without a cursor the counts are zero and next_after is the newest purchase,
+// so the console counts only the decisions made after its first read.
+export function getRecentPipeline(after: number | null, signal?: AbortSignal): Promise<RecentPipeline> {
+  const query = after === null ? '' : `?after=${after}`
+  return request(`/stats/pipeline/recent${query}`, { signal })
+}
+
+export const entryTypes =['card', 'device', 'player', 'ip'] as const
 export type EntryType = (typeof entryTypes)[number]
 
 export interface BlocklistEntry {

@@ -23,7 +23,7 @@ const chainRoute = (top: number) => [{ x: CHAIN_X, y: top + STAGE.height }, { x:
 const chainLabelAt = (top: number) => ({ x: CHAIN_LABEL_X, y: top + STAGE.height + CHAIN_GAP / 2 + 5 })
 const sideRoute = (y: number) => [{ x: EDGE.from, y }, { x: EDGE.to, y }]
 
-export function PipelineTallDiagram({ flow, paths, modelRan, scored, label, chainModelLines }: DiagramProps) {
+export function PipelineTallDiagram({ flow, paths, modelRan, scored, label, chainModelLines, pulses }: DiagramProps) {
   const chainModelAt = chainLabelAt(TOP.rules)
   return (
     <svg className="pipeline-diagram pipeline-diagram-tall" viewBox="0 0 360 424" role="img" aria-label={label}>
@@ -45,9 +45,9 @@ export function PipelineTallDiagram({ flow, paths, modelRan, scored, label, chai
       <SideLabel y={ROW.rules} path={paths['rules-block']} />
       <SideLabel y={ROW.review} path={paths['model-review']} caption={`${number.format(flow.modelEscalated)} escalated`} />
       <SideLabel y={ROW.allow} path={paths['model-allow']} caption={`${number.format(flow.modelCleared)} cleared`} />
-      <OutcomeBin outcome="block" name="Block" count={flow.block} box={{ ...BIN, y: TOP.blocklist, height: TOP.rules + STAGE.height - TOP.blocklist }} />
-      <OutcomeBin outcome="review" name="Review" count={flow.review} box={{ ...BIN, y: TOP.model }} />
-      <OutcomeBin outcome="allow" name="Allow" count={flow.allow} box={{ ...BIN, y: TOP.model + MODEL_HEIGHT - BIN.height }} />
+      <OutcomeBin outcome="block" pulse={pulses.block} name="Block" count={flow.block} box={{ ...BIN, y: TOP.blocklist, height: TOP.rules + STAGE.height - TOP.blocklist }} />
+      <OutcomeBin outcome="review" pulse={pulses.review} name="Review" count={flow.review} box={{ ...BIN, y: TOP.model }} />
+      <OutcomeBin outcome="allow" pulse={pulses.allow} name="Allow" count={flow.allow} box={{ ...BIN, y: TOP.model + MODEL_HEIGHT - BIN.height }} />
     </svg>
   )
 }

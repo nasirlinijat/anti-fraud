@@ -1,4 +1,5 @@
 import type { Outcome } from '../api'
+import { flowDashes } from './pipelineActivity'
 import type { PipelineFlow } from './pipelineFlow'
 import type { PathId, PipelinePath } from './pipelinePaths'
 
@@ -18,6 +19,7 @@ export interface DiagramProps {
   scored: number
   label: string
   chainModelLines: FlowLabelLine[]
+  pulses: Partial<Record<Outcome, number>>
 }
 
 export function Stage({ box, title }: { box: Box; title: string }) {
@@ -43,12 +45,22 @@ export function ModelStage({ box, modelRan, scored }: { box: Box; modelRan: bool
   )
 }
 
-export function OutcomeBin({ outcome, name, count, box }: { outcome: Outcome; name: string; count: number; box: Box }) {
+interface OutcomeBinProps {
+  outcome: Outcome
+  name: string
+  count: number
+  box: Box
+  pulse?: number
+}
+
+// A new pulse value remounts the ring, which restarts its animation.
+export function OutcomeBin({ outcome, name, count, box, pulse }: OutcomeBinProps) {
   const x = box.x + box.width / 2
   const middle = box.y + box.height / 2
   return (
     <g className={`pipeline-bin pipeline-bin-${outcome}`}>
       <rect x={box.x} y={box.y} width={box.width} height={box.height} rx={8} />
+      {pulse !== undefined && <rect key={pulse} className="pipeline-bin-pulse" x={box.x} y={box.y} width={box.width} height={box.height} rx={8} />}
       <text className="pipeline-title" x={x} y={middle - 6} textAnchor="middle">{name}</text>
       <text className="pipeline-count" x={x} y={middle + 13} textAnchor="middle">{number.format(count)}</text>
     </g>
@@ -60,11 +72,26 @@ export function FlowPath({ path, route }: { path: PipelinePath; route: Point[] }
   const empty = path.width === 0
   const arrow = arrowhead(route, path.width)
   const tone = empty ? 'empty' : path.outcome ?? 'chain'
+  const line = roundedRoute(route, arrow.length)
   return (
     <g className={`pipeline-flow pipeline-flow-${tone}`} data-path={path.id}>
-      <path d={roundedRoute(route, arrow.length)} strokeWidth={empty ? EMPTY_STROKE : path.width} />
+      <path d={line} strokeWidth={empty ? EMPTY_STROKE : path.width} />
+      {!empty && <FlowDots line={line} pathWidth={path.width} />}
       <polygon points={arrow.points} />
     </g>
+  )
+}
+
+// The dots are hidden until the panel is live; useFlowAnimation moves them.
+function FlowDots({ line, pathWidth }: { line: string; pathWidth: number }) {
+  const dashes = flowDashes(pathWidth)
+  return (
+    <path
+      className={dashes.thin ? 'pipeline-flow-dash pipeline-flow-dash-thin' : 'pipeline-flow-dash'}
+      d={line}
+      strokeWidth={dashes.width}
+      strokeDasharray={dashes.pattern}
+    />
   )
 }
 

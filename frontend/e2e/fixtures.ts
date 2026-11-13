@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
-import type { Period, QualityReport, QualitySource, Stats } from '../src/api'
+import type { Period, QualityReport, QualitySource, RecentPipeline, Stats } from '../src/api'
 import type { Role } from '../src/session'
 
 export const evidenceDirectory = process.env.AF_EVIDENCE_DIR ?? join(tmpdir(), 'af121-evidence')
@@ -32,6 +32,16 @@ export function quality(source: QualitySource = 'simulator', run = runId): Quali
     coverage: { pending: 2, quarantined: 1, scored_decisions: 803, run_status: 'running' } }
 }
 
+export const newestPurchase = 81200
+
+// Without a cursor the feed starts from now; after it, every read has traffic on every path.
+export function recentPipeline(after: number | null): RecentPipeline {
+  if (after === null) {
+    return { after: null, next_after: newestPurchase, outcomes: { allow: 0, review: 0, block: 0, total: 0 }, blocklist_blocks: 0, model: { flagged: 0, cleared: 0 } }
+  }
+  return { after, next_after: after + 36, outcomes: { allow: 30, review: 4, block: 2, total: 36 }, blocklist_blocks: 1, model: { flagged: 2, cleared: 1 } }
+}
+
 export const sessionToken = 'synthetic-session-token'
 
 // mockConsole answers the console's reads with synthetic data. By default an
@@ -52,6 +62,10 @@ export async function mockConsole(page: Page, role: Role | null = 'admin') {
     }
     if (url.pathname === '/admin/accounts') return route.fulfill({ json: { accounts: [{ username: 'demo-user', role: 'admin', disabled: false, created_at: now }] } })
     if (url.pathname === '/admin/assignments') return route.fulfill({ json: { reviewers: [] } })
+    if (url.pathname === '/stats/pipeline/recent') {
+      const after = url.searchParams.get('after')
+      return route.fulfill({ json: recentPipeline(after === null ? null : Number(after)) })
+    }
     if (url.pathname === '/stats') return route.fulfill({ json: statistics((url.searchParams.get('period') ?? '24h') as Period) })
     if (url.pathname === '/stats/quality/runs') return route.fulfill({ json: { source, run_ids: [runId], next_cursor: url.searchParams.has('after') ? undefined : runId } })
     if (url.pathname === '/stats/quality') return route.fulfill({ json: quality(source, url.searchParams.get('run_id') ?? runId) })

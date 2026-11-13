@@ -17,7 +17,7 @@ const chainRoute = (fromX: number, toX: number) => [{ x: fromX + STAGE.width, y:
 const chainLabelX = (fromX: number, toX: number) => (fromX + STAGE.width + toX) / 2
 const dropRoute = (x: number, lane: number) => [{ x: centre(x), y: STAGE.y + STAGE.height }, { x: centre(x), y: lane }, { x: BIN.x, y: lane }]
 
-export function PipelineWideDiagram({ flow, paths, modelRan, scored, label, chainModelLines }: DiagramProps) {
+export function PipelineWideDiagram({ flow, paths, modelRan, scored, label, chainModelLines, pulses }: DiagramProps) {
   const reviewX = MODEL.x + MODEL.width - 20
   const allow = paths['model-allow']
   const review = paths['model-review']
@@ -41,9 +41,9 @@ export function PipelineWideDiagram({ flow, paths, modelRan, scored, label, chai
       <LaneLabel x={TERMINAL_LABEL_X} lane={LANE.rulesBlock} path={paths['rules-block']} />
       <LaneLabel x={TERMINAL_LABEL_X} lane={LANE.review} path={review} caption={`${number.format(flow.modelEscalated)} escalated`} />
       <LaneLabel x={TERMINAL_LABEL_X} lane={MAIN_Y} path={allow} caption={`${number.format(flow.modelCleared)} cleared`} />
-      <OutcomeBin outcome="review" name="Review" count={flow.review} box={{ ...BIN, y: LANE.review - 24, height: 48 }} />
-      <OutcomeBin outcome="allow" name="Allow" count={flow.allow} box={{ ...BIN, y: MAIN_Y - 24, height: 48 }} />
-      <OutcomeBin outcome="block" name="Block" count={flow.block} box={{ ...BIN, y: LANE.rulesBlock - 18, height: 64 }} />
+      <OutcomeBin outcome="review" pulse={pulses.review} name="Review" count={flow.review} box={{ ...BIN, y: LANE.review - 24, height: 48 }} />
+      <OutcomeBin outcome="allow" pulse={pulses.allow} name="Allow" count={flow.allow} box={{ ...BIN, y: MAIN_Y - 24, height: 48 }} />
+      <OutcomeBin outcome="block" pulse={pulses.block} name="Block" count={flow.block} box={{ ...BIN, y: LANE.rulesBlock - 18, height: 64 }} />
     </svg>
   )
 }
