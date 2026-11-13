@@ -43,6 +43,9 @@ type StatsSummary struct {
 	P95ScoringLatencyUs *int64         `json:"p95_scoring_latency_us"`
 	BlockedValueMinor   string         `json:"blocked_value_minor"`
 	DecisionSeries      DecisionSeries `json:"decision_series"`
+	// BlocklistBlocks is the number of blocked decisions that matched the
+	// blocklist. The other blocks came from the rules.
+	BlocklistBlocks int64 `json:"blocklist_blocks"`
 }
 
 // DecisionBucket counts the decisions of each outcome in one time bucket.

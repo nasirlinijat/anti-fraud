@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 )
 
 // StatsStore reads decision statistics.
@@ -33,14 +34,16 @@ func (s *StatsStore) Summary(ctx context.Context, window models.StatsWindow, max
 	return sum, err
 }
 
-// DecisionOverviewSQL counts the decisions in [$1, $2) by outcome and finds the
-// 95th percentile scoring latency and the first decision time ($1 when there
-// are none).
+// DecisionOverviewSQL counts the decisions in [$1, $2) by outcome, and the
+// blocks whose fired rules include the entry named $3, which is how a
+// blocklist block is saved. It also finds the 95th percentile scoring latency
+// and the first decision time ($1 when there are none).
 const DecisionOverviewSQL = `
 SELECT
     count(*) FILTER (WHERE outcome = 'allow') AS allowed,
     count(*) FILTER (WHERE outcome = 'review') AS reviewed,
     count(*) FILTER (WHERE outcome = 'block') AS blocked,
+    count(*) FILTER (WHERE outcome = 'block' AND fired_rules @> jsonb_build_array(jsonb_build_object('name', $3::text))) AS blocklist_blocked,
     count(*) AS total,
     count(scoring_latency_us) AS latency_samples,
     coalesce(percentile_disc(0.95) WITHIN GROUP (ORDER BY scoring_latency_us), 0)::bigint AS p95_latency_us,
@@ -52,9 +55,10 @@ WHERE decided_at >= $1::timestamptz
 // overview is a DecisionOverviewSQL row.
 type overview struct {
 	models.OutcomeCounts
-	latencySamples  int64
-	p95LatencyUs    int64
-	firstDecisionAt time.Time
+	blocklistBlocked int64
+	latencySamples   int64
+	p95LatencyUs     int64
+	firstDecisionAt  time.Time
 }
 
 // BlockedValueSQL sums blocked amounts as text, so the total cannot overflow.
@@ -103,13 +107,13 @@ WHERE d.decided_at >= $1::timestamptz
 func readSummary(ctx context.Context, conn platform.DBTX, window models.StatsWindow, maxRules int) (models.StatsSummary, error) {
 	since, until := window.Since, window.Until
 	var o overview
-	err := conn.QueryRow(ctx, DecisionOverviewSQL, since, until).Scan(
-		&o.Allow, &o.Review, &o.Block, &o.Total, &o.latencySamples, &o.p95LatencyUs, &o.firstDecisionAt,
+	err := conn.QueryRow(ctx, DecisionOverviewSQL, since, until, string(scoring.RuleBlocklist)).Scan(
+		&o.Allow, &o.Review, &o.Block, &o.blocklistBlocked, &o.Total, &o.latencySamples, &o.p95LatencyUs, &o.firstDecisionAt,
 	)
 	if err != nil {
 		return models.StatsSummary{}, fmt.Errorf("read decision overview: %w", err)
 	}
-	sum := models.StatsSummary{Outcomes: o.OutcomeCounts, TopRules: []models.RuleCount{}}
+	sum := models.StatsSummary{Outcomes: o.OutcomeCounts, BlocklistBlocks: o.blocklistBlocked, TopRules: []models.RuleCount{}}
 	if o.latencySamples > 0 {
 		sum.P95ScoringLatencyUs = &o.p95LatencyUs
 	}
