@@ -26,9 +26,14 @@ type ReviewService interface {
 	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
-	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
-	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
+	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
+	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
+	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error)
+	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
+	ClaimMany(ctx context.Context, purchaseIDs []int64, username string) ([]review.ClaimResult, error)
+	DecideMany(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
+	DecideManyClaimed(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
 	ReleaseClaim(ctx context.Context, purchaseID int64) error
 }
@@ -45,6 +50,7 @@ func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 // RegisterReviewRoutes exposes the queue, case evidence, claims, and decisions
 // to analysts with a key and to signed-in reviewers and admins. Only
 // signed-in accounts can claim, and they decide only what they have claimed.
+// The batch routes claim and decide several purchases, each on its own.
 func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.Access) {
 	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
 	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
@@ -53,8 +59,16 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	mux.HandleFunc("GET /reviews/{purchase_id}/network", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveNetwork(w, r)
 	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/network/purchases", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveNetworkPurchases(w, r)
+	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/network/reviews", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveLinkedReviews(w, r)
+	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
+	mux.HandleFunc("POST /reviews/claims", access.Review(h.serveBatchClaim))
+	mux.HandleFunc("POST /reviews/decisions", access.Review(h.serveBatchDecision))
 	mux.HandleFunc("DELETE /reviews/{purchase_id}/claim", access.Admin(h.serveRelease))
 	mux.HandleFunc("GET /admin/assignments", access.Admin(h.serveAssignments))
 }
@@ -155,8 +169,11 @@ type decisionResponse struct {
 	Decision   string    `json:"decision"`
 	AnalystID  string    `json:"analyst_id"`
 	ResolvedAt time.Time `json:"resolved_at"`
-	// DeviceBlocked is true when this rejection added the device to the blocklist.
+	// The blocked fields are true when this rejection added that value of the
+	// purchase to the blocklist.
 	DeviceBlocked bool `json:"device_blocked"`
+	CardBlocked   bool `json:"card_blocked"`
+	PlayerBlocked bool `json:"player_blocked"`
 }
 
 type claimResponse struct {
@@ -189,6 +206,12 @@ type assignmentsResponse struct {
 type decisionRequest struct {
 	Decision    string `json:"decision"`
 	BlockDevice bool   `json:"block_device"`
+	BlockCard   bool   `json:"block_card"`
+	BlockPlayer bool   `json:"block_player"`
+}
+
+func (body decisionRequest) blocks() models.ReviewBlocks {
+	return models.ReviewBlocks{Device: body.BlockDevice, Card: body.BlockCard, Player: body.BlockPlayer}
 }
 
 func (h *ReviewHandler) serveQueue(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
@@ -360,7 +383,7 @@ func (h *ReviewHandler) serveClaim(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 	if !actor.Session {
-		platform.WriteError(w, http.StatusForbidden, "claiming a purchase needs a signed-in account")
+		platform.WriteError(w, http.StatusForbidden, claimNeedsSessionMessage)
 		return
 	}
 	claim, err := h.service.Claim(r.Context(), purchaseID, actor.ID)
@@ -430,9 +453,9 @@ func parsePurchaseID(id string) (int64, bool) {
 // purchase; an analyst key decides without one, as before claims existed.
 func (h *ReviewHandler) decide(ctx context.Context, purchaseID int64, body decisionRequest, actor platform.Actor) (models.Resolution, error) {
 	if actor.Session {
-		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
 	}
-	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.BlockDevice)
+	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
 }
 
 func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
@@ -457,7 +480,9 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 		Decision:      body.Decision,
 		AnalystID:     actor.ID,
 		ResolvedAt:    result.ResolvedAt.UTC(),
-		DeviceBlocked: result.DeviceBlocked,
+		DeviceBlocked: result.Blocked.Device,
+		CardBlocked:   result.Blocked.Card,
+		PlayerBlocked: result.Blocked.Player,
 	})
 }
 
@@ -465,7 +490,8 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 // error is logged with the action that failed and answered with 500.
 func writeReviewError(ctx context.Context, w http.ResponseWriter, purchaseID int64, err error, action string) {
 	switch {
-	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject):
+	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockNeedsReject),
+		errors.Is(err, review.ErrInvalidNetworkAnchor), errors.Is(err, review.ErrInvalidLinkedValue):
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, review.ErrPurchaseNotFound), errors.Is(err, review.ErrNoOpenClaim):
 		platform.WriteError(w, http.StatusNotFound, err.Error())

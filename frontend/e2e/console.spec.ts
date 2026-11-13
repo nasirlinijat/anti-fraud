@@ -182,7 +182,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await openNetworkCase(page)
     await expect(page.getByRole('heading', { name: 'Linked players, cards and devices' })).toBeVisible()
     await expect(page.getByText('Device demo-device (blocklisted): 31 players, 2 rejected.')).toBeVisible()
-    await expect(page.getByRole('img', { name: /Diagram of linked players/ })).toBeVisible()
+    await expect(page.getByRole('group', { name: /Diagram of linked players/ })).toBeVisible()
     await expect(page.locator('.network-diagram').getByText('+23 more', { exact: true })).toBeVisible()
     await page.getByText('View linked players, cards and devices as a table').click()
     await expect(page.getByRole('rowheader', { name: 'sim1-20261111T064452-player-29', exact: true })).toBeVisible()
@@ -190,6 +190,40 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(audit.violations).toEqual([])
   })
 }
+
+const linkedPurchases = { anchor: 'card', value: 'demo-player-2', window_days: 30, total: 3, purchases: [
+  { purchase_id: '77', transaction_id: 'linked-transaction', event_time: now, amount_minor: '4999', outcome: 'review',
+    review_decision: null, claimed_by: 'other-reviewer', awaiting_review: true },
+  { purchase_id: '76', transaction_id: 'earlier-transaction', event_time: now, amount_minor: '1000', outcome: 'block',
+    review_decision: null, claimed_by: null, awaiting_review: false },
+] }
+
+test('a linked player shows its purchases and opens a linked case', async ({ page }) => {
+  let query = new URLSearchParams()
+  await page.route('**/reviews/41/network', route => route.fulfill({ json: network }))
+  await page.route('**/reviews/41/network/purchases?*', route => {
+    query = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: linkedPurchases })
+  })
+  await page.route('**/reviews/77', route => route.fulfill({ json: { ...networkCase, purchase_id: '77', transaction_id: 'linked-transaction',
+    claimed_by: 'other-reviewer', claimed_at: now, ruleset_version: 3, player_purchases: [], device_activity: null, account_events: [] } }))
+  await page.route('**/reviews/77/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+  await openNetworkCase(page)
+  const node = page.getByRole('button', { name: 'Player demo-player-2: Blocked, 1 shared purchase', exact: true })
+  await node.press('Enter')
+  await expect(node).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('heading', { name: 'Player demo-player-2', exact: true })).toBeFocused()
+  const purchases = page.getByRole('region', { name: 'Purchases for Player demo-player-2' })
+  await expect(purchases.getByRole('rowheader', { name: 'earlier-transaction' })).toBeVisible()
+  await expect(purchases).toContainText('Awaiting review, claimed by other-reviewer')
+  await expect(page.getByText('Showing the newest 2 of 3 purchases.')).toBeVisible()
+  expect([query.get('anchor'), query.get('value')]).toEqual(['card', 'demo-player-2'])
+  const audit = await new AxeBuilder({ page }).include('.case-network').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
+  expect(audit.violations).toEqual([])
+  await page.getByRole('button', { name: 'Open case linked-transaction' }).click()
+  await expect(page.getByRole('heading', { name: 'linked-transaction', level: 2 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Review queue' })).toBeFocused()
+})
 
 test('a failed network load leaves the review case usable and can be retried', async ({ page }) => {
   let failing = true
@@ -202,4 +236,73 @@ test('a failed network load leaves the review case usable and can be retried', a
   failing = false
   await page.getByRole('button', { name: 'Retry', exact: true }).click()
   await expect(page.getByText('Device demo-device (blocklisted): 31 players, 2 rejected.')).toBeVisible()
+})
+
+const linkedReview = (id: string, claimedBy: string | null, ruleScore: number) => ({ ...networkCase, purchase_id: id,
+  transaction_id: `linked-${id}`, player_id: `player-${id}`, rule_score: ruleScore, claimed_by: claimedBy, claimed_at: claimedBy && now })
+
+test('linked purchases awaiting review are claimed and rejected together', async ({ page }) => {
+  let unclaimedHolder: string | null = null
+  const claims: unknown[] = []
+  const decisions: unknown[] = []
+  await page.route('**/reviews/41/network/reviews', route => route.fulfill({ json: { window_days: 30, total: 3, items: decisions.length ? [] : [
+    linkedReview('51', unclaimedHolder, 70), linkedReview('52', 'demo-user', 60), linkedReview('53', 'demo-user', 50),
+  ] } }))
+  await page.route('**/reviews/claims', async route => {
+    claims.push(route.request().postDataJSON())
+    unclaimedHolder = 'demo-user'
+    await route.fulfill({ json: { results: [{ purchase_id: '51', status: 'claimed', claimed_by: 'demo-user', claimed_at: now }] } })
+  })
+  await page.route('**/reviews/decisions', async route => {
+    decisions.push(route.request().postDataJSON())
+    const saved = (id: string) => ({ purchase_id: id, status: 'saved', resolved_at: now, device_blocked: true, card_blocked: false, player_blocked: false })
+    await route.fulfill({ json: { decision: 'reject', analyst_id: 'demo-user', results: [saved('51'), saved('52'),
+      { purchase_id: '53', status: 'already_decided', resolved_at: null, device_blocked: false, card_blocked: false, player_blocked: false }] } })
+  })
+  await page.route('**/reviews/41/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+  await openNetworkCase(page)
+  const panel = page.getByRole('region', { name: 'Linked purchases awaiting review' })
+  await expect(panel.getByRole('rowheader', { name: /linked-51/ })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Reject selected (0)' })).toHaveAttribute('aria-disabled', 'true')
+
+  await panel.getByRole('button', { name: 'Claim all unclaimed (1)' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Claimed 1 purchase.' })).toBeVisible()
+  expect(claims).toEqual([{ purchase_ids: ['51'] }])
+  await expect(panel.getByRole('checkbox', { name: 'Select linked-51' })).toBeVisible()
+
+  await panel.getByRole('checkbox', { name: 'Select all claimed by you' }).check()
+  await panel.getByRole('button', { name: 'Reject selected (3)' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: 'Reject 3 purchases?' })).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'Transactions' })).toContainText('linked-53')
+  await dialog.getByRole('checkbox', { name: "Each purchase's device", exact: true }).check()
+  const audit = await new AxeBuilder({ page }).include('dialog[open]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
+  expect(audit.violations).toEqual([])
+  await dialog.getByRole('button', { name: 'Reject', exact: true }).click()
+
+  await expect(page.getByRole('status').filter({ hasText: 'Rejected 2 of 3 purchases and blocked 2 devices. linked-53 was already decided.' })).toBeVisible()
+  expect(decisions).toEqual([{ decision: 'reject', block_device: true, purchase_ids: ['51', '52', '53'] }])
+  await expect(page.getByRole('heading', { name: 'demo-transaction', level: 2 })).toBeVisible()
+  await expect(panel.getByText('No other purchases awaiting review share this purchase')).toBeVisible()
+})
+
+test('the linked purchases awaiting review panel has no detectable accessibility violations', async ({ page }) => {
+  await page.route('**/reviews/41/network/reviews', route => route.fulfill({ json: { window_days: 30, total: 120, items: [
+    linkedReview('51', null, 70), linkedReview('52', 'demo-user', 60), linkedReview('53', 'other-reviewer', 50),
+  ] } }))
+  await page.route('**/reviews/41/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+  await openNetworkCase(page)
+  const panel = page.getByRole('region', { name: 'Linked purchases awaiting review' })
+  await panel.getByRole('checkbox', { name: 'Select linked-52' }).check()
+  await expect(page.getByText('Showing the 3 highest rule scores of 120.')).toBeVisible()
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(panel.getByRole('checkbox', { name: 'Select linked-52' })).toBeChecked()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${scheme} at ${width}`).toBe(true)
+      const audit = await new AxeBuilder({ page }).include('.linked-reviews').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
+      expect(audit.violations, `${scheme} at ${width}`).toEqual([])
+    }
+  }
 })
