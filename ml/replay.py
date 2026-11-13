@@ -12,7 +12,9 @@ Usage (from the ml folder):
     python replay.py data/train_transaction.csv --api-key local-dev-key
 
 Simulated game traffic written by the simulator's -dump option is replayed
-the same way, with the model trained on it:
+the same way, with the model trained on it. The account events written next to
+the dump are sent to POST /account-events before the first purchase that comes
+after them:
     python replay.py --requests data/game/world1.jsonl --limit 10000 --model ../backend/models/lgbm-game-v2.json --api-key local-dev-key
 
 Fraud labels never reach the score API. A separate database importer can load
@@ -99,12 +101,13 @@ class Client:
         self.connection = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=30)
         self.headers = {"Content-Type": "application/json", "X-API-Key": api_key}
 
-    def score(self, request, attempts=5):
-        # Retry the identical transaction: the service returns its saved decision
-        # if a previous attempt committed before its response was lost.
+    def post(self, path, payload, name, attempts=5):
+        """Sends payload and returns the status and body. Retries the identical
+        request: the service returns what it saved if a previous attempt
+        committed before its response was lost."""
         for attempt in range(1, attempts + 1):
             try:
-                self.connection.request("POST", "/score", json.dumps(request), self.headers)
+                self.connection.request("POST", path, json.dumps(payload), self.headers)
                 response = self.connection.getresponse()
                 body = response.read()
             except (OSError, http.client.HTTPException) as error:
@@ -113,11 +116,19 @@ class Client:
             else:
                 status = response.status
             if status is not None and status < 500:
-                break
+                return status, body
             if attempt == attempts:
-                raise SystemExit(f"transaction {request['transaction_id']}: status {status}: {body.decode()}")
-            print(f"transaction {request['transaction_id']}: status {status}, retrying in {2 * attempt}s")
+                raise SystemExit(f"{name}: status {status}: {body.decode()}")
+            print(f"{name}: status {status}, retrying in {2 * attempt}s")
             time.sleep(2 * attempt)
+
+    def record_account_event(self, event):
+        status, body = self.post("/account-events", event, f"account event {event['event_id']}")
+        if status not in (200, 201):
+            raise SystemExit(f"account event {event['event_id']}: status {status}: {body.decode()}")
+
+    def score(self, request):
+        status, body = self.post("/score", request, f"transaction {request['transaction_id']}")
         if status == 409:
             raise SystemExit(
                 f"transaction {request['transaction_id']} is already scored: start from an empty database "
@@ -128,10 +139,14 @@ class Client:
         return json.loads(body)
 
 
-def send(requests, client, progress_every=10000):
+def send(requests, client, account_events=None, progress_every=10000):
+    """Scores the requests in order. With an AccountEventQueue, every account
+    event before a purchase is recorded before that purchase is scored."""
     results = []
     started = time.time()
     for i, request in enumerate(requests, 1):
+        if account_events is not None:
+            account_events.record_before(i - 1, client)
         sent = time.perf_counter()
         response = client.score(request)
         results.append({
@@ -144,6 +159,23 @@ def send(requests, client, progress_every=10000):
             rate = i / (time.time() - started)
             print(f"{i}/{len(requests)} sent, {rate:.0f} per second, about {(len(requests) - i) / rate / 60:.0f} min left")
     return pd.DataFrame(results)
+
+
+class AccountEventQueue:
+    """Account events sorted by time, recorded as the purchases after them
+    come up. event_ns holds the event times and purchase_ns the time of each
+    purchase in replay order, both in nanoseconds since the Unix epoch."""
+
+    def __init__(self, event_ns, purchase_ns, events):
+        self.event_ns, self.purchase_ns, self.events = event_ns, purchase_ns, events
+        self.next = 0
+
+    def record_before(self, purchase, client):
+        """Records every event before the purchase at this position."""
+        end = int(np.searchsorted(self.event_ns, self.purchase_ns[purchase], side="left"))
+        for event in self.events[self.next:end]:
+            client.record_account_event(event)
+        self.next = max(self.next, end)
 
 
 def rule_outcome(rule_score):
@@ -268,6 +300,19 @@ def load_purchases(args):
     return data
 
 
+def dumped_account_events(path):
+    """Reads the account events written next to a simulator dump: the loaded
+    events for the Python features and the raw requests, both sorted by time."""
+    events = features.load_account_events(path)
+    order = np.argsort(events["event_ns"].to_numpy(), kind="stable")
+    requests = []
+    file = features.account_events_path(path)
+    if file.exists():
+        with open(file, encoding="utf-8") as lines:
+            requests = [json.loads(line) for line in lines if line.strip()]
+    return events, [requests[i] for i in order]
+
+
 def load_model(path):
     """Reads an exported model and the policy from the report saved next to it."""
     dump = json.loads(Path(path).read_text())
@@ -315,12 +360,17 @@ def main():
     print(f"replaying {len(data)} purchases from day {args.from_day} to {args.url}")
 
     dump, policy = load_model(args.model)
-    built = features.build(data.copy())
+    events, event_requests = dumped_account_events(args.requests) if args.requests else (None, [])
+    built = features.build(data.copy(), events)
     python_score = python_scores(args.model, dump, built, policy["player_blend_weight"])
 
     started = time.time()
     requests = dumped_requests(args.requests, data["TransactionID"]) if args.requests else requests_from(data)
-    live = send(requests, Client(args.url, args.api_key))
+    account_events = None
+    if event_requests:
+        print(f"recording the {len(event_requests)} account events before the purchases that follow them")
+        account_events = AccountEventQueue(np.sort(events["event_ns"].to_numpy()), data["event_ns"].to_numpy(), event_requests)
+    live = send(requests, Client(args.url, args.api_key), account_events)
     print(f"sent {len(live)} purchases in {(time.time() - started) / 60:.1f} min")
 
     rows = labelled_rows(data, built, python_score)

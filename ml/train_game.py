@@ -50,9 +50,10 @@ DEFAULT_MAX_MISSED_FRAUD = 0.02
 
 
 def load(path):
-    """Builds the features of a simulator dump and keeps each purchase's scenario."""
+    """Builds the features of a simulator dump with its account events and
+    keeps each purchase's scenario."""
     raw = features.load_requests(path)
-    data = features.build(raw.copy())
+    data = features.build(raw.copy(), features.load_account_events(path))
     data["pattern"] = raw["pattern"].to_numpy()
     return data
 

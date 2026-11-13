@@ -76,3 +76,27 @@ def test_labels_csv_keeps_truth_out_of_requests(tmp_path):
     saved = pd.read_csv(tmp_path / "labels.csv")
     assert list(saved) == ["transaction_id", "is_fraud", "scenario"]
     assert saved.loc[0, "scenario"] == "stolen_card"
+
+
+class RecordingClient:
+    def __init__(self):
+        self.sent = []
+
+    def record_account_event(self, event):
+        self.sent.append(("event", event["event_id"]))
+
+    def score(self, request):
+        self.sent.append(("score", request["transaction_id"]))
+        return {"outcome": "allow", "score": 0, "model_score": None}
+
+
+def test_account_events_are_recorded_before_the_purchases_that_follow_them():
+    purchases = [{"transaction_id": "t1"}, {"transaction_id": "t2"}, {"transaction_id": "t3"}]
+    events = [{"event_id": "e1"}, {"event_id": "e2"}, {"event_id": "e3"}]
+    # e2 happens at t2's time, so it only has to be recorded before t3.
+    queue = replay.AccountEventQueue(np.array([5, 20, 25]), np.array([10, 20, 30]), events)
+    client = RecordingClient()
+
+    replay.send(purchases, client, queue)
+
+    assert client.sent == [("event", "e1"), ("score", "t1"), ("score", "t2"), ("event", "e2"), ("event", "e3"), ("score", "t3")]

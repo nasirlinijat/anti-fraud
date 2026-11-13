@@ -26,6 +26,7 @@ def test_reference_rows_drop_the_single_world_training_days_and_history_variants
         "world": ["a"] * 40 + ["b"] * 20,
         "day": day,
         "history_start": [0] * 20 + [5] * 20 + [0] * 20,
+        "account_events_masked": False,
         "is_fraud": 0,
     })
 
@@ -56,7 +57,7 @@ def test_missing_fold_models_stop_the_run_instead_of_training(tmp_path):
 def world_frame(tmp_path, name, seed):
     write_world(tmp_path / f"{name}.jsonl", name, seed)
     frame = train_game.load(tmp_path / f"{name}.jsonl")
-    frame["world"], frame["history_start"] = name, 0
+    frame["world"], frame["history_start"], frame["account_events_masked"] = name, 0, False
     return frame
 
 

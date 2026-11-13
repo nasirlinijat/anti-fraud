@@ -336,13 +336,13 @@ Then, from `ml`:
 .venv/bin/python replay.py data/train_transaction.csv --url http://localhost:8082 --api-key replay-key
 ```
 
-A simulator dump is replayed the same way, from its first purchase, with the model trained on it; the report then also shows, per scenario, how many purchases the rules alone and the rules with the model stopped:
+A simulator dump is replayed the same way, from its first purchase, with the model trained on it; the report then also shows, per scenario, how many purchases the rules alone and the rules with the model stopped. The account events in the file next to the dump are sent to `POST /account-events` before the first purchase that comes after them. Set `SCORE_RATE_LIMIT=0` on the replay backend, or the replay is slowed down by 429 responses:
 
 ```bash
 .venv/bin/python replay.py --requests data/game/world2.jsonl --limit 10000 --model ../backend/models/lgbm-game-v5.json --url http://localhost:8082 --api-key replay-key --out output/replay-game
 ```
 
-For IEEE-CIS, by default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 10000` for a quick check. A full run sends about 170,000 purchases and takes about 40 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts` in that database.
+For IEEE-CIS, by default it replays days 123 to 183: 30 days that build the history, then the test month (days 153 to 183). Add `--limit 10000` for a quick check. A full run sends about 170,000 purchases and takes about 40 minutes on a laptop. To run again, empty the tables first with `TRUNCATE review_resolutions, decisions, purchases, feature_counts, account_events` in that database.
 
 It writes to `output/replay/`:
 

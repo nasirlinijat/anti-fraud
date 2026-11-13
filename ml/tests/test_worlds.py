@@ -22,6 +22,7 @@ def world_rows(world, count, seed, history_start=0):
     rows["is_fraud"] = (rows["amount_to_avg"] + rng.normal(0, 2, count) > 9).astype(int)
     rows["world"] = world
     rows["history_start"] = history_start
+    rows["account_events_masked"] = False
     return rows
 
 
@@ -68,6 +69,45 @@ def test_history_variant_starts_without_history_and_keeps_its_window(tmp_path):
     assert variant["player_txn_count"].tolist() == [0.0, 1.0]
     assert variant["player_avg_amount"].tolist() == [features.MISSING, 3.0]
     assert variant["history_start"].tolist() == [5, 5]
+
+
+def write_account_events(dump, events):
+    """events holds (player ID, event type, day, hour, device ID)."""
+    lines = [json.dumps({"event_id": f"e{index}", "player_id": player_id, "event_type": event_type,
+                         "event_time": f"2026-01-{day + 1:02d}T{hour:02d}:00:00Z", "device_id": device_id})
+             for index, (player_id, event_type, day, hour, device_id) in enumerate(events)]
+    features.account_events_path(dump).write_text("\n".join(lines) + "\n")
+
+
+def test_history_variant_drops_the_account_events_before_its_start(tmp_path):
+    dump = tmp_path / "world.jsonl"
+    write_purchases(dump, [("t1", 0, "p1", 100), ("t2", 5, "p1", 200), ("t3", 6, "p1", 300)])
+    write_account_events(dump, [("p1", "password_reset", 4, 23, None), ("p1", "login", 5, 1, "d1")])
+    raw, events = features.load_requests(dump), features.load_account_events(dump)
+
+    full = worlds.history_variant(raw, 0, 3, events)
+    variant = worlds.history_variant(raw, 5, 3, events)
+
+    assert full["hours_since_password_reset"].tolist() == [features.MISSING, 13.0, 37.0]
+    assert variant["hours_since_password_reset"].tolist() == [features.MISSING, features.MISSING]
+    assert variant["login_devices_24h"].tolist() == [1.0, 0.0]
+
+
+def test_a_world_with_account_events_gets_a_copy_without_them_that_is_never_scored(tmp_path):
+    dump = tmp_path / "world.jsonl"
+    write_purchases(dump, [("t1", 0, "p1", 100), ("t2", 1, "p1", 200)])
+    write_account_events(dump, [("p1", "login", 1, 6, "d1")])
+    plain = tmp_path / "plain.jsonl"
+    write_purchases(plain, [("t1", 0, "p1", 100), ("t2", 1, "p1", 200)])
+
+    data, infos = worlds.load_worlds([dump, plain], [0], 14)
+
+    copy = data[data["account_events_masked"]]
+    assert set(copy["world"]) == {"world"} and len(copy) == 2
+    assert (copy[worlds.ACCOUNT_EVENT_INPUTS] == features.MISSING).all().all()
+    assert data.loc[~data["account_events_masked"] & (data["world"] == "world"), "login_devices_24h"].tolist() == [features.MISSING, 1.0]
+    assert len(worlds.held_out_rows(data, "world")) == 2 and not worlds.held_out_rows(data, "world")["account_events_masked"].any()
+    assert [info["account_events"] for info in infos] == [1, 0]
 
 
 def test_a_world_and_its_variants_stay_on_one_side_of_every_fold():
