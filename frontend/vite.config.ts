@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 
 const scoreRoute = '^/score(?:/|\\?|$)'
-const sessionRoutes = '^/(?:auth|admin|reviews|stats|blocklist|rulesets|simulations)(?:/|\\?|$)'
+const sessionRoutes = '^/(?:auth|admin|reviews|model|stats|blocklist|rulesets|simulations)(?:/|\\?|$)'
 const protectedRoute = new RegExp(`${scoreRoute}|${sessionRoutes}`)
 const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i
 

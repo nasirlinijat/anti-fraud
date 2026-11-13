@@ -1154,6 +1154,75 @@ paths:
         "503":
           $ref: "#/components/responses/OperatorAccessUnavailable"
 
+  /model:
+    get:
+      tags: [Reviews]
+      operationId: getModelStatus
+      summary: Read the loaded fraud model and its training metrics
+      description: >-
+        Returns the active ruleset's model mode and effective thresholds.
+        Evaluation metrics describe the named dataset in the loaded model's
+        training report. Model risk helps prioritize reviews.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      responses:
+        "200":
+          description: The current model status.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loaded, version, mode, clear_below, flag_at, evaluation]
+                properties:
+                  loaded:
+                    type: boolean
+                  version:
+                    type: string
+                    nullable: true
+                    description: Null when no model is loaded.
+                  mode:
+                    type: string
+                    enum: ["off", shadow, assist]
+                  clear_below:
+                    type: number
+                    nullable: true
+                    description: Effective threshold for clearing a review in assist mode. Null when no model is loaded.
+                  flag_at:
+                    type: number
+                    nullable: true
+                    description: Effective threshold for flagging a purchase in assist mode. Null when no model is loaded.
+                  evaluation:
+                    type: object
+                    nullable: true
+                    description: Null when evaluation metrics are unavailable.
+                    required: [dataset, roc_auc, pr_auc]
+                    properties:
+                      dataset: {type: string}
+                      roc_auc: {type: number, minimum: 0, maximum: 1}
+                      pr_auc: {type: number, minimum: 0, maximum: 1}
+        "401":
+          description: The analyst key or session is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The active model settings could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /reviews:
     get:
       tags: [Reviews]
@@ -1929,7 +1998,7 @@ components:
       description: >-
         The token returned by POST /auth/login. Only its SHA-256 hash is
         stored, and it expires 12 hours after sign-in. Reviewers can use the
-        review endpoints. Admins can use the review endpoints and every
+        review endpoints and model status. Admins can also use every
         statistics, quality, ruleset, blocklist, and simulation endpoint. A
         request with an Authorization header is checked as a session, and any
         X-API-Key header on it is ignored. POST /score accepts only the
@@ -1939,7 +2008,7 @@ components:
     RoleNotAllowed:
       description: >-
         The session is valid, but its account role cannot use this endpoint.
-        Reviewers can use only the review endpoints.
+        Reviewers can use the review endpoints and model status.
       content:
         application/json:
           schema:
@@ -2592,7 +2661,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [off, shadow, assist]
+          enum: ["off", shadow, assist]
           description: |
             `off` computes and saves no model score. `shadow` saves the model
             score but does not change the outcome. `assist` lets the model

@@ -193,3 +193,32 @@ test('Simulator can start, follow and stop a synthetic run', async ({ page }) =>
   await page.getByRole('button', { name: 'Stop run', exact: true }).click()
   await expect(page.locator('.simulation-progress .simulation-status')).toHaveText('Stopped')
 })
+
+test('the review queue shows the active model and evaluation dataset', async ({ page }) => {
+  await page.goto('/#/reviews')
+  const model = page.getByRole('region', { name: 'Fraud model' })
+  await expect(model).toContainText('lgbm-game-v9')
+  await expect(model).toContainText('Assist')
+  await expect(model).toContainText('0.011527')
+  await expect(model).toContainText('0.544632')
+  await expect(model).toContainText('Held-out simulator traffic')
+  await expect(model).toContainText('0.9624')
+})
+
+test('the review queue can retry model status and shows when the model is off', async ({ page }) => {
+  let available = false
+  await page.route('**/model', route => {
+    expect(route.request().headers().authorization).toBe(`Bearer ${sessionToken}`)
+    return !available
+      ? route.fulfill({ status: 500, json: { error: 'Could not read model status.' } })
+      : route.fulfill({ json: {
+        loaded: false, version: null, mode: 'assist', clear_below: null, flag_at: null, evaluation: null,
+      } })
+  })
+  await page.goto('/#/reviews')
+  const model = page.getByRole('region', { name: 'Fraud model' })
+  await expect(model.getByRole('alert')).toHaveText('Could not read model status.')
+  available = true
+  await model.getByRole('button', { name: 'Retry' }).click()
+  await expect(model.getByRole('status')).toHaveText('Model is off')
+})
