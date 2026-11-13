@@ -146,6 +146,21 @@ func (mr *MockStoreMockRecorder) Queue(ctx, limit, order, after, claimedBy any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Queue", reflect.TypeOf((*MockStore)(nil).Queue), ctx, limit, order, after, claimedBy)
 }
 
+// QueuePage mocks base method.
+func (m *MockStore) QueuePage(ctx context.Context, limit int, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "QueuePage", ctx, limit, order, number, claimedBy)
+	ret0, _ := ret[0].(models.NumberedReviewPage)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// QueuePage indicates an expected call of QueuePage.
+func (mr *MockStoreMockRecorder) QueuePage(ctx, limit, order, number, claimedBy any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QueuePage", reflect.TypeOf((*MockStore)(nil).QueuePage), ctx, limit, order, number, claimedBy)
+}
+
 // ReleaseClaim mocks base method.
 func (m *MockStore) ReleaseClaim(ctx context.Context, purchaseID int64) (models.ReleaseStatus, error) {
 	m.ctrl.T.Helper()
@@ -174,4 +189,19 @@ func (m *MockStore) Resolve(ctx context.Context, d models.ReviewDecision) (model
 func (mr *MockStoreMockRecorder) Resolve(ctx, d any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Resolve", reflect.TypeOf((*MockStore)(nil).Resolve), ctx, d)
+}
+
+// ResolvedCase mocks base method.
+func (m *MockStore) ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolvedCase", ctx, purchaseID)
+	ret0, _ := ret[0].(models.CaseItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolvedCase indicates an expected call of ResolvedCase.
+func (mr *MockStoreMockRecorder) ResolvedCase(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvedCase", reflect.TypeOf((*MockStore)(nil).ResolvedCase), ctx, purchaseID)
 }

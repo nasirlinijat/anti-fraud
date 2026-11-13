@@ -169,7 +169,7 @@ const network = { window_days: 30, anchors: [
 ] }
 
 async function openNetworkCase(page: Page) {
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [networkCase], next_cursor: null, model_enabled: true } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [networkCase], next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   await page.route('**/reviews/41', route => route.fulfill({ json: { ...networkCase, ruleset_version: 3, player_purchases: [], device_activity: null, account_events: [] } }))
   await page.goto('/#/reviews')
   await page.getByRole('button', { name: 'demo-transaction', exact: true }).click()
@@ -305,4 +305,33 @@ test('the linked purchases awaiting review panel has no detectable accessibility
       expect(audit.violations, `${scheme} at ${width}`).toEqual([])
     }
   }
+})
+
+test('a resolved linked case shows evidence and returns to the selected connection', async ({ page }) => {
+  const resolved = { purchase_id: '78', transaction_id: 'resolved-transaction', event_time: now, amount_minor: '499',
+    outcome: 'review', review_decision: 'reject', claimed_by: null, awaiting_review: false }
+  await page.route('**/reviews/41/network', route => route.fulfill({ json: network }))
+  await page.route('**/reviews/41/network/purchases?*', route => route.fulfill({
+    json: { ...linkedPurchases, purchases: [resolved], total: 1 },
+  }))
+  await page.route('**/reviews/78/resolved', route => route.fulfill({ json: {
+    ...networkCase, purchase_id: '78', transaction_id: resolved.transaction_id, amount_minor: resolved.amount_minor,
+    ruleset_version: 3, player_purchases: [], device_activity: null, account_events: [],
+    fired_rules: [{ name: 'card_velocity', points: 40, message: 'Five earlier purchases used this card.' }],
+    resolution: { decision: 'reject', analyst_id: 'other-reviewer', resolved_at: now },
+  } }))
+  await openNetworkCase(page)
+  const node = page.getByRole('button', { name: 'Player demo-player-2: Blocked, 1 shared purchase', exact: true })
+  await node.press('Enter')
+  const open = page.getByRole('button', { name: 'View resolved case resolved-transaction' })
+  await open.click()
+  const dialog = page.getByRole('dialog', { name: 'Resolved case · resolved-transaction' })
+  await expect(dialog.getByText('other-reviewer', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Rejected', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Five earlier purchases used this card.')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /claim|approve|reject/i })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Back to connection' }).click()
+  await expect(node).toHaveAttribute('aria-pressed', 'true')
+  await expect(open).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'demo-transaction', exact: true })).toBeVisible()
 })

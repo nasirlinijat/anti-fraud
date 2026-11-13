@@ -45,7 +45,7 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   const item = () => ({ purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
     amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model', fired_rules: [],
     claimed_by: claimed ? 'demo-user' : null, claimed_at: claimed ? now : null })
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item()], next_cursor: null, model_enabled: true } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: posts ? [] : [item()], next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   const lateLogin = { event_id: 'demo-login', event_type: 'login', event_time: now, device_id: 'demo-device', ip_country: 'TR',
     received_at: now, recorded_after_decision: true }
   await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null,
@@ -86,7 +86,7 @@ const ownClaim = { purchase_id: 'demo-purchase', transaction_id: 'demo-transacti
 
 test('a rejection adds the chosen card and player to the blocklist and names them', async ({ page }) => {
   const bodies: unknown[] = []
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: bodies.length ? [] : [ownClaim], next_cursor: null, model_enabled: false } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: bodies.length ? [] : [ownClaim], next_cursor: null, model_enabled: false, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   await page.route('**/reviews/demo-purchase/decision', async route => {
     bodies.push(route.request().postDataJSON())
     await route.fulfill({ status: 201, json: { device_blocked: false, card_blocked: true, player_blocked: true } })
@@ -105,7 +105,7 @@ test('a rejection adds the chosen card and player to the blocklist and names the
 })
 
 test('an approval offers no blocklist choices', async ({ page }) => {
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [ownClaim], next_cursor: null, model_enabled: false } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [ownClaim], next_cursor: null, model_enabled: false, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   await page.goto('/#/reviews')
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await expect(page.getByRole('dialog').getByRole('heading', { name: 'Approve this purchase?' })).toBeVisible()
@@ -116,7 +116,7 @@ test('a purchase claimed by another account offers no decision', async ({ page }
   const item = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
     amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: null, model_version: null, fired_rules: [],
     claimed_by: 'other-reviewer', claimed_at: now }
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [item], next_cursor: null, model_enabled: false } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [item], next_cursor: null, model_enabled: false, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   await page.goto('/#/reviews')
   await expect(page.getByText('Claimed by other-reviewer', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /^(Claim|Approve|Reject) demo-transaction$/ })).toHaveCount(0)
@@ -129,7 +129,7 @@ const wideRow = { purchase_id: 'demo-purchase', transaction_id: 'demo-transactio
 
 test('row actions stay in view when the review table is wider than the page', async ({ page }) => {
   const rows = [wideRow, { ...wideRow, purchase_id: 'mine', transaction_id: 'demo-mine', claimed_by: 'demo-user', claimed_at: now }]
-  await page.route('**/reviews?*', route => route.fulfill({ json: { items: rows, next_cursor: null, model_enabled: true } }))
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: rows, next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 } } }))
   for (const width of [1024, 1280]) {
     await page.setViewportSize({ width, height: 800 })
     await page.goto('/#/reviews')
@@ -146,7 +146,7 @@ test('the sort menu opens below its button and changes the queue order', async (
   const sorts: (string | null)[] = []
   await page.route('**/reviews?*', route => {
     sorts.push(new URL(route.request().url()).searchParams.get('sort'))
-    return route.fulfill({ json: { items: [wideRow], next_cursor: null, model_enabled: true } })
+    return route.fulfill({ json: { items: [wideRow], next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 } } })
   })
   // A short window leaves no room below the button, which is where a native list would move on top of it.
   await page.setViewportSize({ width: 1280, height: 300 })
@@ -313,4 +313,42 @@ test('Rulesets shows effective thresholds for a version that uses the model repo
   await expect(flagAt).toHaveAttribute('placeholder', '0.544632')
   await expect(clearBelow).toHaveValue('')
   await expect(flagAt).toHaveValue('')
+})
+
+test('review queue navigates to nearby and end pages and resets when the claim filter changes', async ({ page }) => {
+  await page.route('**/reviews?*', route => {
+    const query = new URL(route.request().url()).searchParams
+    const number = Number(query.get('page'))
+    const mine = query.get('claimed') === 'mine'
+    return route.fulfill({ json: {
+      items: [], next_cursor: null, model_enabled: false,
+      pagination: { page: mine ? 1 : number, total_pages: mine ? 1 : 9, total_items: mine ? 0 : 820 },
+    } })
+  })
+  await page.goto('/#/reviews')
+  const pager = page.getByRole('navigation', { name: 'Review queue pagination' })
+  await expect(pager).toContainText('Page 1 of 9')
+  await expect(pager).toContainText('820 purchases')
+  await expect(pager.getByRole('button', { name: 'First' })).toBeDisabled()
+  await pager.getByRole('button', { name: 'Next' }).click()
+  await expect(pager.getByRole('button', { name: 'Page 2', exact: true })).toHaveAttribute('aria-current', 'page')
+  await pager.getByRole('button', { name: 'Page 4', exact: true }).click()
+  await expect(pager).toContainText('Page 4 of 9')
+  await pager.getByRole('button', { name: 'Last' }).click()
+  await expect(pager).toContainText('Page 9 of 9')
+  await expect(pager.getByRole('button', { name: 'Next' })).toBeDisabled()
+  await pager.getByRole('button', { name: 'Previous' }).click()
+  await expect(pager).toContainText('Page 8 of 9')
+  await pager.getByRole('button', { name: 'First' }).click()
+  await expect(pager).toContainText('Page 1 of 9')
+  await pager.getByRole('button', { name: 'Next' }).click()
+  await expect(pager).toContainText('Page 2 of 9')
+  const filtered = page.waitForRequest(url => {
+    const query = new URL(url.url()).searchParams
+    return query.get('claimed') === 'mine' && query.get('page') === '1'
+  })
+  await page.getByRole('button', { name: 'My claims' }).click()
+  await filtered
+  await expect(pager).toContainText('Page 1 of 1')
+  await expect(pager).toContainText('0 purchases')
 })

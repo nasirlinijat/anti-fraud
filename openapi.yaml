@@ -1231,7 +1231,7 @@ paths:
       description: >-
         Returns up to 100 purchases, highest score first. Ties go to the oldest
         queued purchase, then the lowest purchase ID. Model sorting puts
-        missing scores last. Follow next_cursor with the same sort order.
+        missing scores last. Follow next_cursor with the same sort order or request a numbered page.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -1250,6 +1250,15 @@ paths:
             type: string
             minLength: 1
             maxLength: 128
+        - in: query
+          name: page
+          description: >-
+            Request a numbered page and the count for the current filter.
+            Cannot be combined with cursor. A page beyond the end returns the last available page.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
         - in: query
           name: claimed
           description: >-
@@ -1272,7 +1281,7 @@ paths:
                 $ref: "#/components/schemas/ReviewPage"
         "400":
           description: >-
-            The sort order, cursor, or claimed filter is invalid, the cursor
+            The sort order, cursor, page, or claimed filter is invalid, the cursor
             belongs to a different sort order, or claimed=mine was sent with
             an analyst key.
           content:
@@ -1899,6 +1908,67 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}/resolved:
+    get:
+      tags: [Reviews]
+      operationId: getResolvedReviewCase
+      summary: Get the evidence and decision for a resolved review
+      description: >-
+        Returns the scoring evidence for a resolved review, together with
+        the analyst's decision, ID, and resolution time.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The resolved purchase ID from the linked purchases list.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+      responses:
+        "200":
+          description: The resolved review case.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolvedReviewCase"
+        "400":
+          description: The purchase ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No resolved review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The review case could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /reviews/{purchase_id}/network:
     get:
       tags: [Reviews]
@@ -2463,7 +2533,15 @@ components:
         next_cursor:
           type: string
           nullable: true
-          description: Cursor for the next page, or null if this is the last page.
+          description: Cursor for the next page. Null for numbered pages or the last cursor page.
+        pagination:
+          type: object
+          description: Present when page is requested. An empty queue is represented as page 1 of 1.
+          required: [page, total_pages, total_items]
+          properties:
+            page: {type: integer, format: int64, minimum: 1}
+            total_pages: {type: integer, format: int64, minimum: 1}
+            total_items: {type: integer, format: int64, minimum: 0}
         model_enabled:
           type: boolean
           description: Whether the scoring service currently has a model loaded.
@@ -2670,6 +2748,27 @@ components:
                 $ref: "#/components/schemas/CaseAccountEvent"
             ip_intel:
               $ref: "#/components/schemas/CaseIPIntel"
+
+    ResolvedReviewCase:
+      allOf:
+        - $ref: "#/components/schemas/ReviewCase"
+        - type: object
+          required: [resolution]
+          properties:
+            resolution:
+              type: object
+              required: [decision, analyst_id, resolved_at]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                analyst_id:
+                  type: string
+                  description: The username or analyst key identity that made the decision.
+                resolved_at:
+                  type: string
+                  format: date-time
+                  description: When the review was decided, in UTC.
 
     CaseIPIntel:
       type: object

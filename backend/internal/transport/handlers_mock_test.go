@@ -338,3 +338,40 @@ func TestStatsHandlerWithMockedService(t *testing.T) {
 	service.EXPECT().Recent(gomock.Any(), &after).Return(models.RecentPipeline{After: &after, NextAfter: 9}, nil)
 	wantResponse(t, send(mux, http.MethodGet, "/stats/pipeline/recent?after=5", mockServiceKey, ""), http.StatusOK, `"after":5`, `"next_after":9`)
 }
+
+func TestResolvedReviewHandlerReturnsTheAnalystDecision(t *testing.T) {
+	mux, service := newMockReviewMux(t)
+	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	service.EXPECT().ResolvedCase(gomock.Any(), int64(9)).Return(models.CaseItem{
+		QueueItem:  models.QueueItem{PurchaseID: 9, TransactionID: "resolved-transaction"},
+		Resolution: &models.CaseResolution{Decision: "approve", AnalystID: "reviewer-one", ResolvedAt: at},
+	}, nil)
+	rec := send(mux, http.MethodGet, "/reviews/9/resolved", mockAnalystKey, "")
+	wantResponse(t, rec, http.StatusOK, `"transaction_id":"resolved-transaction"`)
+	got := decodeJSON[resolvedCaseResponse](t, rec)
+	if got.Resolution.Decision != "approve" || got.Resolution.AnalystID != "reviewer-one" || !got.Resolution.ResolvedAt.Equal(at) {
+		t.Fatalf("unexpected resolution: %+v", got.Resolution)
+	}
+}
+
+func TestReviewHandlerReturnsNumberedQueueTotals(t *testing.T) {
+	mux, service := newMockReviewMux(t)
+	service.EXPECT().QueuePage(gomock.Any(), models.QueueByModelScore, int64(4), (*string)(nil)).
+		Return(models.NumberedReviewPage{Number: 3, TotalItems: 207}, nil)
+
+	rec := send(mux, http.MethodGet, "/reviews?sort=model_score&page=4", mockAnalystKey, "")
+	wantResponse(t, rec, http.StatusOK)
+	page := decodeJSON[queueResponse](t, rec)
+	want := queuePagination{Page: 3, TotalPages: 3, TotalItems: 207}
+	if page.Pagination == nil || *page.Pagination != want || page.NextCursor != nil {
+		t.Fatalf("queue page = %+v, want pagination %+v", page, want)
+	}
+}
+
+func TestReviewHandlerRejectsInvalidPageNumbers(t *testing.T) {
+	mux, _ := newMockReviewMux(t)
+	for _, query := range []string{"page=0", "page=-1", "page=abc", "page=1&page=2", "page=9223372036854775808"} {
+		rec := send(mux, http.MethodGet, "/reviews?"+query, mockAnalystKey, "")
+		wantResponse(t, rec, http.StatusBadRequest)
+	}
+}

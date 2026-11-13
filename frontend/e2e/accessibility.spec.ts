@@ -14,7 +14,7 @@ async function mockPopulatedLists(page: Page) {
   await page.route('**/reviews?*', route => route.fulfill({ json: {
     items: [review, { ...review, purchase_id: 'mine', transaction_id: 'demo-mine', claimed_by: 'demo-user', claimed_at: now },
       { ...review, purchase_id: 'other', transaction_id: 'demo-other', claimed_by: 'other-reviewer', claimed_at: now }],
-    next_cursor: null, model_enabled: true,
+    next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 },
   } }))
   await page.route('**/simulations?*', route => route.fulfill({ json: { items: [], available_scenarios: ['normal'] } }))
   await page.route('**/blocklist', route => route.fulfill({ json: {
