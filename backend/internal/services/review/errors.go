@@ -13,4 +13,6 @@ var (
 	ErrNoOpenClaim          = errors.New("purchase has no open claim")
 	ErrInvalidNetworkAnchor = errors.New("anchor must be device, card, or player")
 	ErrInvalidLinkedValue   = errors.New("value must be 1 to 256 bytes without control characters")
+	ErrInvalidBatchSize     = errors.New("purchase_ids must list 1 to 50 purchases")
+	ErrDuplicatePurchaseID  = errors.New("purchase_ids must not list a purchase twice")
 )

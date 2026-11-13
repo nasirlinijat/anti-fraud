@@ -27,9 +27,13 @@ type ReviewService interface {
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
+	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error)
 	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
+	ClaimMany(ctx context.Context, purchaseIDs []int64, username string) ([]review.ClaimResult, error)
+	DecideMany(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
+	DecideManyClaimed(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
 	ReleaseClaim(ctx context.Context, purchaseID int64) error
 }
@@ -46,6 +50,7 @@ func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 // RegisterReviewRoutes exposes the queue, case evidence, claims, and decisions
 // to analysts with a key and to signed-in reviewers and admins. Only
 // signed-in accounts can claim, and they decide only what they have claimed.
+// The batch routes claim and decide several purchases, each on its own.
 func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.Access) {
 	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
 	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
@@ -57,8 +62,13 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	mux.HandleFunc("GET /reviews/{purchase_id}/network/purchases", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveNetworkPurchases(w, r)
 	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/network/reviews", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveLinkedReviews(w, r)
+	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
+	mux.HandleFunc("POST /reviews/claims", access.Review(h.serveBatchClaim))
+	mux.HandleFunc("POST /reviews/decisions", access.Review(h.serveBatchDecision))
 	mux.HandleFunc("DELETE /reviews/{purchase_id}/claim", access.Admin(h.serveRelease))
 	mux.HandleFunc("GET /admin/assignments", access.Admin(h.serveAssignments))
 }
@@ -373,7 +383,7 @@ func (h *ReviewHandler) serveClaim(w http.ResponseWriter, r *http.Request, actor
 		return
 	}
 	if !actor.Session {
-		platform.WriteError(w, http.StatusForbidden, "claiming a purchase needs a signed-in account")
+		platform.WriteError(w, http.StatusForbidden, claimNeedsSessionMessage)
 		return
 	}
 	claim, err := h.service.Claim(r.Context(), purchaseID, actor.ID)

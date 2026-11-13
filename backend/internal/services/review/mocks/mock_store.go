@@ -86,6 +86,21 @@ func (mr *MockStoreMockRecorder) Claim(ctx, purchaseID, username any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockStore)(nil).Claim), ctx, purchaseID, username)
 }
 
+// LinkedReviews mocks base method.
+func (m *MockStore) LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LinkedReviews", ctx, purchaseID)
+	ret0, _ := ret[0].(models.LinkedReviews)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LinkedReviews indicates an expected call of LinkedReviews.
+func (mr *MockStoreMockRecorder) LinkedReviews(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LinkedReviews", reflect.TypeOf((*MockStore)(nil).LinkedReviews), ctx, purchaseID)
+}
+
 // Network mocks base method.
 func (m *MockStore) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {
 	m.ctrl.T.Helper()

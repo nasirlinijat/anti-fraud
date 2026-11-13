@@ -123,6 +123,16 @@ type LinkedPurchase struct {
 	AwaitingReview bool
 }
 
+// LinkedReviews lists the other purchases awaiting review that share the
+// device, card, or player of a purchase under review within WindowDays of it.
+type LinkedReviews struct {
+	WindowDays int
+	// Total counts every matching purchase, including those left out of Items.
+	Total int64
+	// Items lists the matching purchases in the default queue order.
+	Items []QueueItem
+}
+
 // NetworkStatus is the worst thing known about a linked entity.
 type NetworkStatus string
 

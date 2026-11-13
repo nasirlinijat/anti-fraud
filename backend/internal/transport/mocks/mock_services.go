@@ -168,6 +168,21 @@ func (mr *MockReviewServiceMockRecorder) Claim(ctx, purchaseID, username any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockReviewService)(nil).Claim), ctx, purchaseID, username)
 }
 
+// ClaimMany mocks base method.
+func (m *MockReviewService) ClaimMany(ctx context.Context, purchaseIDs []int64, username string) ([]review.ClaimResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimMany", ctx, purchaseIDs, username)
+	ret0, _ := ret[0].([]review.ClaimResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClaimMany indicates an expected call of ClaimMany.
+func (mr *MockReviewServiceMockRecorder) ClaimMany(ctx, purchaseIDs, username any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimMany", reflect.TypeOf((*MockReviewService)(nil).ClaimMany), ctx, purchaseIDs, username)
+}
+
 // Decide mocks base method.
 func (m *MockReviewService) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	m.ctrl.T.Helper()
@@ -196,6 +211,51 @@ func (m *MockReviewService) DecideClaimed(ctx context.Context, purchaseID int64,
 func (mr *MockReviewServiceMockRecorder) DecideClaimed(ctx, purchaseID, decision, username, blocks any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideClaimed), ctx, purchaseID, decision, username, blocks)
+}
+
+// DecideMany mocks base method.
+func (m *MockReviewService) DecideMany(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecideMany", ctx, d)
+	ret0, _ := ret[0].([]review.DecisionResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecideMany indicates an expected call of DecideMany.
+func (mr *MockReviewServiceMockRecorder) DecideMany(ctx, d any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideMany", reflect.TypeOf((*MockReviewService)(nil).DecideMany), ctx, d)
+}
+
+// DecideManyClaimed mocks base method.
+func (m *MockReviewService) DecideManyClaimed(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecideManyClaimed", ctx, d)
+	ret0, _ := ret[0].([]review.DecisionResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecideManyClaimed indicates an expected call of DecideManyClaimed.
+func (mr *MockReviewServiceMockRecorder) DecideManyClaimed(ctx, d any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecideManyClaimed", reflect.TypeOf((*MockReviewService)(nil).DecideManyClaimed), ctx, d)
+}
+
+// LinkedReviews mocks base method.
+func (m *MockReviewService) LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LinkedReviews", ctx, purchaseID)
+	ret0, _ := ret[0].(models.LinkedReviews)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LinkedReviews indicates an expected call of LinkedReviews.
+func (mr *MockReviewServiceMockRecorder) LinkedReviews(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LinkedReviews", reflect.TypeOf((*MockReviewService)(nil).LinkedReviews), ctx, purchaseID)
 }
 
 // Network mocks base method.

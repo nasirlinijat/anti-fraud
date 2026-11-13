@@ -71,6 +71,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"NetworkDevicePlayerPurchases", storage.NetworkDevicePlayerPurchasesSQL, []any{"device-1", monthBefore, monthAfter, "player-2", int32(50)}},
 		{"NetworkCardPlayerPurchases", storage.NetworkCardPlayerPurchasesSQL, []any{"card-1", monthBefore, monthAfter, "player-2", int32(50)}},
 		{"NetworkPlayerCardPurchases", storage.NetworkPlayerCardPurchasesSQL, []any{"player-1", monthBefore, monthAfter, "card-2", int32(50)}},
+		{"LinkedReviews", storage.LinkedReviewsSQL, []any{"device-1", "card-1", "player-1", monthBefore, monthAfter, int64(1), int32(50)}},
 		{"AccountHistory", storage.AccountHistorySQL, []any{"player-1", pgtype.Timestamptz{Time: at.Time.Add(-24 * time.Hour), Valid: true}, at, int32(50)}},
 		{"GetTrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, []any{
 			"device-1", "player-1", pgtype.Timestamptz{Time: at.Time.AddDate(0, 0, -90), Valid: true}, at, "txn-1",

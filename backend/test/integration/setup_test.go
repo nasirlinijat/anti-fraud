@@ -16,8 +16,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/accountevent"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
@@ -119,8 +122,10 @@ func run(m *testing.M) int {
 }
 
 type app struct {
-	mux *http.ServeMux
-	tx  pgx.Tx
+	mux      *http.ServeMux
+	tx       pgx.Tx
+	accounts *account.Service
+	sessions *auth.Service
 }
 
 func newApp(t *testing.T) app {
@@ -161,7 +166,8 @@ func newApp(t *testing.T) app {
 	}
 
 	mux := http.NewServeMux()
-	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
+	sessions := auth.NewService(storage.NewAccountStore(tx), storage.NewSessionStore(tx))
+	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators, Sessions: sessions}
 	accountEvents := storage.NewAccountEventStore(tx)
 	scoreService := score.NewService(rulesets, blocklistSvc, storage.NewPurchaseStore(tx)).UseAccountEvents(accountEvents)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), serviceKey)
@@ -169,7 +175,7 @@ func newApp(t *testing.T) app {
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStore)), access)
-	return app{mux: mux, tx: tx}
+	return app{mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
 }
 
 func (a app) do(t *testing.T, method, path, key, body string) *httptest.ResponseRecorder {
@@ -178,6 +184,31 @@ func (a app) do(t *testing.T, method, path, key, body string) *httptest.Response
 	if key != "" {
 		req.Header.Set("X-API-Key", key)
 	}
+	rec := httptest.NewRecorder()
+	a.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+// signIn creates a reviewer account and returns a session token for it.
+func (a app) signIn(t *testing.T, username string) string {
+	t.Helper()
+	const password = "integration test password"
+	ctx := context.Background()
+	if _, err := a.accounts.Create(ctx, account.NewAccount{Username: username, Password: password, Role: models.RoleReviewer}); err != nil {
+		t.Fatalf("create %s: %v", username, err)
+	}
+	session, err := a.sessions.Login(ctx, username, password)
+	if err != nil {
+		t.Fatalf("sign in %s: %v", username, err)
+	}
+	return session.Token
+}
+
+// doAs sends a request with the session token instead of a key.
+func (a app) doAs(t *testing.T, method, path, token, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	a.mux.ServeHTTP(rec, req)
 	return rec

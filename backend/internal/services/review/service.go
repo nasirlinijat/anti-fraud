@@ -20,6 +20,7 @@ type Store interface {
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
+	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
 	Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
@@ -88,6 +89,12 @@ func (s *Service) NetworkPurchases(ctx context.Context, purchaseID int64, anchor
 	return s.store.NetworkPurchases(ctx, purchaseID, anchor, value)
 }
 
+// LinkedReviews returns the other purchases awaiting review that share the
+// device, card, or player of the purchase under review.
+func (s *Service) LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error) {
+	return s.store.LinkedReviews(ctx, purchaseID)
+}
+
 // isLinkedValue applies the limits of account event IDs, so that a query
 // parameter cannot send an unbounded or unprintable value to the database.
 func isLinkedValue(value string) bool {
@@ -113,11 +120,8 @@ func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision,
 }
 
 func (s *Service) decide(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
-	if d.Decision != "approve" && d.Decision != "reject" {
-		return models.Resolution{}, ErrInvalidDecision
-	}
-	if d.Blocks.Any() && d.Decision != "reject" {
-		return models.Resolution{}, ErrBlockNeedsReject
+	if err := checkDecision(d.Decision, d.Blocks); err != nil {
+		return models.Resolution{}, err
 	}
 	result, err := s.store.Resolve(ctx, d)
 	if err != nil {
@@ -139,9 +143,20 @@ func (s *Service) decide(ctx context.Context, d models.ReviewDecision) (models.R
 	}
 }
 
+func checkDecision(decision string, blocks models.ReviewBlocks) error {
+	if decision != "approve" && decision != "reject" {
+		return ErrInvalidDecision
+	}
+	if blocks.Any() && decision != "reject" {
+		return ErrBlockNeedsReject
+	}
+	return nil
+}
+
 // Claim gives a purchase awaiting review to the signed-in account, so that
 // only that account can decide it. Claiming a purchase the account already
-// holds succeeds again with the original claim.
+// holds succeeds again with the original claim. With ErrClaimedByOther it
+// also returns the claim of the account that holds the purchase.
 func (s *Service) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
 	claim, err := s.store.Claim(ctx, purchaseID, username)
 	if err != nil {
@@ -157,7 +172,7 @@ func (s *Service) Claim(ctx context.Context, purchaseID int64, username string) 
 	case models.ClaimAlreadyResolved:
 		return models.Claim{}, ErrAlreadyDecided
 	case models.ClaimHeldByOther:
-		return models.Claim{}, ErrClaimedByOther
+		return claim, ErrClaimedByOther
 	default:
 		return models.Claim{}, fmt.Errorf("unexpected review claim status %q", claim.Status)
 	}

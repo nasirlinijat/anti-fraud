@@ -36,6 +36,10 @@ func (rejectUnexpectedReviewAccess) NetworkPurchases(context.Context, int64, mod
 	panic("unexpected linked purchases read")
 }
 
+func (rejectUnexpectedReviewAccess) LinkedReviews(context.Context, int64) (models.LinkedReviews, error) {
+	panic("unexpected linked reviews read")
+}
+
 func (rejectUnexpectedReviewAccess) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected models.Resolution write")
 }

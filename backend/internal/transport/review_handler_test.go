@@ -62,6 +62,10 @@ func (fakeReviewReads) NetworkPurchases(context.Context, int64, models.Blocklist
 	panic("unexpected linked purchases request")
 }
 
+func (fakeReviewReads) LinkedReviews(context.Context, int64) (models.LinkedReviews, error) {
+	panic("unexpected linked reviews request")
+}
+
 func (fakeReviewReads) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected decision request")
 }
