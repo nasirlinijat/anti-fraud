@@ -118,6 +118,7 @@ anti-fraud/
 ├── docker-compose.yml        Local PostgreSQL, backend, migration runner, and Swagger UI
 ├── .env.example              Required environment variables
 ├── .agent/
+│   ├── docs/                 Reference docs for features and operations (see section 6)
 │   └── skills/               Project skills (see section 6)
 ├── .github/workflows/ci.yml  CI pipeline
 ├── backend/
@@ -202,6 +203,20 @@ Read the relevant skill before performing the matching task.
 | Commit style | `.agent/skills/commit-style/SKILL.md` | Creating any git commit or branch |
 | Jira task creator | `.agent/skills/jira-task-creator/SKILL.md` | Creating, editing, or planning any Jira work item |
 | Clean code | `.agent/skills/clean-code/SKILL.md` | Writing, reviewing, or refactoring any Go, TypeScript, or Python code |
+
+### 6.1 Reference Docs
+
+Detailed feature and operations reference is in `.agent/docs/`. The index is in `.agent/docs/README.md`. Read the matching file before you change that area, and update it in the same pull request when its behavior changes.
+
+| File | Read before working on |
+|---|---|
+| `.agent/docs/testing.md` | Tests, mocks, integration and concurrency tests, the scoring load test |
+| `.agent/docs/simulator.md` | The simulator CLI, its scenarios, or the console simulation API |
+| `.agent/docs/evaluation.md` | Evaluation labels, chargebacks, the mock bank, or decision quality |
+| `.agent/docs/rulesets.md` | Rulesets or any scoring rule |
+| `.agent/docs/access.md` | Accounts, sessions, roles, claims, or API keys |
+| `.agent/docs/operations.md` | Tracing, rate limits, the database pool, the blocklist cache, metrics, or logs |
+| `.agent/docs/development.md` | The frontend, console pages, `openapi.yaml`, or SQL queries |
 
 ## 7. General Rules
 
