@@ -168,6 +168,26 @@ paths:
         "503":
           $ref: "#/components/responses/DatabaseUnavailable"
 
+  /simulations/reset:
+    post:
+      tags: [Simulations]
+      operationId: resetDemoData
+      summary: Reset the demonstration database
+      description: |
+        Available only when SIMULATION_ENABLED=true. Pause external ingestion
+        and finish in-flight work first. Clears all purchases, decisions,
+        reviews, evaluation data, feature totals, blocklist entries, account
+        events, and simulation history, including request IDs. Preserves
+        rulesets, console accounts, sessions, and configuration audit records.
+        Requires an admin session or operator key. Active console runs conflict.
+      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
+      responses:
+        '204': {description: Demo data reset. Repeating an empty reset is safe.}
+        '401': {description: Missing or invalid operator key or session.}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
+        '404': {description: Simulation feature disabled.}
+        '409': {description: A simulation controller or another reset is active.}
+        '503': {description: Reset service unavailable or request deadline exceeded.}
   /simulations:
     post:
       tags: [Simulations]

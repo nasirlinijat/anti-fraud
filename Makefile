@@ -4,7 +4,7 @@ export
 TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 TEST_REDIS_URL ?= redis://localhost:$(REDIS_PORT)/0
 
-.PHONY: up down db run test test-integration test-ml lint lint-frontend migrate docs simulate
+.PHONY: reset up down db run test test-integration test-ml lint lint-frontend migrate docs simulate
 
 up:
 	docker compose up -d --build --wait
@@ -52,3 +52,6 @@ docs:
 
 simulate:
 	cd backend && go run ./cmd/simulator $(ARGS)
+
+reset:
+	cd backend && go run ./cmd/reset-demo

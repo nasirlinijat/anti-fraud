@@ -85,3 +85,6 @@ Review and block count as flagged. Precision is the fraudulent share of flags, r
 `GET /stats/quality?source=simulator&run_id=<id>` returns the aggregate report. `source=ieee-cis` selects replay labels. `GET /stats/quality/runs?source=simulator` lists run IDs, with a bounded `limit` and exclusive `after` cursor for more. Both use the service key and require a configured `LABELS_DATABASE_URL` with the restricted evaluation role. Quality reads work with `SIMULATION_ENABLED=false`; missing or unavailable evaluation access returns 503 without disabling scoring. The console proxy forwards these routes; the public production API host does not.
 
 Only finalized answers contribute to metrics. Pending and quarantined intents are counted separately and never treated as legitimate purchases. Console runs show their recorded progress; CLI and replay runs have unknown total coverage because ingestion does not store an expected run size. No historical answers are guessed. Labels finalized before purchase verification was introduced need independent source verification; use fresh runs for acceptance comparisons.
+
+Demo reset removes finalized, pending, and quarantined evaluation state together
+with all purchases and simulation history. See [reset instructions](simulator.md#reset-demonstration-data).

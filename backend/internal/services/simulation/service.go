@@ -51,12 +51,14 @@ type Store interface {
 
 // Service owns background workers; database locks also exclude other processes.
 type Service struct {
-	store   Store
-	client  simulator.Scorer
-	mu      sync.Mutex
-	closed  bool
-	cancels map[string]context.CancelFunc
-	wg      sync.WaitGroup
+	resetter   Resetter
+	resetCache ResetCache
+	store      Store
+	client     simulator.Scorer
+	mu         sync.Mutex
+	closed     bool
+	cancels    map[string]context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 // NewService returns the service. When no other controller is active it

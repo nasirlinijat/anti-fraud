@@ -74,7 +74,8 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 		closers = append(closers, evaluation.Close)
 	}
 	quality.RegisterQualityRoutes(mux, quality.NewQualityStore(evaluation), access)
-	manager := newSimulationManager(cfg, pool, evaluation)
+	cache, _ := blocklistStorage.(simulation.ResetCache)
+	manager := newSimulationManager(cfg, pool, evaluation, cache)
 	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, access)
 
 	return manager, closeAll

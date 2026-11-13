@@ -53,6 +53,7 @@ ALTER ROLE antifraud_labels LOGIN PASSWORD :'labels_password';
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM antifraud_labels;
 GRANT USAGE ON SCHEMA public TO antifraud_labels;
 GRANT SELECT, INSERT ON purchase_labels TO antifraud_labels;
+GRANT EXECUTE ON FUNCTION reset_demo_data() TO antifraud_labels;
 GRANT UPDATE(rejection_reason) ON pending_purchase_labels TO antifraud_labels;
 GRANT SELECT, INSERT, DELETE ON pending_purchase_labels TO antifraud_labels;
 -- Full purchase reads are needed to verify pending snapshots; scoring writes remain forbidden.

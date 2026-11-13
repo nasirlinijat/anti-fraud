@@ -15,7 +15,7 @@ func TestEvaluationAccessDoesNotEnableSimulation(t *testing.T) {
 		if pool != nil {
 			pool.Close()
 		}
-		if manager := newSimulationManager(cfg, nil, nil); manager != nil {
+		if manager := newSimulationManager(cfg, nil, nil, nil); manager != nil {
 			t.Fatal("disabled controller was started")
 		}
 	}
