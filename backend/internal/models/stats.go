@@ -48,6 +48,25 @@ type StatsSummary struct {
 	BlocklistBlocks int64 `json:"blocklist_blocks"`
 }
 
+// PipelineModelEffects counts the model's effect on the recent decisions, as
+// ModelEffects does for a window.
+type PipelineModelEffects struct {
+	Flagged int64 `json:"flagged"`
+	Cleared int64 `json:"cleared"`
+}
+
+// RecentPipeline counts the decisions saved after a purchase ID, for the live
+// scoring pipeline. It holds counts only, never a purchase.
+type RecentPipeline struct {
+	// After is the purchase ID the counts start after, nil when the caller sent none.
+	After *int64 `json:"after"`
+	// NextAfter is the largest purchase ID counted, or the cursor when none was.
+	NextAfter       int64                `json:"next_after"`
+	Outcomes        OutcomeCounts        `json:"outcomes"`
+	BlocklistBlocks int64                `json:"blocklist_blocks"`
+	Model           PipelineModelEffects `json:"model"`
+}
+
 // DecisionBucket counts the decisions of each outcome in one time bucket.
 type DecisionBucket struct {
 	Start  time.Time `json:"start"`

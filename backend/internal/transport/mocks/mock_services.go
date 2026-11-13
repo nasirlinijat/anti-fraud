@@ -418,6 +418,21 @@ func (m *MockStatsService) EXPECT() *MockStatsServiceMockRecorder {
 	return m.recorder
 }
 
+// Recent mocks base method.
+func (m *MockStatsService) Recent(ctx context.Context, after *int64) (models.RecentPipeline, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Recent", ctx, after)
+	ret0, _ := ret[0].(models.RecentPipeline)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Recent indicates an expected call of Recent.
+func (mr *MockStatsServiceMockRecorder) Recent(ctx, after any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recent", reflect.TypeOf((*MockStatsService)(nil).Recent), ctx, after)
+}
+
 // Summary mocks base method.
 func (m *MockStatsService) Summary(ctx context.Context, window models.StatsWindow) (models.StatsSummary, error) {
 	m.ctrl.T.Helper()

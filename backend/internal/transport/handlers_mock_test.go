@@ -288,4 +288,8 @@ func TestStatsHandlerWithMockedService(t *testing.T) {
 
 	service.EXPECT().Window("2d", statsNow).Return(models.StatsWindow{}, errors.New("must be one of 15m, 1h, 24h, 7d, all"))
 	wantResponse(t, send(mux, http.MethodGet, "/stats?period=2d", mockServiceKey, ""), http.StatusBadRequest, `"period":"must be one of`)
+
+	after := int64(5)
+	service.EXPECT().Recent(gomock.Any(), &after).Return(models.RecentPipeline{After: &after, NextAfter: 9}, nil)
+	wantResponse(t, send(mux, http.MethodGet, "/stats/pipeline/recent?after=5", mockServiceKey, ""), http.StatusOK, `"after":5`, `"next_after":9`)
 }
