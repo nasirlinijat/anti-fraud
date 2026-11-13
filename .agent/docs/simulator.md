@@ -83,7 +83,22 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 | `quiet_takeover` | Fraud uses an established account from a new phone in the player's own country for a mid-sized amount, and can pass the rules |
 | `device_farm` | Fraud uses one emulator and one connection for four to six accounts created between ten minutes and ten hours earlier, each with its own card, one to three purchases each, minutes apart, ending in a larger purchase |
 
-Before a purchase, the simulator also sends the player's recent logins and password resets to `POST /account-events`: a login before some normal purchases, a rare password reset between 2 hours and 2 days earlier, a login from the new phone or from abroad, and for `account_takeover` and `quiet_takeover` a login from the new device minutes earlier, usually after a password reset. These events come from their own random stream, so a seed produces the same purchases as before. `-dump` writes them to a second file next to the purchases, `world1.account_events.jsonl` for `world1.jsonl`, for model training and the replay. A failed account event is reported and the purchase is still scored. Console simulation runs log each failed account event with the run ID, and log the number of failures when the run finishes.
+Before a purchase, the simulator also sends the player's logins and password resets to `POST /account-events`. Every scenario has them, honest or not, because a game asks for a login before it sells anything:
+
+| Accounts | Account events |
+|---|---|
+| Established, on first purchase in the run | Logins on 5 to 40% of the 30 days before, from the player's own device and country; the share is drawn per player. A player back after a long break (`returning_player`) has none |
+| Created less than a day earlier | One login right after the account was created, from the device and country of the first purchase |
+| Every session | A login 1 to 60 minutes before a purchase whose device and country have not logged in for 6 hours |
+| Second device | 20% of players also play on a second device: 30% of their earlier logins come from it, and 15% of their sessions follow a login on it 1 to 20 hours before |
+| Password resets | 2% of established accounts per 30 days, 2 to 60 minutes before a login; also 10% of `new_phone`, 5% of `internet_cafe`, and 25% of `returning_player` sessions |
+| New device or country, honest | A new phone, an internet cafe's computer, and a trip abroad each log in from the new device or country before the purchase |
+| `account_takeover`, `quiet_takeover` | A login from the attacker's device 1 to 15 minutes before, after a password reset in 45% and 30% of cases, with up to two and one further logins within the hour before |
+| `card_testing`, `device_farm` | Scripts log in 10 seconds to 2 or 5 minutes before every purchase, with up to two and one further logins in the 5 minutes before |
+| `new_account_spend`, `new_big_spender`, `new_casual_player` | The same events: the login after the account was created and a session login 1 to 30 minutes before the purchase |
+| `stolen_card`, `slow_card_testing`, `low_and_slow` | The fraudster's own older account logs in like a regular player's |
+
+These rates follow how players use a game account, not any one dataset. Account events leave out the device and country when the player's client leaves them out of purchases. They come from their own random stream and seeded draws, so a seed produces the same purchases as before. `-dump` writes them to a second file next to the purchases, `world1.account_events.jsonl` for `world1.jsonl`, for model training and the replay. A failed account event is reported and the purchase is still scored. Console simulation runs log each failed account event with the run ID, and log the number of failures when the run finishes.
 
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 
