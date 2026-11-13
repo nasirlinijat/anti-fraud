@@ -176,6 +176,18 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   .review-table .rule-list { min-inline-size: 15rem; }
   .review-table .review-open,
   .review-table .review-actions { white-space: nowrap; flex-wrap: nowrap; }
+
+  /* The actions stay at the edge of the region, so a row can be decided without scrolling sideways.
+     Collapsed borders do not follow a sticky cell, so its divider is a shadow. */
+  .review-table tr > :last-child {
+    position: sticky;
+    inset-inline-end: 0;
+    box-shadow: inset 1px 0 var(--border);
+  }
+
+  .review-table thead th:last-child { z-index: 2; }
+  .review-table tbody td:last-child { background: var(--surface); }
+  .review-table tbody tr:hover > td:last-child { background: color-mix(in srgb, var(--text) 6%, var(--surface)); }
 }
 
 .review-case {

@@ -4,6 +4,7 @@ import { TimeDisplayToggle } from '../Display'
 import { useAccount } from '../sessionContext'
 import { Button } from '../ui/Button'
 import { PageHeader } from '../ui/PageHeader'
+import { SelectMenu } from '../ui/SelectMenu'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
@@ -114,7 +115,9 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
     <>
       <div className="toolbar">
         <ClaimFilterButtons claimed={claimed} onChange={next => change(() => pages.setClaimed(next))} />
-        {modelEnabled && <SortSelect sort={sort} onChange={next => change(() => pages.setSort(next))} />}
+        {modelEnabled && (
+          <SelectMenu label="Sort by" value={sort} options={sortOptions} onChange={next => change(() => pages.setSort(next))} />
+        )}
         <TimeDisplayToggle display={time} />
       </div>
       <QueueFeedback feedback={feedback} onRetry={loadError ? undefined : retry} pending={queuePending} />
@@ -168,17 +171,7 @@ function ClaimFilterButtons({ claimed, onChange }: { claimed: ClaimFilter; onCha
   )
 }
 
-function SortSelect({ sort, onChange }: { sort: ReviewSort; onChange: (sort: ReviewSort) => void }) {
-  return (
-    <label className="inline-field">
-      Sort by
-      <select value={sort} onChange={event => onChange(event.target.value === 'model_score' ? 'model_score' : 'rule_score')}>
-        <option value="rule_score">Rule score</option>
-        <option value="model_score">Model risk</option>
-      </select>
-    </label>
-  )
-}
+const sortOptions = [['rule_score', 'Rule score'], ['model_score', 'Model risk']] as const
 
 function EmptyQueue({ firstPage, mine, admin }: { firstPage: boolean; mine: boolean; admin: boolean }) {
   if (!firstPage) {
