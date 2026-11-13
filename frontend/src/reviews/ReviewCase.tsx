@@ -25,11 +25,13 @@ interface CaseViewProps {
   time: TimeDisplay
   handlers: ReviewHandlers
   onBack: () => void
+  // Opens another purchase awaiting review in place of this one.
+  onOpen: (purchaseId: string) => void
 }
 
 // The case is read again every few seconds, so a claim taken or released by
 // someone else changes the available actions without a reload.
-export function CaseView({ purchaseId, time, handlers, onBack }: CaseViewProps) {
+export function CaseView({ purchaseId, time, handlers, onBack, onOpen }: CaseViewProps) {
   const [state, setState] = useState<CaseState>({ status: 'loading' })
   const load = useCallback((signal: AbortSignal) => getReviewCase(purchaseId, signal), [purchaseId])
   const { retry, pending } = usePolling(load, {
@@ -55,12 +57,19 @@ export function CaseView({ purchaseId, time, handlers, onBack }: CaseViewProps) 
         <EmptyState announce>This purchase is no longer available for review. Go back to the queue to pick another.</EmptyState>
       )}
       {state.status === 'failed' && <ErrorState onRetry={retry} pending={pending}>{state.message}</ErrorState>}
-      {state.status === 'loaded' && <CaseDetails review={state.review} time={time} handlers={handlers} />}
+      {state.status === 'loaded' && <CaseDetails review={state.review} time={time} handlers={handlers} onOpen={onOpen} />}
     </article>
   )
 }
 
-function CaseDetails({ review, time, handlers }: { review: ReviewCase; time: TimeDisplay; handlers: ReviewHandlers }) {
+interface CaseDetailsProps {
+  review: ReviewCase
+  time: TimeDisplay
+  handlers: ReviewHandlers
+  onOpen: (purchaseId: string) => void
+}
+
+function CaseDetails({ review, time, handlers, onOpen }: CaseDetailsProps) {
   return (
     <>
       <header className="panel case-summary">
@@ -108,7 +117,7 @@ function CaseDetails({ review, time, handlers }: { review: ReviewCase; time: Tim
         <h3 id="case-account">Recent account events</h3>
         <AccountEvents review={review} time={time} />
       </section>
-      <CaseNetwork purchaseId={review.purchase_id} />
+      <CaseNetwork purchaseId={review.purchase_id} time={time} onOpen={onOpen} />
     </>
   )
 }

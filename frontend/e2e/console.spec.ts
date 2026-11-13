@@ -182,7 +182,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await openNetworkCase(page)
     await expect(page.getByRole('heading', { name: 'Linked players, cards and devices' })).toBeVisible()
     await expect(page.getByText('Device demo-device (blocklisted): 31 players, 2 rejected.')).toBeVisible()
-    await expect(page.getByRole('img', { name: /Diagram of linked players/ })).toBeVisible()
+    await expect(page.getByRole('group', { name: /Diagram of linked players/ })).toBeVisible()
     await expect(page.locator('.network-diagram').getByText('+23 more', { exact: true })).toBeVisible()
     await page.getByText('View linked players, cards and devices as a table').click()
     await expect(page.getByRole('rowheader', { name: 'sim1-20261111T064452-player-29', exact: true })).toBeVisible()
@@ -190,6 +190,40 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(audit.violations).toEqual([])
   })
 }
+
+const linkedPurchases = { anchor: 'card', value: 'demo-player-2', window_days: 30, total: 3, purchases: [
+  { purchase_id: '77', transaction_id: 'linked-transaction', event_time: now, amount_minor: '4999', outcome: 'review',
+    review_decision: null, claimed_by: 'other-reviewer', awaiting_review: true },
+  { purchase_id: '76', transaction_id: 'earlier-transaction', event_time: now, amount_minor: '1000', outcome: 'block',
+    review_decision: null, claimed_by: null, awaiting_review: false },
+] }
+
+test('a linked player shows its purchases and opens a linked case', async ({ page }) => {
+  let query = new URLSearchParams()
+  await page.route('**/reviews/41/network', route => route.fulfill({ json: network }))
+  await page.route('**/reviews/41/network/purchases?*', route => {
+    query = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: linkedPurchases })
+  })
+  await page.route('**/reviews/77', route => route.fulfill({ json: { ...networkCase, purchase_id: '77', transaction_id: 'linked-transaction',
+    claimed_by: 'other-reviewer', claimed_at: now, ruleset_version: 3, player_purchases: [], device_activity: null, account_events: [] } }))
+  await page.route('**/reviews/77/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+  await openNetworkCase(page)
+  const node = page.getByRole('button', { name: 'Player demo-player-2: Blocked, 1 shared purchase', exact: true })
+  await node.press('Enter')
+  await expect(node).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('heading', { name: 'Player demo-player-2', exact: true })).toBeFocused()
+  const purchases = page.getByRole('region', { name: 'Purchases for Player demo-player-2' })
+  await expect(purchases.getByRole('rowheader', { name: 'earlier-transaction' })).toBeVisible()
+  await expect(purchases).toContainText('Awaiting review, claimed by other-reviewer')
+  await expect(page.getByText('Showing the newest 2 of 3 purchases.')).toBeVisible()
+  expect([query.get('anchor'), query.get('value')]).toEqual(['card', 'demo-player-2'])
+  const audit = await new AxeBuilder({ page }).include('.case-network').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
+  expect(audit.violations).toEqual([])
+  await page.getByRole('button', { name: 'Open case linked-transaction' }).click()
+  await expect(page.getByRole('heading', { name: 'linked-transaction', level: 2 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Review queue' })).toBeFocused()
+})
 
 test('a failed network load leaves the review case usable and can be retried', async ({ page }) => {
   let failing = true

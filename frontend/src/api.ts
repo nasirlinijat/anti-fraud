@@ -302,6 +302,32 @@ export function getReviewNetwork(purchaseId: string, signal: AbortSignal): Promi
   return request(`/reviews/${encodeURIComponent(purchaseId)}/network`, { signal })
 }
 
+export interface LinkedPurchase {
+  purchase_id: string
+  transaction_id: string
+  event_time: string
+  amount_minor: string
+  outcome: Outcome
+  review_decision: Decision | null
+  claimed_by: string | null
+  awaiting_review: boolean
+}
+
+export interface LinkedPurchases {
+  anchor: NetworkEntityType
+  value: string
+  window_days: number
+  // All matching purchases; at most 50 of the newest are listed.
+  total: number
+  purchases: LinkedPurchase[]
+}
+
+export function getLinkedPurchases(purchaseId: string, anchor: NetworkEntityType, value: string,
+  signal: AbortSignal): Promise<LinkedPurchases> {
+  const params = new URLSearchParams({ anchor, value })
+  return request(`/reviews/${encodeURIComponent(purchaseId)}/network/purchases?${params}`, { signal })
+}
+
 export interface Claim {
   purchase_id: string
   claimed_by: string

@@ -94,6 +94,12 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
     setPage(current => current && { ...current, items: current.items.filter(row => row.purchase_id !== id) })
   }
 
+  // The control that opened a linked case is replaced with the case, so the page heading takes focus.
+  function openLinkedCase(id: string) {
+    heading.current?.focus()
+    setOpenCase(id)
+  }
+
   const nextCursor = page?.next_cursor ?? null
   const dialog = (
     <DecisionDialog confirmation={decisions.confirmation} blockDevice={decisions.blockDevice}
@@ -105,7 +111,8 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
     return (
       <>
         <QueueFeedback feedback={feedback} />
-        <CaseView key={openCase} purchaseId={openCase} time={time} handlers={handlers} onBack={() => setOpenCase(null)} />
+        <CaseView key={openCase} purchaseId={openCase} time={time} handlers={handlers}
+          onBack={() => setOpenCase(null)} onOpen={openLinkedCase} />
         {dialog}
       </>
     )
