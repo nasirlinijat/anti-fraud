@@ -16,22 +16,50 @@ type verificationProfile struct {
 	threeDS []resultShare
 }
 
-// legitimateVerification is the profile of every pattern that is not fraud.
-// Genuine cardholders almost always pass. Some issuers or regions skip a check
-// (AVS is not supported by many issuers outside a few countries), and a mistyped
-// security code or an outdated address gives a rare innocent mismatch.
+// legitimateVerification is the profile of every pattern that is not fraud
+// and has no profile in newCardVerification. Genuine cardholders almost always
+// pass. A regular player pays with the card saved on the account, and a saved
+// card keeps no security code, so the gateway often skips the CVV check, as it
+// does for a takeover that pays with the owner's saved card. Some issuers or
+// regions skip a check, and an outdated address or a mistyped code gives a
+// rare innocent mismatch.
 var legitimateVerification = verificationProfile{
-	cvv:     []resultShare{{"mismatch", 0.01}, {"not_checked", 0.05}},
+	cvv:     []resultShare{{"mismatch", 0.01}, {"not_checked", 0.35}},
 	avs:     []resultShare{{"mismatch", 0.02}, {"partial", 0.08}, {"not_checked", 0.25}},
 	threeDS: []resultShare{{"failed", 0.01}, {"attempted", 0.05}, {"not_enrolled", 0.10}},
 }
+
+// enteredCardVerification is the profile of honest purchases with a card
+// typed in for the first time: on a new account, on a relative's account, or
+// on an internet cafe's computer. The gateway checks the code, and a typo
+// gives a mismatch more often than on a saved card.
+var enteredCardVerification = verificationProfile{
+	cvv:     []resultShare{{"mismatch", 0.03}, {"not_checked", 0.05}},
+	avs:     legitimateVerification.avs,
+	threeDS: legitimateVerification.threeDS,
+}
+
+var newCardVerification = map[Pattern]verificationProfile{
+	PatternNewCasualPlayer: enteredCardVerification,
+	PatternNewBigSpender:   enteredCardVerification,
+	PatternFamilyCard:      enteredCardVerification,
+	PatternInternetCafe:    enteredCardVerification,
+}
+
+// avsCountries are the card countries whose issuers support the address
+// check. AVS is used by card issuers in only a few countries, such as the
+// United States and the United Kingdom, so the gateway cannot check the
+// address of any other card, honest or not.
+var avsCountries = map[string]bool{"US": true, "GB": true}
 
 // fraudVerification gives the fraud patterns their own profile. Fraudsters
 // who bought full card details pass the CVV check most of the time but rarely
 // know the billing address or the cardholder's 3-D Secure code. Card testers
 // probe numbers without the details, so they fail far more often. A takeover
 // pays with the owner's saved card, so the stored details still match and the
-// gateway often skips the CVV check.
+// gateway often skips the CVV check. Low and slow fraud pays with a card saved
+// on the fraudster's own older account, so its CVV check is skipped as often as
+// a regular player's.
 var fraudVerification = map[Pattern]verificationProfile{
 	PatternCardTesting: {
 		cvv:     []resultShare{{"mismatch", 0.45}, {"not_checked", 0.15}},
@@ -69,7 +97,7 @@ var fraudVerification = map[Pattern]verificationProfile{
 		threeDS: []resultShare{{"failed", 0.10}, {"attempted", 0.10}, {"not_enrolled", 0.10}},
 	},
 	PatternLowAndSlow: {
-		cvv:     []resultShare{{"mismatch", 0.05}, {"not_checked", 0.05}},
+		cvv:     []resultShare{{"mismatch", 0.05}, {"not_checked", 0.35}},
 		avs:     []resultShare{{"mismatch", 0.08}, {"partial", 0.10}, {"not_checked", 0.25}},
 		threeDS: []resultShare{{"failed", 0.08}, {"attempted", 0.08}, {"not_enrolled", 0.10}},
 	},
@@ -79,14 +107,24 @@ var fraudVerification = map[Pattern]verificationProfile{
 // The results are drawn from the seed and the transaction ID, outside the
 // random sequence, so the rest of the traffic is the same as without them.
 func (g *generator) withVerification(pattern Pattern, req Request) Request {
-	profile, fraud := fraudVerification[pattern]
-	if !fraud {
-		profile = legitimateVerification
-	}
+	profile := verificationOf(pattern)
 	req.CVVResult = ptr(drawResult(g.seededDraw(req.TransactionID, "cvv"), profile.cvv, "match"))
 	req.AVSResult = ptr(drawResult(g.seededDraw(req.TransactionID, "avs"), profile.avs, "match"))
+	if req.CardCountry == nil || !avsCountries[*req.CardCountry] {
+		req.AVSResult = ptr("not_checked")
+	}
 	req.ThreeDSResult = ptr(drawResult(g.seededDraw(req.TransactionID, "three_ds"), profile.threeDS, "authenticated"))
 	return req
+}
+
+func verificationOf(pattern Pattern) verificationProfile {
+	if profile, fraud := fraudVerification[pattern]; fraud {
+		return profile
+	}
+	if profile, entered := newCardVerification[pattern]; entered {
+		return profile
+	}
+	return legitimateVerification
 }
 
 // drawResult maps a draw from 0 to 1 to the result whose share covers it, or
