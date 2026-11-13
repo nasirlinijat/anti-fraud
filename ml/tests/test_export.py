@@ -33,7 +33,7 @@ def test_fast_reader_matches_tree_reader(model_and_rows):
     assert np.max(np.abs(export.predict_fast(dump, values) - export.predict_from_dump(dump, values))) < 1e-12
 
 
-@pytest.mark.parametrize("version", ["lgbm-ieee-v3", "lgbm-ieee-v5"])
+@pytest.mark.parametrize("version", ["lgbm-ieee-v5", "lgbm-game-v9"])
 def test_fast_reader_matches_exported_golden_rows(version):
     models = Path(__file__).resolve().parents[2] / "backend" / "models"
     dump = json.loads((models / f"{version}.json").read_text())

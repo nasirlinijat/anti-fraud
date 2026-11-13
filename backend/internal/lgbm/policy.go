@@ -11,7 +11,7 @@ import (
 )
 
 // ReportPath returns the training report written next to a model file:
-// models/lgbm-ieee-v3.json has models/lgbm-ieee-v3.report.json.
+// models/lgbm-game-v9.json has models/lgbm-game-v9.report.json.
 func ReportPath(modelPath string) string {
 	return strings.TrimSuffix(modelPath, ".json") + ".report.json"
 }
