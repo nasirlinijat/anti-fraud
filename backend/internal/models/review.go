@@ -94,6 +94,45 @@ type LinkedEntity struct {
 	Status    NetworkStatus
 }
 
+// LinkedPurchases lists the purchases of a linked entity that share an anchor
+// with a purchase under review within WindowDays of that purchase.
+type LinkedPurchases struct {
+	// Anchor names the anchor of the purchase under review that links Value.
+	Anchor     BlocklistType
+	Value      string
+	WindowDays int
+	// Total counts every matching purchase, including those left out of Purchases.
+	Total int64
+	// Purchases lists the matching purchases, newest first.
+	Purchases []LinkedPurchase
+}
+
+// LinkedPurchase is a purchase of a linked entity that shares the anchor.
+type LinkedPurchase struct {
+	PurchaseID    int64
+	TransactionID string
+	EventTime     time.Time
+	AmountMinor   int64
+	Outcome       scoring.Outcome
+	// ReviewDecision is approve or reject, or nil when no analyst decided the purchase.
+	ReviewDecision *string
+	// ClaimedBy is the username holding the claim while the purchase awaits
+	// review, or nil when nobody holds one.
+	ClaimedBy *string
+	// AwaitingReview is true for a purchase scored for review and not yet decided.
+	AwaitingReview bool
+}
+
+// LinkedReviews lists the other purchases awaiting review that share the
+// device, card, or player of a purchase under review within WindowDays of it.
+type LinkedReviews struct {
+	WindowDays int
+	// Total counts every matching purchase, including those left out of Items.
+	Total int64
+	// Items lists the matching purchases in the default queue order.
+	Items []QueueItem
+}
+
 // NetworkStatus is the worst thing known about a linked entity.
 type NetworkStatus string
 
@@ -134,13 +173,25 @@ const (
 
 // ReviewDecision is a decision on a purchase under review.
 type ReviewDecision struct {
-	PurchaseID  int64
-	Decision    string
-	AnalystID   string
-	BlockDevice bool
+	PurchaseID int64
+	Decision   string
+	AnalystID  string
+	Blocks     ReviewBlocks
 	// ClaimedBy is the username that must hold the claim on the purchase, or
 	// nil for a decision made with an analyst key, which needs no claim.
 	ClaimedBy *string
+}
+
+// ReviewBlocks says which values of the purchase a rejection also blocklists.
+type ReviewBlocks struct {
+	Device bool
+	Card   bool
+	Player bool
+}
+
+// Any reports whether any value is to be blocklisted.
+func (b ReviewBlocks) Any() bool {
+	return b.Device || b.Card || b.Player
 }
 
 type ClaimStatus string
@@ -190,7 +241,9 @@ type Claim struct {
 }
 
 type Resolution struct {
-	Status        ResolutionStatus
-	ResolvedAt    time.Time
-	DeviceBlocked bool
+	Status     ResolutionStatus
+	ResolvedAt time.Time
+	// Blocked says which values of the purchase this rejection added to the
+	// blocklist. A value that was already blocked is not reported.
+	Blocked ReviewBlocks
 }

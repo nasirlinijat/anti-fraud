@@ -132,6 +132,13 @@
     animation: bin-pulse 600ms var(--ease-out) both;
   }
 
+  .network-node :is(.network-edge, .network-label) {
+    transition: opacity var(--motion-fast) ease, stroke var(--motion-fast) ease, stroke-width var(--motion-fast) ease;
+  }
+
+  .network-legend-item { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease; }
+  .network-selection { animation: drop-in var(--motion) var(--ease-out); }
+
   .status-pill::before { transition: background-color var(--motion) ease, border-radius var(--motion) ease; }
 
   .login-hero > * { animation: rise-in var(--motion-slow) var(--ease-out) both; }

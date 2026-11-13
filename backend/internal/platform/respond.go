@@ -30,14 +30,27 @@ func WriteError(w http.ResponseWriter, code int, message string) {
 
 const DatabaseUnavailableMessage = "the database is unavailable; retry later"
 
+// WriteServerError logs err with LogServerError and answers 503 when the
+// database is unavailable and 500 otherwise, without the error's details.
 func WriteServerError(ctx context.Context, w http.ResponseWriter, msg string, err error, attrs ...any) {
-	args := append(attrs, "error", err)
+	LogServerError(ctx, msg, err, attrs...)
 	if DatabaseUnavailable(err) {
-		slog.WarnContext(ctx, msg+": database unavailable", args...)
 		w.Header().Set("Retry-After", "1")
 		WriteError(w, http.StatusServiceUnavailable, DatabaseUnavailableMessage)
 		return
 	}
-	slog.ErrorContext(ctx, msg, args...)
 	WriteError(w, http.StatusInternalServerError, "internal error")
+}
+
+// LogServerError logs an error the client cannot fix, as a warning when the
+// database is unavailable and as an error otherwise. It is for handlers that
+// report the failure inside a successful response, such as one purchase of a
+// batch.
+func LogServerError(ctx context.Context, msg string, err error, attrs ...any) {
+	args := append(attrs, "error", err)
+	if DatabaseUnavailable(err) {
+		slog.WarnContext(ctx, msg+": database unavailable", args...)
+		return
+	}
+	slog.ErrorContext(ctx, msg, args...)
 }

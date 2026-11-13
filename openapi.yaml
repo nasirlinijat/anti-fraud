@@ -1606,6 +1606,8 @@ paths:
       description: >-
         A session must first claim the purchase with POST
         /reviews/{purchase_id}/claim. An analyst key decides without a claim.
+        A rejection can also blocklist the purchase's device, card and player
+        in the same transaction.
       security:
         - AnalystKeyAuth: []
         - SessionAuth: []
@@ -1639,6 +1641,24 @@ paths:
                     purchase without a device, or a device that is already
                     blocked, is rejected without a new entry. A decision
                     that conflicts with an earlier one saves nothing.
+                block_card:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the card token of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. When the card is already blocked, the purchase
+                    is rejected without a new entry. A decision that
+                    conflicts with an earlier one saves nothing.
+                block_player:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Also blocklist the player ID of the purchase, in the same
+                    transaction as the rejection. Only allowed with a reject
+                    decision. When the player is already blocked, the
+                    purchase is rejected without a new entry. A decision that
+                    conflicts with an earlier one saves nothing.
       responses:
         "201":
           description: The analyst decision was saved.
@@ -1684,6 +1704,127 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: The review decision could not be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
+  /reviews/claims:
+    post:
+      tags: [Reviews]
+      operationId: claimReviews
+      summary: Claim several purchases awaiting review
+      description: >-
+        Claims each listed purchase for the signed-in reviewer or admin, one
+        after another in request order, with the rules of POST
+        /reviews/{purchase_id}/claim. Each purchase gets its own result, so
+        the response is 200 even when some could not be claimed. An
+        unexpected failure on one purchase gives it the status error, and the
+        rest are still claimed. Analyst keys cannot claim.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchClaimRequest"
+      responses:
+        "200":
+          description: A result for each purchase, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchClaimResults"
+        "400":
+          description: >-
+            The body is not a single object with only purchase_ids, or the list
+            is empty, has more than 50 IDs, repeats an ID, or has an ID that is
+            not a positive decimal string without leading zeros. Nothing was
+            claimed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: >-
+            The request used an analyst key, which cannot claim, or the
+            session's role cannot use the review endpoints.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The request body exceeds 4096 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
+  /reviews/decisions:
+    post:
+      tags: [Reviews]
+      operationId: resolveReviews
+      summary: Approve or reject several purchases awaiting review
+      description: >-
+        Applies one decision to each listed purchase, one after another in
+        request order, with the rules of POST /reviews/{purchase_id}/decision:
+        a session decides only the purchases it has claimed, and an analyst
+        key decides without a claim. Each purchase is decided in its own
+        transaction, so the batch is not atomic: a purchase that someone else
+        decided meanwhile is reported as already_decided and does not undo
+        the others. Each purchase still gets at most one decision. An
+        unexpected failure on one purchase gives it the status error, and the
+        rest are still decided.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDecisionRequest"
+      responses:
+        "200":
+          description: A result for each purchase, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDecisionResults"
+        "400":
+          description: >-
+            The body is not a single batch decision object, the decision is
+            not approve or reject, a block field is set with approve, or the
+            list is empty, has more than 50 IDs, repeats an ID, or has an ID
+            that is not a positive decimal string without leading zeros.
+            Nothing was saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "413":
+          description: The request body exceeds 4096 bytes.
           content:
             application/json:
               schema:
@@ -1816,6 +1957,159 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: The linked players and cards could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
+  /reviews/{purchase_id}/network/purchases:
+    get:
+      tags: [Reviews]
+      operationId: getReviewNetworkPurchases
+      summary: Get the purchases of a player or card linked to a purchase awaiting review
+      description: >-
+        Returns the purchases of one linked player or card that share an
+        anchor of the purchase under review, within 30 days before or after
+        it, newest first, at most 50. The anchor's own value is read from the
+        purchase under review, so only the client names the linked value. A
+        value the network does not link, such as an unknown player or the
+        purchase's own player or card, returns an empty list. Fraud labels are
+        never read.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The purchase ID from the review queue.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+        - in: query
+          name: anchor
+          required: true
+          description: >-
+            The anchor of the purchase under review that links the value: its
+            device or card for a linked player, or its player for a linked card.
+          schema:
+            type: string
+            enum: [device, card, player]
+        - in: query
+          name: value
+          required: true
+          description: >-
+            The linked value from the network: a player ID for the device or
+            card anchor, a card token for the player anchor.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: The purchases of the linked value. A device anchor of a purchase without a device returns an empty list.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedPurchases"
+        "400":
+          description: >-
+            The purchase ID is not a positive integer, anchor or value is
+            missing or repeated, anchor is not device, card, or player, or
+            value is longer than 256 bytes or contains control characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No purchase under review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The linked purchases could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
+  /reviews/{purchase_id}/network/reviews:
+    get:
+      tags: [Reviews]
+      operationId: getLinkedReviews
+      summary: Get the other purchases awaiting review linked to a purchase awaiting review
+      description: >-
+        Returns the other purchases awaiting review that share the device
+        (when the purchase has one), card, or player of the purchase under
+        review, within 30 days before or after it. The purchase itself is left
+        out, and a purchase that shares several values is listed once. Items
+        have the queue's shape and order, highest rule score first, at most
+        50. Fraud labels are never read.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The purchase ID from the review queue.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+      responses:
+        "200":
+          description: The linked purchases awaiting review.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedReviews"
+        "400":
+          description: The purchase ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No purchase under review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The linked purchases awaiting review could not be loaded.
           content:
             application/json:
               schema:
@@ -2132,7 +2426,7 @@ components:
         error: {type: string}
     ReviewResolution:
       type: object
-      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked]
+      required: [purchase_id, decision, analyst_id, resolved_at, device_blocked, card_blocked, player_blocked]
       properties:
         purchase_id:
           type: string
@@ -2150,6 +2444,12 @@ components:
         device_blocked:
           type: boolean
           description: True when this rejection added the device of the purchase to the blocklist.
+        card_blocked:
+          type: boolean
+          description: True when this rejection added the card token of the purchase to the blocklist.
+        player_blocked:
+          type: boolean
+          description: True when this rejection added the player ID of the purchase to the blocklist.
 
     ReviewPage:
       type: object
@@ -2534,6 +2834,221 @@ components:
             The worst of: the value is on the blocklist, an analyst rejected one of the purchases, one was blocked, one
             awaits review, or none of these. Only the blocklist check covers every purchase; the other statuses come
             from the purchases that share the anchor value within the window.
+
+    LinkedPurchases:
+      type: object
+      required: [anchor, value, window_days, total, purchases]
+      properties:
+        anchor:
+          type: string
+          enum: [device, card, player]
+          description: The anchor of the purchase under review that links the value.
+        value:
+          type: string
+          description: The linked player ID or card token.
+        window_days:
+          type: integer
+          format: int32
+          description: Listed purchases are at most this many days before or after the purchase under review.
+          example: 30
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of matching purchases, including any left out of purchases.
+        purchases:
+          type: array
+          maxItems: 50
+          description: The matching purchases, newest first.
+          items:
+            $ref: "#/components/schemas/LinkedPurchase"
+
+    LinkedPurchase:
+      type: object
+      required: [purchase_id, transaction_id, event_time, amount_minor, outcome, review_decision, claimed_by, awaiting_review]
+      properties:
+        purchase_id:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+          description: Decimal purchase ID, sent as a string to preserve 64-bit precision.
+        transaction_id:
+          type: string
+        event_time:
+          type: string
+          format: date-time
+          description: Purchase time in UTC.
+        amount_minor:
+          type: string
+          pattern: "^[0-9]+$"
+          description: Amount in minor currency units, sent as a string to preserve 64-bit precision.
+        outcome:
+          type: string
+          enum: [allow, review, block]
+        review_decision:
+          type: string
+          enum: [approve, reject]
+          nullable: true
+          description: The analyst's decision, or null when no analyst decided the purchase.
+        claimed_by:
+          type: string
+          nullable: true
+          description: The username holding the claim while the purchase awaits review, or null.
+        awaiting_review:
+          type: boolean
+          description: Whether the purchase was scored for review and is not yet decided.
+
+    LinkedReviews:
+      type: object
+      required: [window_days, total, items]
+      properties:
+        window_days:
+          type: integer
+          format: int32
+          description: Listed purchases are at most this many days before or after the purchase under review.
+          example: 30
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of matching purchases, including any left out of items.
+        items:
+          type: array
+          maxItems: 50
+          description: The matching purchases, highest rule score first, then oldest decision first.
+          items:
+            $ref: "#/components/schemas/ReviewItem"
+
+    BatchPurchaseIDs:
+      type: array
+      minItems: 1
+      maxItems: 50
+      uniqueItems: true
+      description: Distinct purchase IDs from the review queue, as decimal strings.
+      items:
+        type: string
+        pattern: "^[1-9][0-9]*$"
+
+    BatchClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [purchase_ids]
+      properties:
+        purchase_ids:
+          $ref: "#/components/schemas/BatchPurchaseIDs"
+
+    BatchClaimResults:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          description: One result per requested purchase, in request order.
+          items:
+            $ref: "#/components/schemas/BatchClaimResult"
+
+    BatchClaimResult:
+      type: object
+      required: [purchase_id, status, claimed_by, claimed_at]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        status:
+          type: string
+          enum: [claimed, already_yours, held_by_other, already_decided, not_found, not_review, error]
+          description: >-
+            claimed is a new claim, already_yours a claim you held before, and
+            held_by_other a claim of another account. already_decided,
+            not_found and not_review match the 409 and 404 answers of the
+            single claim. error means the claim could not be saved; retry it.
+        claimed_by:
+          type: string
+          nullable: true
+          description: The account holding the claim for claimed, already_yours and held_by_other, otherwise null.
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When that claim was made, in UTC, or null.
+
+    BatchDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, purchase_ids]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        purchase_ids:
+          $ref: "#/components/schemas/BatchPurchaseIDs"
+        block_device:
+          type: boolean
+          default: false
+          description: >-
+            Also blocklist each purchase's own device, in the same transaction
+            as its rejection. Only allowed with a reject decision. A purchase
+            without a device, or a device that is already blocked, is rejected
+            without a new entry.
+        block_card:
+          type: boolean
+          default: false
+          description: >-
+            Also blocklist each purchase's own card token, in the same
+            transaction as its rejection. Only allowed with a reject decision.
+            A card that is already blocked gets no new entry.
+        block_player:
+          type: boolean
+          default: false
+          description: >-
+            Also blocklist each purchase's own player ID, in the same
+            transaction as its rejection. Only allowed with a reject decision.
+            A player that is already blocked gets no new entry.
+
+    BatchDecisionResults:
+      type: object
+      required: [decision, analyst_id, results]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        analyst_id:
+          type: string
+          description: The username of the session or the analyst ID of the key.
+        results:
+          type: array
+          description: One result per requested purchase, in request order.
+          items:
+            $ref: "#/components/schemas/BatchDecisionResult"
+
+    BatchDecisionResult:
+      type: object
+      required: [purchase_id, status, resolved_at, device_blocked, card_blocked, player_blocked]
+      properties:
+        purchase_id:
+          type: string
+          description: The purchase ID as a decimal string.
+        status:
+          type: string
+          enum: [saved, already_decided, not_claimed, not_found, not_review, error]
+          description: >-
+            saved is the decision of this request. already_decided,
+            not_claimed, not_found and not_review match the 409 and 404
+            answers of the single decision. error means the decision could
+            not be saved; retry it.
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time when the database recorded the decision, in UTC, for saved, otherwise null.
+        device_blocked:
+          type: boolean
+          description: True when this rejection added the device of the purchase to the blocklist. A purchase decided earlier in the same batch may already have blocked a shared value.
+        card_blocked:
+          type: boolean
+          description: True when this rejection added the card token of the purchase to the blocklist.
+        player_blocked:
+          type: boolean
+          description: True when this rejection added the player ID of the purchase to the blocklist.
 
     RulesetSummary:
       type: object

@@ -75,6 +75,7 @@ export async function mockConsole(page: Page, role: Role | null = 'admin') {
       loaded: true, version: 'lgbm-game-v9', mode: 'assist', clear_below: 0.011527, flag_at: 0.544632,
       evaluation: { dataset: 'Held-out simulator traffic', roc_auc: 0.9926, pr_auc: 0.9624 },
     } })
+    if (url.pathname.endsWith('/network/reviews')) return route.fulfill({ json: { window_days: 30, total: 0, items: [] } })
     if (url.pathname.startsWith('/reviews')) return route.fulfill({ json: { items: [], next_cursor: null, model_enabled: true } })
     if (url.pathname === '/rulesets/active') return route.fulfill({ json: { version: 3, created_at: now, note: 'Demo configuration', review_threshold: 30, block_threshold: 80, rules: {} } })
     if (url.pathname === '/rulesets') return route.fulfill({ json: { versions: [] } })
