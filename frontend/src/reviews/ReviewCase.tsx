@@ -10,7 +10,9 @@ import type { TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { AccountEvents } from './AccountEvents'
 import { CaseNetwork } from './CaseNetwork'
+import { LinkedReviews } from './LinkedReviews'
 import { ClaimBadge, ReviewActions, type ReviewHandlers } from './ReviewActions'
+import type { LinkedReviewActions } from './useReviewWork'
 
 type CaseState =
   | { status: 'loading' }
@@ -24,6 +26,7 @@ interface CaseViewProps {
   purchaseId: string
   time: TimeDisplay
   handlers: ReviewHandlers
+  linked: LinkedReviewActions
   onBack: () => void
   // Opens another purchase awaiting review in place of this one.
   onOpen: (purchaseId: string) => void
@@ -31,7 +34,7 @@ interface CaseViewProps {
 
 // The case is read again every few seconds, so a claim taken or released by
 // someone else changes the available actions without a reload.
-export function CaseView({ purchaseId, time, handlers, onBack, onOpen }: CaseViewProps) {
+export function CaseView({ purchaseId, time, handlers, linked, onBack, onOpen }: CaseViewProps) {
   const [state, setState] = useState<CaseState>({ status: 'loading' })
   const load = useCallback((signal: AbortSignal) => getReviewCase(purchaseId, signal), [purchaseId])
   const { retry, pending } = usePolling(load, {
@@ -57,7 +60,9 @@ export function CaseView({ purchaseId, time, handlers, onBack, onOpen }: CaseVie
         <EmptyState announce>This purchase is no longer available for review. Go back to the queue to pick another.</EmptyState>
       )}
       {state.status === 'failed' && <ErrorState onRetry={retry} pending={pending}>{state.message}</ErrorState>}
-      {state.status === 'loaded' && <CaseDetails review={state.review} time={time} handlers={handlers} onOpen={onOpen} />}
+      {state.status === 'loaded' && (
+        <CaseDetails review={state.review} time={time} handlers={handlers} linked={linked} onOpen={onOpen} />
+      )}
     </article>
   )
 }
@@ -66,10 +71,11 @@ interface CaseDetailsProps {
   review: ReviewCase
   time: TimeDisplay
   handlers: ReviewHandlers
+  linked: LinkedReviewActions
   onOpen: (purchaseId: string) => void
 }
 
-function CaseDetails({ review, time, handlers, onOpen }: CaseDetailsProps) {
+function CaseDetails({ review, time, handlers, linked, onOpen }: CaseDetailsProps) {
   return (
     <>
       <header className="panel case-summary">
@@ -118,6 +124,7 @@ function CaseDetails({ review, time, handlers, onOpen }: CaseDetailsProps) {
         <AccountEvents review={review} time={time} />
       </section>
       <CaseNetwork purchaseId={review.purchase_id} time={time} onOpen={onOpen} />
+      <LinkedReviews purchaseId={review.purchase_id} handlers={handlers} actions={linked} onOpen={onOpen} />
     </>
   )
 }

@@ -8,11 +8,11 @@ import { SelectMenu } from '../ui/SelectMenu'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
-import { DecisionDialog } from './DecisionDialog'
-import type { ReviewHandlers } from './ReviewActions'
+import { BatchDecisionDialog, DecisionDialog } from './DecisionDialog'
 import { CaseView } from './ReviewCase'
 import { ReviewTable } from './ReviewTable'
-import { useClaims, useDecisions, type Feedback } from './useDecisions'
+import type { Feedback } from './useDecisions'
+import { useReviewWork } from './useReviewWork'
 
 const REFRESH_MS = 3_000
 
@@ -64,21 +64,15 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
         change(() => pages.setSort('rule_score'))
         return
       }
-      decisions.requests.reconcile(result.items)
+      work.reconcile(result.items)
       setPage(result)
       setLoadError(null)
     },
     onError: (error) => setLoadError(error instanceof Error ? error.message : 'Could not load the review queue.'),
   })
 
-  const decisions = useDecisions({ refresh, onFeedback: setFeedback, onDecided: removeDecidedPurchase })
-  const claims = useClaims({ refresh, onFeedback: setFeedback })
-  const handlers: ReviewHandlers = {
-    username,
-    busy: new Set([...decisions.requests.pending, ...claims.pending]),
-    onClaim: item => void claims.claim(item),
-    onDecision: decisions.choose,
-  }
+  const work = useReviewWork({ username, refreshQueue: refresh, onFeedback: setFeedback, onDecided: removeDecidedPurchase })
+  const { handlers, decisions, batch } = work
 
   // Changing what the queue shows drops the page on screen until the new one arrives.
   function change(apply: () => void) {
@@ -102,16 +96,21 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
 
   const nextCursor = page?.next_cursor ?? null
   const dialog = (
-    <DecisionDialog confirmation={decisions.confirmation} blocks={decisions.blocks}
-      onBlocksChange={decisions.setBlocks} onDismiss={decisions.dismiss}
-      onConfirm={action => void decisions.save(action)} />
+    <>
+      <DecisionDialog confirmation={decisions.confirmation} blocks={decisions.blocks}
+        onBlocksChange={decisions.setBlocks} onDismiss={decisions.dismiss}
+        onConfirm={action => void decisions.save(action)} />
+      <BatchDecisionDialog confirmation={batch.confirmation} blocks={batch.blocks}
+        onBlocksChange={batch.setBlocks} onDismiss={batch.dismiss}
+        onConfirm={action => void batch.save(action)} />
+    </>
   )
 
   if (openCase !== null) {
     return (
       <>
         <QueueFeedback feedback={feedback} />
-        <CaseView key={openCase} purchaseId={openCase} time={time} handlers={handlers}
+        <CaseView key={openCase} purchaseId={openCase} time={time} handlers={handlers} linked={work.linked}
           onBack={() => setOpenCase(null)} onOpen={openLinkedCase} />
         {dialog}
       </>

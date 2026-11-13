@@ -354,6 +354,36 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
 .network-selection > p { margin: 0; }
 
 .network-details .table-scroll { margin-block-start: var(--space-sm); }
+.linked-reviews { display: grid; gap: var(--space-md); }
+.linked-reviews > h3,
+.linked-reviews > p { margin: 0; }
+
+.linked-review-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.linked-review-table .cell-select { inline-size: 1%; }
+.linked-review-table .cell-select input { display: block; }
+
+/* A selected row keeps its checked box and gains an edge mark, so selection never depends on color alone. */
+.linked-review-table tr.is-selected { background: var(--surface-subtle); }
+.linked-review-table tr.is-selected > :first-child { box-shadow: inset 4px 0 var(--text); }
+
+@media (max-width: 47.999rem) {
+  .linked-review-table .cell-select:empty { display: none; }
+  .linked-review-table .cell-select { inline-size: auto; padding-block-end: var(--space-sm); }
+  .linked-review-table tr.is-selected > :first-child { box-shadow: none; }
+  .linked-review-table tr.is-selected { box-shadow: inset 4px 0 var(--text); }
+}
+
+@media (forced-colors: active) {
+  .linked-review-table tr.is-selected > :first-child,
+  .linked-review-table tr.is-selected { box-shadow: none; outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
 .network-anchor-row > th { background: var(--surface-subtle); overflow-wrap: anywhere; }
 .network-anchor-row:focus { outline: none; }
 .network-anchor-row:focus > th { box-shadow: inset 0 0 0 2px var(--focus); }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { claimReview, noReviewBlocks, submitReviewDecision, type Decision, type Review, type ReviewBlocks } from '../api'
 import { ApiError } from '../request'
-import { decisionFeedback } from './decisionFeedback'
+import { decisionFeedback, type Feedback } from './decisionFeedback'
 
+export type { Feedback } from './decisionFeedback'
 export type ReviewAction = { item: Review; decision: Decision }
-export type Feedback = { text: string; failed?: boolean }
 
 interface DecisionOptions {
   refresh: () => void
@@ -82,11 +82,14 @@ export function useClaims({ refresh, onFeedback }: Pick<DecisionOptions, 'refres
     }
   }
 
-  return { pending: requests.pending, claim }
+  return { requests, claim }
 }
 
+export type ReviewRequests = ReturnType<typeof useReviewRequests>
+
 // Tracks the writes in flight, by purchase ID, so each purchase can have only
-// one at a time and its buttons stay disabled until it settles.
+// one at a time and its buttons stay disabled until it settles. A batch write
+// is one request, so all its IDs share one controller.
 function useReviewRequests() {
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
   // A null controller keeps the action disabled until a successful poll verifies queue state.
@@ -105,18 +108,18 @@ function useReviewRequests() {
     pending,
     has: (id: string) => requests.current.has(id),
     isCurrent: (id: string, controller: AbortController) => requests.current.get(id) === controller,
-    begin(id: string) {
+    begin(...ids: string[]) {
       const controller = new AbortController()
-      requests.current.set(id, controller)
+      for (const id of ids) requests.current.set(id, controller)
       publish()
       return controller
     },
-    finish(id: string) {
-      requests.current.delete(id)
+    finish(...ids: string[]) {
+      for (const id of ids) requests.current.delete(id)
       publish()
     },
-    holdForReconciliation(id: string) {
-      requests.current.set(id, null)
+    holdForReconciliation(...ids: string[]) {
+      for (const id of ids) requests.current.set(id, null)
       publish()
     },
     // Only a successful read listing the purchase confirms it is still pending.
@@ -146,11 +149,16 @@ function describeDecisionFailure(error: unknown, transactionId: string): Decisio
   if (status === 409) {
     return { feedback: { text: `${transactionId} was not decided. ${message}`, failed: true } }
   }
-  if (status !== undefined && status < 500 && error instanceof ApiError && error.kind === 'http') {
+  if (isClientError(error)) {
     return { feedback: { text: `Could not save a decision for ${transactionId}. ${message}`, failed: true } }
   }
   return {
     unconfirmed: true,
     feedback: { text: `Could not confirm the decision for ${transactionId}. ${message} Check whether it is still pending after the queue refreshes.`, failed: true },
   }
+}
+
+// A clear client error means the backend refused the write, so nothing was saved.
+export function isClientError(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === 'http' && error.status !== undefined && error.status < 500
 }

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  checkReadiness, getActiveRuleset, getReviewNetwork, listReviews, publishRuleset, removeBlocklistEntry,
-  score, submitReviewDecision,
+  checkReadiness, claimReviews, getActiveRuleset, getLinkedReviews, getReviewNetwork, listReviews, publishRuleset,
+  removeBlocklistEntry, score, submitReviewDecision, submitReviewDecisions,
 } from '../src/api.ts'
 import { request } from '../src/request.ts'
 import { forgetSessionToken, keepSessionToken, onSessionRejected } from '../src/session.ts'
@@ -189,4 +189,55 @@ test('the review network is read with the session and a 401 reports the rejected
   assert.equal(options.headers.get('Authorization'), 'Bearer session-token')
   assert.equal(options.headers.has('X-API-Key'), false)
   assert.equal(rejections, 1)
+})
+
+test('linked reviews are read from the case network path', async ({ mock }) => {
+  const list = { window_days: 30, total: 0, items: [] }
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json(list))
+  assert.deepEqual(await getLinkedReviews('4/2', new AbortController().signal), list)
+  assert.equal(fetch.mock.calls[0].arguments[0], '/reviews/4%2F2/network/reviews')
+})
+
+test('a batch claim sends the purchase IDs and returns each result', async ({ mock }) => {
+  const results = [
+    { purchase_id: '12', status: 'claimed', claimed_by: 'alice', claimed_at: '2026-11-12T12:00:00Z' },
+    { purchase_id: '15', status: 'held_by_other', claimed_by: 'bob', claimed_at: '2026-11-12T11:00:00Z' },
+  ]
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ results }))
+  assert.deepEqual(await claimReviews(['12', '15'], new AbortController().signal), results)
+  const [path, options] = fetch.mock.calls[0].arguments
+  assert.equal(path, '/reviews/claims')
+  assert.equal(options.method, 'POST')
+  assert.deepEqual(JSON.parse(options.body), { purchase_ids: ['12', '15'] })
+})
+
+test('a batch decision sends only the chosen block fields, and none with an approval', async ({ mock }) => {
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ decision: 'reject', analyst_id: 'alice', results: [] }))
+  const { signal } = new AbortController()
+  await submitReviewDecisions(['12'], 'approve', allBlocks, signal)
+  await submitReviewDecisions(['12', '15'], 'reject', { device: true, card: false, player: false }, signal)
+  const calls = fetch.mock.calls.map(call => [call.arguments[0], JSON.parse(call.arguments[1].body)])
+  assert.deepEqual(calls, [
+    ['/reviews/decisions', { decision: 'approve', purchase_ids: ['12'] }],
+    ['/reviews/decisions', { decision: 'reject', block_device: true, purchase_ids: ['12', '15'] }],
+  ])
+})
+
+test('a batch decision maps each result to its status and added blocklist entries', async ({ mock }) => {
+  mock.method(globalThis, 'fetch', async () => Response.json({ decision: 'reject', analyst_id: 'alice', results: [
+    { purchase_id: '12', status: 'saved', resolved_at: '2026-11-12T12:00:00Z', device_blocked: true, card_blocked: false, player_blocked: true },
+    { purchase_id: '15', status: 'already_decided', resolved_at: null, device_blocked: false, card_blocked: false, player_blocked: false },
+  ] }))
+  const outcomes = await submitReviewDecisions(['12', '15'], 'reject', allBlocks, new AbortController().signal)
+  assert.deepEqual(outcomes, [
+    { purchase_id: '12', status: 'saved', blocked: { device: true, card: false, player: true } },
+    { purchase_id: '15', status: 'already_decided', blocked: noBlocks },
+  ])
+})
+
+test('a rejected batch decision keeps its status', async ({ mock }) => {
+  mock.method(globalThis, 'fetch', async () => Response.json({ error: 'purchase_ids must list 1 to 50 IDs' }, { status: 400 }))
+  await assert.rejects(submitReviewDecisions([], 'approve', noBlocks, new AbortController().signal), {
+    kind: 'http', status: 400, message: 'purchase_ids must list 1 to 50 IDs',
+  })
 })

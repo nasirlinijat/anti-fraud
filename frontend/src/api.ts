@@ -328,6 +328,17 @@ export function getLinkedPurchases(purchaseId: string, anchor: NetworkEntityType
   return request(`/reviews/${encodeURIComponent(purchaseId)}/network/purchases?${params}`, { signal })
 }
 
+export interface LinkedReviews {
+  window_days: number
+  // All linked purchases awaiting review; at most 50 with the highest rule scores are listed.
+  total: number
+  items: Review[]
+}
+
+export function getLinkedReviews(purchaseId: string, signal: AbortSignal): Promise<LinkedReviews> {
+  return request(`/reviews/${encodeURIComponent(purchaseId)}/network/reviews`, { signal })
+}
+
 export interface Claim {
   purchase_id: string
   claimed_by: string
@@ -336,6 +347,26 @@ export interface Claim {
 
 export function claimReview(purchaseId: string, signal?: AbortSignal): Promise<Claim> {
   return request(`/reviews/${encodeURIComponent(purchaseId)}/claim`, { method: 'POST', signal })
+}
+
+export type ClaimStatus = 'claimed' | 'already_yours' | 'held_by_other' | 'already_decided' | 'not_found' | 'not_review' | 'error'
+
+export interface ClaimOutcome {
+  purchase_id: string
+  status: ClaimStatus
+  claimed_by: string | null
+  claimed_at: string | null
+}
+
+// Returns one result per purchase, in request order: the batch is not atomic.
+export async function claimReviews(purchaseIds: string[], signal: AbortSignal): Promise<ClaimOutcome[]> {
+  const result = await request<{ results: ClaimOutcome[] }>('/reviews/claims', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ purchase_ids: purchaseIds }),
+    signal,
+  })
+  return result.results
 }
 
 export function releaseClaim(purchaseId: string): Promise<Saved<null>> {
@@ -369,12 +400,43 @@ export async function submitReviewDecision(purchaseId: string, decision: Decisio
       expectedStatus: 201,
       signal,
     })
-    return { device: result?.device_blocked === true, card: result?.card_blocked === true, player: result?.player_blocked === true }
+    return blockedValues(result)
   } catch (error) {
     // A 201 confirms the save even if the optional feedback could not be read.
     if (error instanceof ApiError && error.status === 201) return noReviewBlocks
     throw error
   }
+}
+
+function blockedValues(saved: DecisionSaved | null): ReviewBlocks {
+  return { device: saved?.device_blocked === true, card: saved?.card_blocked === true, player: saved?.player_blocked === true }
+}
+
+export type DecisionStatus = 'saved' | 'already_decided' | 'not_claimed' | 'not_found' | 'not_review' | 'error'
+
+export interface DecisionOutcome {
+  purchase_id: string
+  status: DecisionStatus
+  // The blocklist entries this purchase's rejection added.
+  blocked: ReviewBlocks
+}
+
+interface DecisionResult extends DecisionSaved {
+  purchase_id: string
+  status: DecisionStatus
+}
+
+// Returns one result per purchase, in request order: the batch is not atomic.
+// The block choices apply to each purchase's own device, card and player.
+export async function submitReviewDecisions(purchaseIds: string[], decision: Decision,
+  blocks: ReviewBlocks, signal: AbortSignal): Promise<DecisionOutcome[]> {
+  const result = await request<{ results: DecisionResult[] }>('/reviews/decisions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...decisionBody(decision, blocks), purchase_ids: purchaseIds }),
+    signal,
+  })
+  return result.results.map(saved => ({ purchase_id: saved.purchase_id, status: saved.status, blocked: blockedValues(saved) }))
 }
 
 // The API accepts block fields only with a rejection, so only the chosen ones are sent.
