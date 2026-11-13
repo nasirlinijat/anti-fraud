@@ -359,6 +359,34 @@ input[type='checkbox'] {
 .dialog-body { color: var(--muted); }
 .dialog-body .check { color: var(--text); }
 
+.review-blocks {
+  display: grid;
+  margin: var(--space-md) 0 var(--space-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+}
+
+.review-blocks legend {
+  margin-block-end: var(--space-sm);
+  font-family: var(--font-body);
+  font-size: var(--type-label);
+}
+
+/* A long selection scrolls inside the dialog, so the decision buttons stay in view. */
+.batch-transactions {
+  max-block-size: 10rem;
+  overflow: auto;
+  margin-block: 0 var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.batch-transactions ul { margin: 0; padding-inline-start: 1.1rem; }
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;

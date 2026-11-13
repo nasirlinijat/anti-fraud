@@ -80,6 +80,38 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   await expect.poll(() => posts).toBe(1)
 })
 
+const ownClaim = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: 'demo-device',
+  amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: null, model_version: null, fired_rules: [],
+  claimed_by: 'demo-user', claimed_at: now }
+
+test('a rejection adds the chosen card and player to the blocklist and names them', async ({ page }) => {
+  const bodies: unknown[] = []
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: bodies.length ? [] : [ownClaim], next_cursor: null, model_enabled: false } }))
+  await page.route('**/reviews/demo-purchase/decision', async route => {
+    bodies.push(route.request().postDataJSON())
+    await route.fulfill({ status: 201, json: { device_blocked: false, card_blocked: true, player_blocked: true } })
+  })
+  await page.goto('/#/reviews')
+  await page.getByRole('button', { name: 'Reject demo-transaction' }).click()
+  const choices = page.getByRole('dialog').getByRole('group', { name: 'Also add to the blocklist' })
+  for (const name of ["This purchase's device (demo-device)", "This purchase's card", "This purchase's player (demo-player)"]) {
+    await expect(choices.getByRole('checkbox', { name, exact: true })).not.toBeChecked()
+  }
+  await choices.getByRole('checkbox', { name: "This purchase's card", exact: true }).check()
+  await choices.getByRole('checkbox', { name: "This purchase's player (demo-player)", exact: true }).check()
+  await page.getByRole('dialog').getByRole('button', { name: 'Reject', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Rejected demo-transaction and blocked its card and player.' })).toBeVisible()
+  expect(bodies).toEqual([{ decision: 'reject', block_card: true, block_player: true }])
+})
+
+test('an approval offers no blocklist choices', async ({ page }) => {
+  await page.route('**/reviews?*', route => route.fulfill({ json: { items: [ownClaim], next_cursor: null, model_enabled: false } }))
+  await page.goto('/#/reviews')
+  await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Approve this purchase?' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('checkbox')).toHaveCount(0)
+})
+
 test('a purchase claimed by another account offers no decision', async ({ page }) => {
   const item = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
     amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: null, model_version: null, fired_rules: [],

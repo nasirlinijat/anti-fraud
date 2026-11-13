@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
@@ -11,10 +13,14 @@ import (
 
 const PageSize = 100
 
+const maxLinkedValueBytes = 256
+
 type Store interface {
 	Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
+	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
+	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
 	Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
@@ -70,29 +76,52 @@ func (s *Service) Network(ctx context.Context, purchaseID int64) (models.CaseNet
 	return s.store.Network(ctx, purchaseID)
 }
 
+// NetworkPurchases returns the purchases of a value linked to the purchase
+// under review through one of its anchors. It returns ErrInvalidNetworkAnchor
+// or ErrInvalidLinkedValue before reading anything.
+func (s *Service) NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error) {
+	if anchor != models.BlocklistDevice && anchor != models.BlocklistCard && anchor != models.BlocklistPlayer {
+		return models.LinkedPurchases{}, ErrInvalidNetworkAnchor
+	}
+	if !isLinkedValue(value) {
+		return models.LinkedPurchases{}, ErrInvalidLinkedValue
+	}
+	return s.store.NetworkPurchases(ctx, purchaseID, anchor, value)
+}
+
+// LinkedReviews returns the other purchases awaiting review that share the
+// device, card, or player of the purchase under review.
+func (s *Service) LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error) {
+	return s.store.LinkedReviews(ctx, purchaseID)
+}
+
+// isLinkedValue applies the limits of account event IDs, so that a query
+// parameter cannot send an unbounded or unprintable value to the database.
+func isLinkedValue(value string) bool {
+	return value != "" && len(value) <= maxLinkedValueBytes && !strings.ContainsFunc(value, unicode.IsControl)
+}
+
 // Decide saves the decision of an analyst with a key on a purchase awaiting
 // review. Each purchase gets one decision; a rejection can also blocklist the
-// purchase's device in the same transaction.
-func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error) {
+// purchase's device, card and player in the same transaction.
+func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: analystID, BlockDevice: blockDevice,
+		PurchaseID: purchaseID, Decision: decision, AnalystID: analystID, Blocks: blocks,
 	})
 }
 
 // DecideClaimed saves the decision of a signed-in account, which must hold
-// the claim on the purchase. It returns ErrNotClaimed otherwise.
-func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error) {
+// the claim on the purchase. It returns ErrNotClaimed otherwise. Like Decide,
+// a rejection can also blocklist the purchase's device, card and player.
+func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: username, BlockDevice: blockDevice, ClaimedBy: &username,
+		PurchaseID: purchaseID, Decision: decision, AnalystID: username, Blocks: blocks, ClaimedBy: &username,
 	})
 }
 
 func (s *Service) decide(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
-	if d.Decision != "approve" && d.Decision != "reject" {
-		return models.Resolution{}, ErrInvalidDecision
-	}
-	if d.BlockDevice && d.Decision != "reject" {
-		return models.Resolution{}, ErrBlockDeviceNeedsReject
+	if err := checkDecision(d.Decision, d.Blocks); err != nil {
+		return models.Resolution{}, err
 	}
 	result, err := s.store.Resolve(ctx, d)
 	if err != nil {
@@ -114,9 +143,20 @@ func (s *Service) decide(ctx context.Context, d models.ReviewDecision) (models.R
 	}
 }
 
+func checkDecision(decision string, blocks models.ReviewBlocks) error {
+	if decision != "approve" && decision != "reject" {
+		return ErrInvalidDecision
+	}
+	if blocks.Any() && decision != "reject" {
+		return ErrBlockNeedsReject
+	}
+	return nil
+}
+
 // Claim gives a purchase awaiting review to the signed-in account, so that
 // only that account can decide it. Claiming a purchase the account already
-// holds succeeds again with the original claim.
+// holds succeeds again with the original claim. With ErrClaimedByOther it
+// also returns the claim of the account that holds the purchase.
 func (s *Service) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
 	claim, err := s.store.Claim(ctx, purchaseID, username)
 	if err != nil {
@@ -132,7 +172,7 @@ func (s *Service) Claim(ctx context.Context, purchaseID int64, username string) 
 	case models.ClaimAlreadyResolved:
 		return models.Claim{}, ErrAlreadyDecided
 	case models.ClaimHeldByOther:
-		return models.Claim{}, ErrClaimedByOther
+		return claim, ErrClaimedByOther
 	default:
 		return models.Claim{}, fmt.Errorf("unexpected review claim status %q", claim.Status)
 	}

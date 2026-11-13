@@ -71,6 +71,7 @@ export async function mockConsole(page: Page, role: Role | null = 'admin') {
     if (url.pathname === '/stats/quality') return route.fulfill({ json: quality(source, url.searchParams.get('run_id') ?? runId) })
     if (url.pathname === '/blocklist') return route.fulfill({ json: { entries: [] } })
     if (url.pathname.startsWith('/simulations')) return route.fulfill({ status: 503, json: { error: 'Simulations are disabled.' } })
+    if (url.pathname.endsWith('/network/reviews')) return route.fulfill({ json: { window_days: 30, total: 0, items: [] } })
     if (url.pathname.startsWith('/reviews')) return route.fulfill({ json: { items: [], next_cursor: null, model_enabled: true } })
     if (url.pathname === '/rulesets/active') return route.fulfill({ json: { version: 3, created_at: now, note: 'Demo configuration', review_threshold: 30, block_threshold: 80, rules: {} } })
     if (url.pathname === '/rulesets') return route.fulfill({ json: { versions: [] } })

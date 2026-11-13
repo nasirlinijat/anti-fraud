@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -123,6 +124,76 @@ func TestReviewDecisionBlocksTheDevice(t *testing.T) {
 	if next.Outcome != "block" || len(next.FiredRules) != 1 || next.FiredRules[0].Name != "blocklist" {
 		t.Fatalf("next purchase on the device %+v, want a blocklist block", next)
 	}
+}
+
+// purchaseOf is a small purchase with the given card, player and device.
+func purchaseOf(transactionID, cardToken, playerID, deviceID string) string {
+	eventTime := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	return fmt.Sprintf(`{"transaction_id":%q,"event_time":%q,"amount_minor":100,"player_id":%q,"card_token":%q,"device_id":%q}`,
+		transactionID, eventTime, playerID, cardToken, deviceID)
+}
+
+func TestReviewDecisionBlocksTheCardAndPlayer(t *testing.T) {
+	a := newApp(t)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	scored := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-cp-review", 20000, "it-cp-device")), http.StatusOK)
+	if scored.Outcome != "review" {
+		t.Fatalf("outcome %s, want review", scored.Outcome)
+	}
+	var purchaseID int64
+	if err := a.tx.QueryRow(context.Background(), `SELECT id FROM purchases WHERE transaction_id = 'it-cp-review'`).Scan(&purchaseID); err != nil {
+		t.Fatalf("read the purchase under review: %v", err)
+	}
+
+	type decision struct {
+		DeviceBlocked bool `json:"device_blocked"`
+		CardBlocked   bool `json:"card_blocked"`
+		PlayerBlocked bool `json:"player_blocked"`
+	}
+	reject := `{"decision":"reject","block_card":true,"block_player":true}`
+	saved := expect[decision](t, a.do(t, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", purchaseID), analystKey, reject), http.StatusCreated)
+	if saved != (decision{CardBlocked: true, PlayerBlocked: true}) {
+		t.Fatalf("decision %+v, want the card and player blocked", saved)
+	}
+
+	for name, body := range map[string]string{
+		"same card":   purchaseOf("it-cp-same-card", "card-it-cp-review", "it-cp-other-player", "it-cp-other-device"),
+		"same player": purchaseOf("it-cp-same-player", "it-cp-other-card", "player-it-cp-review", "it-cp-device-2"),
+	} {
+		next := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, body), http.StatusOK)
+		if next.Outcome != "block" || len(next.FiredRules) != 1 || next.FiredRules[0].Name != "blocklist" {
+			t.Fatalf("next purchase with the %s %+v, want a blocklist block", name, next)
+		}
+	}
+}
+
+func TestReviewNetworkListsThePurchasesOfALinkedPlayer(t *testing.T) {
+	a := newApp(t)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-other", 100, "it-net-device")), http.StatusOK)
+	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-review", 20000, "it-net-device")), http.StatusOK)
+	var purchaseID int64
+	err := a.tx.QueryRow(context.Background(), `SELECT id FROM purchases WHERE transaction_id = 'it-net-review'`).Scan(&purchaseID)
+	if err != nil {
+		t.Fatalf("read the purchase under review: %v", err)
+	}
+
+	type linkedPurchases struct {
+		Total     int64 `json:"total"`
+		Purchases []struct {
+			TransactionID  string `json:"transaction_id"`
+			Outcome        string `json:"outcome"`
+			AwaitingReview bool   `json:"awaiting_review"`
+		} `json:"purchases"`
+	}
+	path := fmt.Sprintf("/reviews/%d/network/purchases?anchor=device&value=player-it-net-other", purchaseID)
+	expect[map[string]any](t, a.do(t, http.MethodGet, path, serviceKey, ""), http.StatusUnauthorized)
+	got := expect[linkedPurchases](t, a.do(t, http.MethodGet, path, analystKey, ""), http.StatusOK)
+	if got.Total != 1 || len(got.Purchases) != 1 || got.Purchases[0].TransactionID != "it-net-other" ||
+		got.Purchases[0].Outcome != "allow" || got.Purchases[0].AwaitingReview {
+		t.Fatalf("linked purchases %+v, want the allowed it-net-other", got)
+	}
+	expect[map[string]any](t, a.do(t, http.MethodGet, fmt.Sprintf("/reviews/%d/network/purchases?anchor=ip&value=x", purchaseID), analystKey, ""), http.StatusBadRequest)
 }
 
 func TestRuntimeRoleCannotReadLabelsOrChangeDecisions(t *testing.T) {
