@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
@@ -11,10 +13,13 @@ import (
 
 const PageSize = 100
 
+const maxLinkedValueBytes = 256
+
 type Store interface {
 	Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
+	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
@@ -68,6 +73,25 @@ func (s *Service) Case(ctx context.Context, purchaseID int64) (models.CaseItem, 
 
 func (s *Service) Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error) {
 	return s.store.Network(ctx, purchaseID)
+}
+
+// NetworkPurchases returns the purchases of a value linked to the purchase
+// under review through one of its anchors. It returns ErrInvalidNetworkAnchor
+// or ErrInvalidLinkedValue before reading anything.
+func (s *Service) NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error) {
+	if anchor != models.BlocklistDevice && anchor != models.BlocklistCard && anchor != models.BlocklistPlayer {
+		return models.LinkedPurchases{}, ErrInvalidNetworkAnchor
+	}
+	if !isLinkedValue(value) {
+		return models.LinkedPurchases{}, ErrInvalidLinkedValue
+	}
+	return s.store.NetworkPurchases(ctx, purchaseID, anchor, value)
+}
+
+// isLinkedValue applies the limits of account event IDs, so that a query
+// parameter cannot send an unbounded or unprintable value to the database.
+func isLinkedValue(value string) bool {
+	return value != "" && len(value) <= maxLinkedValueBytes && !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 // Decide saves the decision of an analyst with a key on a purchase awaiting

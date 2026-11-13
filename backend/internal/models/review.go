@@ -94,6 +94,35 @@ type LinkedEntity struct {
 	Status    NetworkStatus
 }
 
+// LinkedPurchases lists the purchases of a linked entity that share an anchor
+// with a purchase under review within WindowDays of that purchase.
+type LinkedPurchases struct {
+	// Anchor names the anchor of the purchase under review that links Value.
+	Anchor     BlocklistType
+	Value      string
+	WindowDays int
+	// Total counts every matching purchase, including those left out of Purchases.
+	Total int64
+	// Purchases lists the matching purchases, newest first.
+	Purchases []LinkedPurchase
+}
+
+// LinkedPurchase is a purchase of a linked entity that shares the anchor.
+type LinkedPurchase struct {
+	PurchaseID    int64
+	TransactionID string
+	EventTime     time.Time
+	AmountMinor   int64
+	Outcome       scoring.Outcome
+	// ReviewDecision is approve or reject, or nil when no analyst decided the purchase.
+	ReviewDecision *string
+	// ClaimedBy is the username holding the claim while the purchase awaits
+	// review, or nil when nobody holds one.
+	ClaimedBy *string
+	// AwaitingReview is true for a purchase scored for review and not yet decided.
+	AwaitingReview bool
+}
+
 // NetworkStatus is the worst thing known about a linked entity.
 type NetworkStatus string
 

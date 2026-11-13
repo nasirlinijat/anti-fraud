@@ -11,4 +11,6 @@ var (
 	ErrNotClaimed             = errors.New("purchase must be claimed by you before you decide it")
 	ErrClaimedByOther         = errors.New("purchase is claimed by another account")
 	ErrNoOpenClaim            = errors.New("purchase has no open claim")
+	ErrInvalidNetworkAnchor   = errors.New("anchor must be device, card, or player")
+	ErrInvalidLinkedValue     = errors.New("value must be 1 to 256 bytes without control characters")
 )

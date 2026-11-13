@@ -101,6 +101,21 @@ func (mr *MockStoreMockRecorder) Network(ctx, purchaseID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Network", reflect.TypeOf((*MockStore)(nil).Network), ctx, purchaseID)
 }
 
+// NetworkPurchases mocks base method.
+func (m *MockStore) NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NetworkPurchases", ctx, purchaseID, anchor, value)
+	ret0, _ := ret[0].(models.LinkedPurchases)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NetworkPurchases indicates an expected call of NetworkPurchases.
+func (mr *MockStoreMockRecorder) NetworkPurchases(ctx, purchaseID, anchor, value any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NetworkPurchases", reflect.TypeOf((*MockStore)(nil).NetworkPurchases), ctx, purchaseID, anchor, value)
+}
+
 // Queue mocks base method.
 func (m *MockStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error) {
 	m.ctrl.T.Helper()

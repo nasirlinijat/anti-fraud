@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,6 +137,62 @@ func TestCaseReturnsTheStoreResult(t *testing.T) {
 	if _, err := svc.Case(context.Background(), 9); !errors.Is(err, models.ErrReviewNotFound) {
 		t.Fatalf("err = %v, want ErrReviewNotFound", err)
 	}
+}
+
+func TestNetworkPurchasesChecksTheAnchorAndValueBeforeReading(t *testing.T) {
+	tests := []struct {
+		name   string
+		anchor models.BlocklistType
+		value  string
+		want   error
+	}{
+		{"empty anchor", "", "player-2", review.ErrInvalidNetworkAnchor},
+		{"ip anchor", models.BlocklistIP, "player-2", review.ErrInvalidNetworkAnchor},
+		{"unknown anchor", "email", "player-2", review.ErrInvalidNetworkAnchor},
+		{"empty value", models.BlocklistDevice, "", review.ErrInvalidLinkedValue},
+		{"value over 256 bytes", models.BlocklistCard, strings.Repeat("a", 257), review.ErrInvalidLinkedValue},
+		{"control character", models.BlocklistPlayer, "card\n2", review.ErrInvalidLinkedValue},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, store := newService(t)
+			store.EXPECT().NetworkPurchases(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+			_, err := svc.NetworkPurchases(context.Background(), 7, tt.anchor, tt.value)
+
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNetworkPurchasesReturnsTheStoreResult(t *testing.T) {
+	longest := strings.Repeat("a", 256)
+	want := models.LinkedPurchases{Anchor: models.BlocklistCard, Value: longest, WindowDays: 30, Total: 1,
+		Purchases: []models.LinkedPurchase{{PurchaseID: 3, TransactionID: "tx-3"}}}
+
+	t.Run("linked purchases", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().NetworkPurchases(gomock.Any(), int64(7), models.BlocklistCard, longest).Return(want, nil)
+
+		got, err := svc.NetworkPurchases(context.Background(), 7, models.BlocklistCard, longest)
+
+		if err != nil || got.Total != 1 || len(got.Purchases) != 1 || got.Purchases[0].TransactionID != "tx-3" {
+			t.Fatalf("NetworkPurchases = %+v, %v; want %+v", got, err, want)
+		}
+	})
+
+	t.Run("store error", func(t *testing.T) {
+		svc, store := newService(t)
+		store.EXPECT().NetworkPurchases(gomock.Any(), int64(7), models.BlocklistDevice, "player-2").Return(models.LinkedPurchases{}, models.ErrReviewNotFound)
+
+		_, err := svc.NetworkPurchases(context.Background(), 7, models.BlocklistDevice, "player-2")
+
+		if !errors.Is(err, models.ErrReviewNotFound) {
+			t.Fatalf("err = %v, want ErrReviewNotFound", err)
+		}
+	})
 }
 
 func TestCursorForModelOrderPutsMissingScoresLast(t *testing.T) {

@@ -125,6 +125,35 @@ func TestReviewDecisionBlocksTheDevice(t *testing.T) {
 	}
 }
 
+func TestReviewNetworkListsThePurchasesOfALinkedPlayer(t *testing.T) {
+	a := newApp(t)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-other", 100, "it-net-device")), http.StatusOK)
+	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-review", 20000, "it-net-device")), http.StatusOK)
+	var purchaseID int64
+	err := a.tx.QueryRow(context.Background(), `SELECT id FROM purchases WHERE transaction_id = 'it-net-review'`).Scan(&purchaseID)
+	if err != nil {
+		t.Fatalf("read the purchase under review: %v", err)
+	}
+
+	type linkedPurchases struct {
+		Total     int64 `json:"total"`
+		Purchases []struct {
+			TransactionID  string `json:"transaction_id"`
+			Outcome        string `json:"outcome"`
+			AwaitingReview bool   `json:"awaiting_review"`
+		} `json:"purchases"`
+	}
+	path := fmt.Sprintf("/reviews/%d/network/purchases?anchor=device&value=player-it-net-other", purchaseID)
+	expect[map[string]any](t, a.do(t, http.MethodGet, path, serviceKey, ""), http.StatusUnauthorized)
+	got := expect[linkedPurchases](t, a.do(t, http.MethodGet, path, analystKey, ""), http.StatusOK)
+	if got.Total != 1 || len(got.Purchases) != 1 || got.Purchases[0].TransactionID != "it-net-other" ||
+		got.Purchases[0].Outcome != "allow" || got.Purchases[0].AwaitingReview {
+		t.Fatalf("linked purchases %+v, want the allowed it-net-other", got)
+	}
+	expect[map[string]any](t, a.do(t, http.MethodGet, fmt.Sprintf("/reviews/%d/network/purchases?anchor=ip&value=x", purchaseID), analystKey, ""), http.StatusBadRequest)
+}
+
 func TestRuntimeRoleCannotReadLabelsOrChangeDecisions(t *testing.T) {
 	if !runtimeRole {
 		t.Skip("TEST_RUNTIME_DATABASE_URL is not set")

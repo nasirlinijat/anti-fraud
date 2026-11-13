@@ -58,6 +58,10 @@ type fakeReviewReads struct {
 	networkReader
 }
 
+func (fakeReviewReads) NetworkPurchases(context.Context, int64, models.BlocklistType, string) (models.LinkedPurchases, error) {
+	panic("unexpected linked purchases request")
+}
+
 func (fakeReviewReads) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected decision request")
 }

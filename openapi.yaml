@@ -1663,6 +1663,94 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /reviews/{purchase_id}/network/purchases:
+    get:
+      tags: [Reviews]
+      operationId: getReviewNetworkPurchases
+      summary: Get the purchases of a player or card linked to a purchase awaiting review
+      description: >-
+        Returns the purchases of one linked player or card that share an
+        anchor of the purchase under review, within 30 days before or after
+        it, newest first, at most 50. The anchor's own value is read from the
+        purchase under review, so only the client names the linked value. A
+        value the network does not link, such as an unknown player or the
+        purchase's own player or card, returns an empty list. Fraud labels are
+        never read.
+      security:
+        - AnalystKeyAuth: []
+        - SessionAuth: []
+      parameters:
+        - in: path
+          name: purchase_id
+          required: true
+          description: The purchase ID from the review queue.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+        - in: query
+          name: anchor
+          required: true
+          description: >-
+            The anchor of the purchase under review that links the value: its
+            device or card for a linked player, or its player for a linked card.
+          schema:
+            type: string
+            enum: [device, card, player]
+        - in: query
+          name: value
+          required: true
+          description: >-
+            The linked value from the network: a player ID for the device or
+            card anchor, a card token for the player anchor.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: The purchases of the linked value. A device anchor of a purchase without a device returns an empty list.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedPurchases"
+        "400":
+          description: >-
+            The purchase ID is not a positive integer, anchor or value is
+            missing or repeated, anchor is not device, card, or player, or
+            value is longer than 256 bytes or contains control characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >-
+            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No purchase under review has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The linked purchases could not be loaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ReviewAccessUnavailable"
+
   /rulesets:
     get:
       tags: [Rulesets]
@@ -2373,6 +2461,68 @@ components:
             The worst of: the value is on the blocklist, an analyst rejected one of the purchases, one was blocked, one
             awaits review, or none of these. Only the blocklist check covers every purchase; the other statuses come
             from the purchases that share the anchor value within the window.
+
+    LinkedPurchases:
+      type: object
+      required: [anchor, value, window_days, total, purchases]
+      properties:
+        anchor:
+          type: string
+          enum: [device, card, player]
+          description: The anchor of the purchase under review that links the value.
+        value:
+          type: string
+          description: The linked player ID or card token.
+        window_days:
+          type: integer
+          format: int32
+          description: Listed purchases are at most this many days before or after the purchase under review.
+          example: 30
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The number of matching purchases, including any left out of purchases.
+        purchases:
+          type: array
+          maxItems: 50
+          description: The matching purchases, newest first.
+          items:
+            $ref: "#/components/schemas/LinkedPurchase"
+
+    LinkedPurchase:
+      type: object
+      required: [purchase_id, transaction_id, event_time, amount_minor, outcome, review_decision, claimed_by, awaiting_review]
+      properties:
+        purchase_id:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+          description: Decimal purchase ID, sent as a string to preserve 64-bit precision.
+        transaction_id:
+          type: string
+        event_time:
+          type: string
+          format: date-time
+          description: Purchase time in UTC.
+        amount_minor:
+          type: string
+          pattern: "^[0-9]+$"
+          description: Amount in minor currency units, sent as a string to preserve 64-bit precision.
+        outcome:
+          type: string
+          enum: [allow, review, block]
+        review_decision:
+          type: string
+          enum: [approve, reject]
+          nullable: true
+          description: The analyst's decision, or null when no analyst decided the purchase.
+        claimed_by:
+          type: string
+          nullable: true
+          description: The username holding the claim while the purchase awaits review, or null.
+        awaiting_review:
+          type: boolean
+          description: Whether the purchase was scored for review and is not yet decided.
 
     RulesetSummary:
       type: object

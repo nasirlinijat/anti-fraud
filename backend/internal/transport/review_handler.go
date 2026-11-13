@@ -26,6 +26,7 @@ type ReviewService interface {
 	Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
+	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blockDevice bool) (models.Resolution, error)
 	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blockDevice bool) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
@@ -52,6 +53,9 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	}))
 	mux.HandleFunc("GET /reviews/{purchase_id}/network", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveNetwork(w, r)
+	}))
+	mux.HandleFunc("GET /reviews/{purchase_id}/network/purchases", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveNetworkPurchases(w, r)
 	}))
 	mux.HandleFunc("POST /reviews/{purchase_id}/claim", access.Review(h.serveClaim))
 	mux.HandleFunc("POST /reviews/{purchase_id}/decision", access.Review(h.serveDecision))
@@ -465,7 +469,8 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 // error is logged with the action that failed and answered with 500.
 func writeReviewError(ctx context.Context, w http.ResponseWriter, purchaseID int64, err error, action string) {
 	switch {
-	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject):
+	case errors.Is(err, review.ErrInvalidDecision), errors.Is(err, review.ErrBlockDeviceNeedsReject),
+		errors.Is(err, review.ErrInvalidNetworkAnchor), errors.Is(err, review.ErrInvalidLinkedValue):
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, review.ErrPurchaseNotFound), errors.Is(err, review.ErrNoOpenClaim):
 		platform.WriteError(w, http.StatusNotFound, err.Error())

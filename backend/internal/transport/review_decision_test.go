@@ -32,6 +32,10 @@ func (rejectUnexpectedReviewAccess) Network(context.Context, int64) (models.Case
 	panic("unexpected network read")
 }
 
+func (rejectUnexpectedReviewAccess) NetworkPurchases(context.Context, int64, models.BlocklistType, string) (models.LinkedPurchases, error) {
+	panic("unexpected linked purchases read")
+}
+
 func (rejectUnexpectedReviewAccess) Resolve(context.Context, models.ReviewDecision) (models.Resolution, error) {
 	panic("unexpected models.Resolution write")
 }
@@ -65,6 +69,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 		{http.MethodGet, "/reviews"},
 		{http.MethodGet, "/reviews/1"},
 		{http.MethodGet, "/reviews/1/network"},
+		{http.MethodGet, "/reviews/1/network/purchases?anchor=card&value=player-1"},
 		{http.MethodPost, "/reviews/1/decision"},
 	} {
 		rec := reviewRequest(mux, route.method, route.path, queueTestKey, `{"decision":"approve"}`)
