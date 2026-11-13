@@ -55,7 +55,7 @@ Backfill simulates event times, so a day of traffic can be sent in a few minutes
 
 The scenario descriptions below are for a player whose client sends every field. A rule that needs a missing field does not fire.
 
-Every purchase also carries the payment gateway's verification results: `cvv_result`, `avs_result`, and `three_ds_result`. Legitimate patterns almost always pass, sometimes report a check as `not_checked` or `not_enrolled`, and fail each check in only 1 to 2% of purchases. Card testing fails the CVV check in about 45% of purchases and the address check in about half. Stolen cards usually pass the CVV check, because the details were stolen with the card, but fail 3-D Secure in about 40%. Account takeovers pay with the owner's saved card, so the stored details still match. The results are drawn from the seed and the transaction ID, outside the main random sequence, so a seed generates the same purchases as before apart from these fields.
+Every purchase also carries the payment gateway's verification results: `cvv_result`, `avs_result`, and `three_ds_result`. Legitimate patterns almost always pass and fail each check in only 1 to 3% of purchases. A saved card keeps no security code, so the CVV check is skipped (`not_checked`) for about 35% of regular players' purchases and about 40% of account takeovers, which pay with the owner's saved card; a card typed in for the first time, on a new account, a relative's account, or an internet cafe's computer, is checked and mistyped in about 3% of purchases. The address check exists only for cards issued in the United States and the United Kingdom; every other card, honest or not, reports `not_checked`. Card testing fails the CVV check in about 45% of purchases and, on cards that support it, the address check in about half. Stolen cards usually pass the CVV check, because the details were stolen with the card, but fail 3-D Secure in about 40%. The results are drawn from the seed and the transaction ID, outside the main random sequence, so a seed generates the same purchases as before apart from these fields.
 
 Some connections are moved into the mock IP intelligence ranges, a quarter of them as IPv6 addresses. About 3% of regular players' home connections are on a VPN, so the IP rules also catch innocent purchases. Travellers and expats use a VPN in 15 to 20% of cases, and about a fifth of internet cafes sit behind a public proxy. Bots run in data centres: about half of device farms and card testing come from a hosting range, and card testing also uses proxies and Tor. Stolen cards and account takeovers hide behind a VPN, proxy, or Tor in 40 to 45% of cases, and quieter fraud less often. Most fraud still uses residential connections that a reputation service cannot flag. The choice is drawn from the seed and the original address, outside the main random sequence, so a shared connection such as a family home or a device farm moves as a whole, and only `ip_address` changes.
 
@@ -83,7 +83,22 @@ Each special scenario is equally likely when an event starts one. Some scenarios
 | `quiet_takeover` | Fraud uses an established account from a new phone in the player's own country for a mid-sized amount, and can pass the rules |
 | `device_farm` | Fraud uses one emulator and one connection for four to six accounts created between ten minutes and ten hours earlier, each with its own card, one to three purchases each, minutes apart, ending in a larger purchase |
 
-Before a purchase, the simulator also sends the player's recent logins and password resets to `POST /account-events`: a login before some normal purchases, a rare password reset between 2 hours and 2 days earlier, a login from the new phone or from abroad, and for `account_takeover` and `quiet_takeover` a login from the new device minutes earlier, usually after a password reset. These events come from their own random stream, so a seed produces the same purchases as before, and `-dump` leaves them out. A failed account event is reported and the purchase is still scored. Console simulation runs log each failed account event with the run ID, and log the number of failures when the run finishes.
+Before a purchase, the simulator also sends the player's logins and password resets to `POST /account-events`. Every scenario has them, honest or not, because a game asks for a login before it sells anything:
+
+| Accounts | Account events |
+|---|---|
+| Established, on first purchase in the run | Logins on 5 to 40% of the 30 days before, from the player's own device and country; the share is drawn per player. A player back after a long break (`returning_player`) has none |
+| Created less than a day earlier | One login right after the account was created, from the device and country of the first purchase |
+| Every session | A login 1 to 60 minutes before a purchase whose device and country have not logged in for 6 hours |
+| Second device | 20% of players also play on a second device: 30% of their earlier logins come from it, and 15% of their sessions follow a login on it 1 to 20 hours before |
+| Password resets | 2% of established accounts per 30 days, 2 to 60 minutes before a login; also 10% of `new_phone`, 5% of `internet_cafe`, and 25% of `returning_player` sessions |
+| New device or country, honest | A new phone, an internet cafe's computer, and a trip abroad each log in from the new device or country before the purchase |
+| `account_takeover`, `quiet_takeover` | A login from the attacker's device 1 to 15 minutes before, after a password reset in 45% and 30% of cases, with up to two and one further logins within the hour before |
+| `card_testing`, `device_farm` | Scripts log in 10 seconds to 2 or 5 minutes before every purchase, with up to two and one further logins in the 5 minutes before |
+| `new_account_spend`, `new_big_spender`, `new_casual_player` | The same events: the login after the account was created and a session login 1 to 30 minutes before the purchase |
+| `stolen_card`, `slow_card_testing`, `low_and_slow` | The fraudster's own older account logs in like a regular player's |
+
+These rates follow how players use a game account, not any one dataset. Account events leave out the device and country when the player's client leaves them out of purchases. They come from their own random stream and seeded draws, so a seed produces the same purchases as before. `-dump` writes them to a second file next to the purchases, `world1.account_events.jsonl` for `world1.jsonl`, for model training and the replay. A failed account event is reported and the purchase is still scored. Console simulation runs log each failed account event with the run ID, and log the number of failures when the run finishes.
 
 The simulator keeps pattern names local and prints the score API's actual outcomes for every pattern, including rows with zero purchases. Decisions depend on the active ruleset, blocklist, model, and purchase history. For example, card testing can start with allowed purchases before the velocity rule contributes to a block. Compose runs with the model enabled, so a purchase that passes the rules can still be sent to review.
 
@@ -103,4 +118,34 @@ Matching start retries with the same operator and request_id return the original
 
 History and counters are saved in PostgreSQL. `sent` counts saved decisions and is the sum of allowed, reviewed and blocked. The worker records an in-flight transaction before scoring and checkpoints its result afterwards. On recovery it reconciles that transaction against saved decisions and marks unfinished runs `interrupted`; it does not automatically continue their traffic. `pending: true` means an outcome still cannot be confirmed. A new run needs a new request_id. Database failures stop dispatch until recovery. Only console-managed runs share the active-run guard; separately launched CLI simulators are not controlled.
 
-A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results. This API does not reset data or expose fraud labels; the controller persists evaluation answers privately.
+A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results. This API does not expose fraud labels; the controller persists evaluation answers privately.
+
+## Reset demonstration data
+
+Pause external traffic, replay, label import/recovery, and mock-bank jobs and
+let in-flight work finish. With `SIMULATION_ENABLED=true`, an admin session or
+operator key can call `POST /simulations/reset`. Success returns 204; an active
+console simulation returns 409, and a disabled feature returns 404.
+
+`make reset` calls the same endpoint on the running backend. Set
+`RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN` in the environment; optionally set
+`RESET_URL` to override `http://127.0.0.1:$PORT` (port 8080 by default).
+`RESET_URL` must be an absolute HTTP or HTTPS URL. A base path is supported;
+user information, query strings, fragments, and invalid ports are rejected.
+This CLI sends its credentials to the operator-selected backend, so configure
+only a trusted destination. Redirects are never followed. Credentials are read
+from the environment and never passed as command arguments.
+
+Reset clears every purchase, decision, review claim/resolution, private finalized
+and pending evaluation answer, feature total, blocklist entry, account event,
+chargeback, and simulation run in this database. Start request IDs can be reused.
+Ruleset versions and their active selection, console accounts, sessions, audit
+records, and identity sequence positions remain. Model files, purchase dumps,
+and accompanying account-event JSONL files remain on disk. Replay sends account
+events and purchases; both flows must be paused.
+
+Scoring falls back to PostgreSQL until its Redis blocklist mirror is rebuilt.
+A cache rebuild failure does not undo a committed reset; database fallback stays
+active until a successful reload. Apply migrations and role grants before
+starting the backend with simulations enabled. Runtime and evaluation database
+connection targets must match, including fallback hosts.

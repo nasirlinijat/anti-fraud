@@ -69,8 +69,8 @@ func TestVerificationFailuresFollowThePattern(t *testing.T) {
 	}{
 		{simulator.PatternNormal, [3]float64{0, 0, 0}, [3]float64{0.03, 0.05, 0.03}},
 		{simulator.PatternTraveler, [3]float64{0, 0, 0}, [3]float64{0.05, 0.08, 0.05}},
-		{simulator.PatternCardTesting, [3]float64{0.3, 0.35, 0.2}, [3]float64{0.6, 0.65, 0.5}},
-		{simulator.PatternStolenCard, [3]float64{0.02, 0.15, 0.25}, [3]float64{0.2, 0.45, 0.55}},
+		{simulator.PatternCardTesting, [3]float64{0.3, 0.06, 0.2}, [3]float64{0.6, 0.2, 0.5}},
+		{simulator.PatternStolenCard, [3]float64{0.02, 0.02, 0.25}, [3]float64{0.2, 0.15, 0.55}},
 		{simulator.PatternAccountTakeover, [3]float64{0, 0, 0.03}, [3]float64{0.1, 0.12, 0.3}},
 	}
 	for _, tt := range tests {
@@ -80,5 +80,46 @@ func TestVerificationFailuresFollowThePattern(t *testing.T) {
 				t.Errorf("%s: %s fails for %.3f of purchases, want %.2f to %.2f", tt.pattern, check, got[i], tt.min[i], tt.max[i])
 			}
 		}
+	}
+}
+
+func TestOnlyCardsFromAddressCheckCountriesGetAnAddressCheck(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	cfg.SuspiciousShare = 0.6
+	cfg.MissingFieldShare = 0
+	checked := 0
+	for _, p := range generate(t, cfg, 5000) {
+		req := p.Request
+		supported := *req.CardCountry == "US" || *req.CardCountry == "GB"
+		if !supported && *req.AVSResult != "not_checked" {
+			t.Fatalf("purchase %s with a card from %s has address check result %s", req.TransactionID, *req.CardCountry, *req.AVSResult)
+		}
+		if supported && *req.AVSResult != "not_checked" {
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no card had its address checked")
+	}
+}
+
+func TestSavedCardsSkipTheCodeCheckAsOftenForHonestPlayersAsForTakeovers(t *testing.T) {
+	cfg := simulator.DefaultConfig()
+	cfg.Scenarios = []simulator.Pattern{simulator.PatternNormal, simulator.PatternAccountTakeover, simulator.PatternNewCasualPlayer}
+	cfg.SuspiciousShare = 0.5
+	cfg.MissingFieldShare = 0
+	skipped, total := map[simulator.Pattern]int{}, map[simulator.Pattern]int{}
+	for _, p := range generate(t, cfg, 20000) {
+		total[p.Pattern]++
+		if *p.Request.CVVResult == "not_checked" {
+			skipped[p.Pattern]++
+		}
+	}
+	share := func(pattern simulator.Pattern) float64 { return float64(skipped[pattern]) / float64(total[pattern]) }
+	if normal, takeover := share(simulator.PatternNormal), share(simulator.PatternAccountTakeover); normal < 0.3 || takeover < 0.3 {
+		t.Errorf("the CVV check is skipped for %.2f of normal purchases and %.2f of takeovers, want both about 0.35 to 0.4", normal, takeover)
+	}
+	if fresh := share(simulator.PatternNewCasualPlayer); fresh > 0.1 {
+		t.Errorf("the CVV check is skipped for %.2f of new players' first cards, want about 0.05", fresh)
 	}
 }

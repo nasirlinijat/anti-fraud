@@ -8,7 +8,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 )
 
-// Store reads purchase history for the features.
+// Store reads the purchase history and account events for the features.
 type Store struct {
 	conn platform.DBTX
 }
@@ -87,6 +87,39 @@ SELECT
     count(DISTINCT coalesce(email_domain, 'none')) AS email_domains
 FROM issuer_purchases`
 
+// AccountActivitySQL summarizes the player's account events after $2 and
+// before the purchase time $3: whether there are any, the latest password
+// reset, the first login from the purchase's device ID ($4) and from its IP
+// country in upper case ($5), and the distinct devices of the logins after
+// $6. A NULL device or country matches nothing. Every part is an index seek
+// or a range scan of the player's events in the window.
+const AccountActivitySQL = `
+SELECT
+    EXISTS (
+        SELECT 1 FROM account_events
+        WHERE player_id = $1::text AND event_time > $2::timestamptz AND event_time < $3::timestamptz
+    ) AS has_events,
+    (
+        SELECT max(event_time) FROM account_events
+        WHERE player_id = $1::text AND event_type = 'password_reset'
+          AND event_time > $2::timestamptz AND event_time < $3::timestamptz
+    ) AS last_password_reset,
+    (
+        SELECT min(event_time) FROM account_events
+        WHERE player_id = $1::text AND event_type = 'login' AND device_id = $4::text
+          AND event_time > $2::timestamptz AND event_time < $3::timestamptz
+    ) AS device_first_login,
+    (
+        SELECT min(event_time) FROM account_events
+        WHERE player_id = $1::text AND event_type = 'login' AND ip_country = $5::text
+          AND event_time > $2::timestamptz AND event_time < $3::timestamptz
+    ) AS country_first_login,
+    (
+        SELECT count(DISTINCT device_id) FROM account_events
+        WHERE player_id = $1::text AND event_type = 'login'
+          AND event_time > $6::timestamptz AND event_time < $3::timestamptz
+    ) AS login_devices_24h`
+
 // FeatureCountsSQL reads the running totals for all purchases, the email domain,
 // the device name, the operating system, the browser, and the screen
 // resolution. A NULL key matches nothing.
@@ -101,7 +134,8 @@ WHERE (kind = 'all' AND key = '')
    OR (kind = 'screen' AND key = $5::text)`
 
 // History reads the history of the purchase. Purchase history means saved
-// purchases that come before in (event_time, transaction_id) order; the
+// purchases that come before in (event_time, transaction_id) order, and
+// account history means the player's account events before its event time; the
 // running totals in All, Email and Device count every saved purchase, so
 // purchases must be scored in event time order.
 func (s *Store) History(ctx context.Context, in Input) (History, error) {
@@ -134,6 +168,11 @@ func (s *Store) History(ctx context.Context, in Input) (History, error) {
 	if err := s.readCounts(ctx, in, &h); err != nil {
 		return History{}, fmt.Errorf("read feature counts: %w", err)
 	}
+
+	h.Account, err = s.accountActivity(ctx, in, at)
+	if err != nil {
+		return History{}, fmt.Errorf("read account activity: %w", err)
+	}
 	return h, nil
 }
 
@@ -160,6 +199,15 @@ func (s *Store) playerHistory(ctx context.Context, in Input, at time.Time) (Play
 		p.Last = *last
 	}
 	return p, nil
+}
+
+// accountActivity summarizes the player's account events before the purchase.
+func (s *Store) accountActivity(ctx context.Context, in Input, at time.Time) (AccountActivity, error) {
+	var a AccountActivity
+	err := s.conn.QueryRow(ctx, AccountActivitySQL,
+		in.PlayerID, at.Add(-AccountLookback), at, in.DeviceID, in.AccountCountry(), at.Add(-LoginDevicesWindow),
+	).Scan(&a.HasEvents, &a.LastPasswordReset, &a.DeviceFirstLogin, &a.CountryFirstLogin, &a.LoginDevices24h)
+	return a, err
 }
 
 // readCounts reads the running totals that match the purchase into h.

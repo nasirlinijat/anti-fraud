@@ -37,6 +37,7 @@ The Make targets need GNU Make. The frontend needs Node.js 26 or newer.
 | `make lint-frontend` | Runs the frontend lint, type check, and unit tests |
 | `make migrate` | Applies all pending database migrations |
 | `make docs` | Shows the API spec (`openapi.yaml`) in Swagger UI at http://localhost:8090 |
+| `make reset` | Resets demo data through the enabled simulation API; pause external traffic first |
 | `make simulate` | Sends seeded demo purchases to the running backend |
 
 To run the frontend with hot reload, start the backend first. Then run `npm ci` and `npm run dev` in `frontend/` and open http://localhost:5173.

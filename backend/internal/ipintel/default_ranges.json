@@ -1,0 +1,10 @@
+[
+  {"cidr": "192.0.2.0/25", "kind": "hosting"},
+  {"cidr": "192.0.2.128/26", "kind": "vpn"},
+  {"cidr": "192.0.2.192/27", "kind": "proxy"},
+  {"cidr": "192.0.2.224/27", "kind": "tor"},
+  {"cidr": "2001:db8:d0::/48", "kind": "hosting"},
+  {"cidr": "2001:db8:a0::/48", "kind": "vpn"},
+  {"cidr": "2001:db8:b0::/48", "kind": "proxy"},
+  {"cidr": "2001:db8:c0::/48", "kind": "tor"}
+]

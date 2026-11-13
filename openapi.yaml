@@ -168,6 +168,26 @@ paths:
         "503":
           $ref: "#/components/responses/DatabaseUnavailable"
 
+  /simulations/reset:
+    post:
+      tags: [Simulations]
+      operationId: resetDemoData
+      summary: Reset the demonstration database
+      description: |
+        Available only when SIMULATION_ENABLED=true. Pause external ingestion
+        and finish in-flight work first. Clears all purchases, decisions,
+        reviews, evaluation data, feature totals, blocklist entries, account
+        events, and simulation history, including request IDs. Preserves
+        rulesets, console accounts, sessions, and configuration audit records.
+        Requires an admin session or operator key. Active console runs conflict.
+      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
+      responses:
+        '204': {description: Demo data reset. Repeating an empty reset is safe.}
+        '401': {description: Missing or invalid operator key or session.}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
+        '404': {description: Simulation feature disabled.}
+        '409': {description: A simulation controller or another reset is active.}
+        '503': {description: Reset service unavailable or request deadline exceeded.}
   /simulations:
     post:
       tags: [Simulations]
@@ -489,11 +509,14 @@ paths:
         Saves a login or password reset that the game's account system
         reports for a player. The account takeover rules
         `recent_password_reset`, `new_device_login`, and `new_country_login`
-        read these events, and the review case lists them. They are never
-        model inputs.
+        read these events, and the review case lists them. Game models
+        trained with account events (from `lgbm-game-v8`) also take four
+        inputs computed from them: the hours since the latest password reset,
+        the hours since the first login from the purchase's device and from
+        its IP country, and the distinct login devices in the last 24 hours.
 
-        A rule reads only events with an event time before the purchase's
-        event time, so send each event as soon as it happens. After
+        A rule or model input reads only events with an event time before
+        the purchase's event time, so send each event as soon as it happens. After
         authentication and validation, a retry with the same event ID and
         matching fields returns the saved event with 200 without saving it
         again. Fields are compared after normal request normalization, with
@@ -2217,7 +2240,8 @@ components:
       description: >-
         The IP intelligence lookup saved with the decision. Null when no lookup
         was made: IP_INTEL_PROVIDER is off, or the purchase carried no
-        ip_address. It is a rule input and evidence only, never a model input.
+        ip_address. It is a rule input and evidence. The fraud model sees only
+        whether the network is hosting or anonymous, never the address.
       required: [provider, available, hosting, vpn, proxy, tor]
       properties:
         provider:
@@ -2651,7 +2675,8 @@ components:
           description: >-
             IPv4 or IPv6 address of the purchase. Checked against the
             blocklist and, when IP_INTEL_PROVIDER is set, looked up for the
-            datacenter_ip and anonymous_ip rules. Never a model input.
+            datacenter_ip and anonymous_ip rules. The address is never a model
+            input; the kind of network from the lookup is.
           example: 203.0.113.9
         ip_country:
           type: string
@@ -2690,8 +2715,8 @@ components:
           enum: [match, mismatch, not_checked]
           description: >-
             The payment gateway's check of the card security code during
-            authorization. The cvv_mismatch rule fires on `mismatch`. Not used
-            by the fraud model.
+            authorization. The cvv_mismatch rule fires on `mismatch`. Also an
+            input of game models trained with it.
           example: match
         avs_result:
           type: string
@@ -2700,15 +2725,15 @@ components:
             The payment gateway's check of the billing address against the
             card issuer's records. The avs_mismatch rule fires on `mismatch`
             only; `partial` is common for genuine cardholders and adds no
-            points. Not used by the fraud model.
+            points. Also an input of game models trained with it.
           example: partial
         three_ds_result:
           type: string
           enum: [authenticated, attempted, failed, not_enrolled]
           description: >-
             The outcome of 3-D Secure cardholder authentication. The
-            three_ds_failed rule fires on `failed`. Not used by the fraud
-            model.
+            three_ds_failed rule fires on `failed`. Also an input of game
+            models trained with it.
           example: authenticated
 
     ScoreResponse:

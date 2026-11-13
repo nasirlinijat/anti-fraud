@@ -2,6 +2,7 @@ package ipintel
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,18 +30,24 @@ type Range struct {
 	Kind   Kind
 }
 
+// defaultRangesJSON is in the format of LoadRanges. The training code in ml/
+// reads the same file, so a model is trained on the classification the
+// service makes.
+//
+//go:embed default_ranges.json
+var defaultRangesJSON []byte
+
 // DefaultRanges lie inside the documentation ranges of RFC 5737 (192.0.2.0/24)
 // and RFC 3849 (2001:db8::/32), so they never classify a real address. The
 // simulator places hosting, VPN, proxy, and Tor traffic in them.
-var DefaultRanges = []Range{
-	{netip.MustParsePrefix("192.0.2.0/25"), KindHosting},
-	{netip.MustParsePrefix("192.0.2.128/26"), KindVPN},
-	{netip.MustParsePrefix("192.0.2.192/27"), KindProxy},
-	{netip.MustParsePrefix("192.0.2.224/27"), KindTor},
-	{netip.MustParsePrefix("2001:db8:d0::/48"), KindHosting},
-	{netip.MustParsePrefix("2001:db8:a0::/48"), KindVPN},
-	{netip.MustParsePrefix("2001:db8:b0::/48"), KindProxy},
-	{netip.MustParsePrefix("2001:db8:c0::/48"), KindTor},
+var DefaultRanges = mustParseRanges(defaultRangesJSON)
+
+func mustParseRanges(data []byte) []Range {
+	ranges, err := ParseRanges(data)
+	if err != nil {
+		panic(err)
+	}
+	return ranges
 }
 
 // Mock classifies addresses by a fixed table of ranges. An address in no

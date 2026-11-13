@@ -338,16 +338,120 @@ def test_non_finite_code_text_is_missing(tmp_path, text):
         assert built[name].tolist() == [features.MISSING], name
 
 
-def test_gateway_verification_results_are_not_model_inputs(tmp_path):
-    purchases = [
-        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
-                           "card_token": "c1", "ip_country": "AZ", "device_id": "d1"}),
-        ("stolen_card", True, {"event_time": "2026-01-02T10:00:00Z", "amount_minor": 20000, "player_id": "p2",
-                               "card_token": "c1", "ip_country": "TR", "device_id": "d2"}),
-    ]
-    verified = [(pattern, fraud, {**request, "cvv_result": "mismatch", "avs_result": "partial",
-                                  "three_ds_result": "failed"}) for pattern, fraud, request in purchases]
-    without = features.build(features.load_requests(write_dump(tmp_path / "without.jsonl", purchases)))
-    with_results = features.build(features.load_requests(write_dump(tmp_path / "with.jsonl", verified)))
+def test_payment_verification_codes(raw):
+    built = build_for(raw)
+    codes = built[["cvv_result_code", "avs_result_code", "three_ds_result_code"]]
+    assert codes.loc[1].tolist() == [0, 0, 0]
+    assert codes.loc[2].tolist() == [1, 1, 1]
+    assert codes.loc[3].tolist() == [2, 2, 2]
+    assert codes.loc[4].tolist() == [features.MISSING, 3, 3]
+    assert codes.loc[8].tolist() == [features.MISSING] * 3
 
-    pd.testing.assert_frame_equal(with_results, without)
+
+def test_ip_network_flags_follow_the_default_ranges(raw):
+    built = build_for(raw)
+    flags = built[["ip_is_hosting", "ip_is_anonymous"]]
+    # An ordinary address, IPv4 hosting, a VPN, an IPv6 Tor exit, an
+    # IPv4-mapped proxy, and an IPv6 address outside the ranges.
+    assert flags.loc[1].tolist() == [0, 0]
+    assert flags.loc[2].tolist() == [1, 0]
+    assert flags.loc[3].tolist() == [0, 1]
+    assert flags.loc[4].tolist() == [0, 1]
+    assert flags.loc[5].tolist() == [0, 1]
+    assert flags.loc[9].tolist() == [0, 0]
+    # No IP address: the service makes no lookup.
+    assert flags.loc[6].tolist() == [features.MISSING, features.MISSING]
+
+
+def test_ip_kinds_matches_the_mock_lookup():
+    ranges = features.ip_ranges()
+    assert features.ip_kinds("192.0.2.127", ranges) == {"hosting"}
+    assert features.ip_kinds("192.0.2.128", ranges) == {"vpn"}
+    assert features.ip_kinds("::ffff:192.0.2.224", ranges) == {"tor"}
+    assert features.ip_kinds("2001:db8:b0::abcd", ranges) == {"proxy"}
+    assert features.ip_kinds("2001:db8:d0::1%eth0", ranges) == set()
+    assert features.ip_kinds("203.0.113.9", ranges) == set()
+    assert features.ip_kinds("not an address", ranges) is None
+    assert features.ip_kinds(None, ranges) is None
+
+
+def test_signals_from_a_simulator_dump(tmp_path):
+    first = {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1", "card_token": "c1"}
+    dump = write_dump(tmp_path / "dump.jsonl", [
+        ("normal", False, {**first, "ip_address": "198.51.100.7", "cvv_result": "match", "avs_result": "partial",
+                           "three_ds_result": "authenticated"}),
+        ("card_testing", True, {**first, "event_time": "2026-01-02T10:00:00Z", "ip_address": " 192.0.2.5 ",
+                                "cvv_result": "mismatch", "three_ds_result": "failed"}),
+        ("normal", False, {**first, "event_time": "2026-01-03T10:00:00Z", "cvv_result": " "}),
+    ])
+    built = features.build(features.load_requests(dump))
+
+    assert built["cvv_result_code"].tolist() == [0, 2, features.MISSING]
+    assert built["avs_result_code"].tolist() == [1, features.MISSING, features.MISSING]
+    assert built["three_ds_result_code"].tolist() == [0, 3, features.MISSING]
+    assert built["ip_is_hosting"].tolist() == [0, 1, features.MISSING]
+    assert built["ip_is_anonymous"].tolist() == [0, 0, features.MISSING]
+
+
+def test_ieee_columns_leave_the_signals_missing():
+    built = features.build(features.load(TESTDATA / "transactions.csv").drop(columns=features.GAME_COLUMNS))
+    assert (built[features.FEATURE_GROUPS["signals"]] == features.MISSING).all().all()
+
+
+def write_account_events(dump, events):
+    lines = [json.dumps({"event_id": f"e{index}", **event}) for index, event in enumerate(events)]
+    features.account_events_path(dump).write_text("\n".join(lines) + "\n")
+    return features.load_account_events(dump)
+
+
+def test_account_inputs_from_the_events_next_to_a_dump(tmp_path):
+    home = {"player_id": "p1", "card_token": "c1", "amount_minor": 1999}
+    dump = write_dump(tmp_path / "world.jsonl", [
+        ("normal", False, {**home, "event_time": "2026-01-01T10:00:00Z", "device_id": "d1", "ip_country": "az"}),
+        ("account_takeover", True, {**home, "event_time": "2026-01-02T10:00:00Z", "device_id": "d2", "ip_country": "TR"}),
+        ("normal", False, {**home, "event_time": "2026-03-01T10:00:00Z", "device_id": "d1"}),
+    ])
+    events = write_account_events(dump, [
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-01T09:00:00Z", "device_id": "d1", "ip_country": " AZ "},
+        {"player_id": "p1", "event_type": "password_reset", "event_time": "2026-01-02T08:30:00Z"},
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T03:00:00Z", "device_id": "d4"},
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T09:54:00Z", "device_id": "d2", "ip_country": "tr"},
+        # At the purchase time, so it does not count for that purchase.
+        {"player_id": "p1", "event_type": "login", "event_time": "2026-01-02T10:00:00Z", "device_id": "d3"},
+        {"player_id": "p2", "event_type": "login", "event_time": "2026-01-01T09:30:00Z", "device_id": "d1"},
+    ])
+
+    built = features.build(features.load_requests(dump), events)
+
+    assert built["hours_since_password_reset"].tolist() == [features.MISSING, 1.5, features.MISSING]
+    assert built["device_first_login_hours"].tolist() == [1.0, pytest.approx(0.1), features.MISSING]
+    assert built["country_first_login_hours"].tolist() == [1.0, pytest.approx(0.1), features.MISSING]
+    # The login from d1 is 25 hours before the second purchase, and the third
+    # purchase comes more than 30 days after every event.
+    assert built["login_devices_24h"].tolist() == [1.0, 2.0, features.MISSING]
+
+
+def test_a_dump_without_account_events_has_the_inputs_of_a_player_without_any(tmp_path):
+    dump = write_dump(tmp_path / "world.jsonl", [
+        ("normal", False, {"event_time": "2026-01-01T10:00:00Z", "amount_minor": 1999, "player_id": "p1",
+                           "card_token": "c1", "device_id": "d1", "ip_country": "AZ"}),
+    ])
+
+    built = features.build(features.load_requests(dump), features.load_account_events(dump))
+
+    assert (built[features.FEATURE_GROUPS["account_events"]] == features.MISSING).all().all()
+
+
+def test_account_country_changes_only_ascii_letters():
+    assert features.ascii_upper("az") == "AZ"
+    assert features.ascii_upper("150") == "150"
+    assert features.ascii_upper("ſé") == "ſé"
+
+
+def test_account_inputs_never_change_when_later_rows_are_added(raw):
+    events = make_fixture.account_events(raw)
+    full = features.build(raw.copy(), events).set_index(raw["TransactionID"])
+    for count in range(1, len(raw)):
+        prefix = raw.iloc[:count]
+        built = features.build(prefix.copy(), events).set_index(prefix["TransactionID"])
+        pd.testing.assert_frame_equal(built[features.FEATURES], full.loc[built.index, features.FEATURES])

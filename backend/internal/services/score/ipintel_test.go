@@ -181,6 +181,61 @@ func TestScoreMakesNoIPLookupWithoutAnAddressOrAProvider(t *testing.T) {
 	}
 }
 
+func TestScoreGivesTheModelTheKindOfNetwork(t *testing.T) {
+	tests := []struct {
+		name                       string
+		provider                   *fakeIPIntel
+		ip                         string
+		wantHosting, wantAnonymous float64
+	}{
+		{"ordinary address", &fakeIPIntel{}, "192.0.2.10", 0, 0},
+		{"hosting address", &fakeIPIntel{result: ipintel.Result{Hosting: true}}, "192.0.2.10", 1, 0},
+		{"proxy", &fakeIPIntel{result: ipintel.Result{Proxy: true}}, "192.0.2.10", 0, 1},
+		{"VPN in a data centre", &fakeIPIntel{result: ipintel.Result{Hosting: true, VPN: true}}, "192.0.2.10", 1, 1},
+		{"failed lookup", &fakeIPIntel{err: errors.New("reputation service unavailable")}, "192.0.2.10", features.Missing, features.Missing},
+		{"no IP address", &fakeIPIntel{result: ipintel.Result{Hosting: true}}, "", features.Missing, features.Missing},
+		{"no provider", nil, "192.0.2.10", features.Missing, features.Missing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newScoreDeps(t)
+			if tt.provider != nil {
+				d.service.UseIPIntel(tt.provider)
+			}
+			p := purchaseFrom(tt.ip)
+			saved := d.expectScoredAndSaved(p)
+
+			if _, err := d.service.Score(context.Background(), p, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+
+			hosting, anonymous := saved.ModelInputs["ip_is_hosting"], saved.ModelInputs["ip_is_anonymous"]
+			if hosting != tt.wantHosting || anonymous != tt.wantAnonymous {
+				t.Errorf("ip_is_hosting %v, ip_is_anonymous %v; want %v, %v", hosting, anonymous, tt.wantHosting, tt.wantAnonymous)
+			}
+		})
+	}
+}
+
+func TestScoreGivesTheModelThePaymentVerificationResults(t *testing.T) {
+	d := newScoreDeps(t)
+	p := purchaseFrom("")
+	cvv, threeDS := scoring.CVVMismatch, scoring.ThreeDSAttempted
+	p.CVVResult, p.ThreeDSResult = &cvv, &threeDS
+	saved := d.expectScoredAndSaved(p)
+
+	if _, err := d.service.Score(context.Background(), p, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]float64{"cvv_result_code": 2, "avs_result_code": features.Missing, "three_ds_result_code": 1}
+	for name, w := range want {
+		if got := saved.ModelInputs[name]; got != w {
+			t.Errorf("%s = %v, want %v", name, got, w)
+		}
+	}
+}
+
 func TestScoreRetryMakesNoIPLookup(t *testing.T) {
 	d := newScoreDeps(t)
 	provider := &fakeIPIntel{result: ipintel.Result{Hosting: true}}

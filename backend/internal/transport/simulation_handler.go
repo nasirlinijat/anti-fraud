@@ -23,6 +23,7 @@ const (
 )
 
 type SimulationService interface {
+	Reset(ctx context.Context, actorID string) error
 	Start(ctx context.Context, operatorID string, settings models.SimulationSettings) (models.SimulationRun, bool, error)
 	Get(ctx context.Context, id string) (models.SimulationRun, error)
 	List(ctx context.Context, before string, limit int) ([]models.SimulationRun, string, error)
@@ -44,6 +45,7 @@ func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled 
 	if !enabled {
 		return
 	}
+	mux.Handle("POST /simulations/reset", bounded(access.ConfigWrite(h.reset)))
 	mux.Handle("POST /simulations", bounded(access.ConfigWrite(h.start)))
 	mux.Handle("POST /simulations/{id}/stop", bounded(access.ConfigWrite(h.stop)))
 	mux.Handle("GET /simulations/{id}", bounded(access.ConfigRead(http.HandlerFunc(h.read))))

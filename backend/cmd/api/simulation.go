@@ -14,16 +14,20 @@ import (
 )
 
 // newSimulationManager registers no controller or recovery when disabled.
-func newSimulationManager(cfg platform.Config, pool, evaluation *pgxpool.Pool) *simulation.Service {
+func newSimulationManager(cfg platform.Config, pool, evaluation *pgxpool.Pool, cache simulation.ResetCache) *simulation.Service {
 	if !cfg.SimulationEnabled {
 		return nil
 	}
 	setupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	resetter, err := labels.NewResetStore(setupCtx, pool, evaluation)
+	if err != nil {
+		fatal("initialize demo reset", err)
+	}
 	client := &simulator.Client{BaseURL: "http://127.0.0.1:" + cfg.Port, APIKey: cfg.APIKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
 	manager, err := simulation.NewService(setupCtx, labels.NewSimulationStore(storage.NewSimulationStore(pool, cfg.DatabaseURL), evaluation), client)
 	if err != nil {
 		fatal("initialize simulations", err)
 	}
-	return manager
+	return manager.UseReset(resetter, cache)
 }
