@@ -72,6 +72,17 @@
 .pipeline-flow-block { color: color-mix(in srgb, var(--chart-block) 80%, var(--surface)); }
 .pipeline-flow-empty { color: var(--muted); }
 .pipeline-flow-empty path { stroke-dasharray: 4 3; }
+
+/* The moving dots and the bin pulse are shown only by the motion styles, while the panel is live. */
+.pipeline-flow .pipeline-flow-dash {
+  display: none;
+  opacity: 0;
+  stroke: color-mix(in srgb, currentColor 35%, white);
+  stroke-linecap: round;
+}
+
+.pipeline-flow .pipeline-flow-dash-thin { stroke: color-mix(in srgb, currentColor 75%, var(--text)); }
+.pipeline-bin .pipeline-bin-pulse { display: none; fill: none; pointer-events: none; }
 .pipeline-stage rect { fill: var(--surface-subtle); stroke: var(--text); stroke-width: 2; }
 .pipeline-stage-idle rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 4 4; }
 .pipeline-stage-idle .pipeline-title { fill: var(--muted); }
@@ -91,6 +102,7 @@
 @media (forced-colors: active) {
   .pipeline-diagram rect { fill: Canvas !important; stroke: CanvasText !important; }
   .pipeline-flow { color: CanvasText !important; }
+  .pipeline-flow .pipeline-flow-dash { stroke: Canvas !important; }
   .pipeline-diagram text { fill: CanvasText !important; }
 }
 

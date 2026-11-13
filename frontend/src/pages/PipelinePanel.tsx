@@ -1,9 +1,13 @@
+import { useMemo, useRef } from 'react'
 import type { Stats } from '../api'
+import { binPulses, flowSpeeds, liveLabel } from './pipelineActivity'
 import { pipelineFlow, type PipelineFlow as Flow } from './pipelineFlow'
 import { pipelinePaths, shareOfEntered } from './pipelinePaths'
 import type { DiagramProps, FlowLabelLine } from './PipelineShapes'
 import { PipelineTallDiagram } from './PipelineTallDiagram'
 import { PipelineWideDiagram } from './PipelineWideDiagram'
+import { useFlowAnimation } from './useFlowAnimation'
+import { ACTIVITY_INTERVAL_MS, usePipelineActivity } from './usePipelineActivity'
 
 const number = new Intl.NumberFormat()
 
@@ -24,9 +28,14 @@ function rulesOutcomeLines(flow: Flow): FlowLabelLine[] {
 }
 
 // Both layouts are rendered and the stylesheet shows one, chosen by the width of the panel.
+// The statistics give the counts and widths; the recent activity only moves the dots.
 export function PipelinePanel({ stats }: { stats: Pick<Stats, 'outcomes' | 'model' | 'blocklist_blocks'> }) {
   const flow = pipelineFlow(stats)
   const modelRan = stats.model.scored > 0
+  const activity = usePipelineActivity()
+  const figure = useRef<HTMLElement>(null)
+  const speeds = useMemo(() => activity && flowSpeeds(activity.paths, ACTIVITY_INTERVAL_MS / 1000), [activity])
+  useFlowAnimation(figure, speeds)
   const diagram: DiagramProps = {
     flow,
     paths: pipelinePaths(flow),
@@ -34,11 +43,19 @@ export function PipelinePanel({ stats }: { stats: Pick<Stats, 'outcomes' | 'mode
     scored: stats.model.scored,
     label: describe(flow, modelRan),
     chainModelLines: rulesOutcomeLines(flow),
+    pulses: activity ? binPulses(activity.bins, activity.sequence) : {},
   }
   return (
     <section className="panel pipeline-panel">
-      <h2>Scoring pipeline</h2>
-      <figure className="pipeline-figure">
+      <div className="panel-head">
+        <h2>Scoring pipeline</h2>
+        {activity && (
+          <p className="muted small" aria-live="off">
+            {liveLabel(activity.firstRead ? null : activity.decisions, ACTIVITY_INTERVAL_MS / 1000)}
+          </p>
+        )}
+      </div>
+      <figure ref={figure} className={activity ? 'pipeline-figure pipeline-figure-live' : 'pipeline-figure'}>
         <PipelineWideDiagram {...diagram} />
         <PipelineTallDiagram {...diagram} />
         <PipelineTable flow={flow} />

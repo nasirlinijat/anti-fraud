@@ -1,5 +1,12 @@
 import type { Stats } from '../api.ts'
 
+// The dashboard statistics and the recent pipeline counts both have this shape.
+export interface FlowCounts {
+  outcomes: Stats['outcomes']
+  blocklist_blocks: number
+  model: Pick<Stats['model'], 'flagged' | 'cleared'>
+}
+
 export interface PipelineFlow {
   entered: number
   passedBlocklist: number
@@ -20,7 +27,7 @@ function atLeastZero(value: number): number {
 }
 
 // The model has no block count: it can only move a purchase between review and allow.
-export function pipelineFlow(stats: Pick<Stats, 'outcomes' | 'model' | 'blocklist_blocks'>): PipelineFlow {
+export function pipelineFlow(stats: FlowCounts): PipelineFlow {
   const { outcomes, model } = stats
   return {
     entered: outcomes.total,
