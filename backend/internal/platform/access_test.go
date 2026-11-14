@@ -39,15 +39,7 @@ type accessCase struct {
 
 func testAccess(t *testing.T) Access {
 	t.Helper()
-	analysts, err := ParseAnalystKeys(`[{"analyst_id":"key-analyst","key":"analyst-key"}]`, "service-key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	operators, err := ParseOperatorKeys(`[{"operator_id":"key-operator","key":"operator-key"}]`, "service-key", analysts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Access{ServiceKey: "service-key", Analysts: analysts, Operators: operators, Sessions: testSessions}
+	return Access{Sessions: testSessions}
 }
 
 // serveAccessCase sends the case's request to handler and checks the status,
@@ -75,21 +67,21 @@ func serveAccessCase(t *testing.T, handler http.Handler, actor *string, tc acces
 		t.Fatalf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
 	}
 	challenge := rec.Header().Get("WWW-Authenticate")
-	if tc.authorization != "" && rec.Code == http.StatusUnauthorized && challenge != "Bearer" {
+	if rec.Code == http.StatusUnauthorized && challenge != "Bearer" {
 		t.Fatalf("WWW-Authenticate = %q, want Bearer", challenge)
 	}
 }
 
-func TestConfigReadAcceptsServiceKeyOrAdminSession(t *testing.T) {
+func TestConfigReadRequiresAdminSession(t *testing.T) {
 	for _, tc := range []accessCase{
-		{name: "service key", apiKey: "service-key", want: http.StatusNoContent},
+		{name: "service key", apiKey: "service-key", want: http.StatusUnauthorized},
 		{name: "admin session", authorization: "Bearer admin-token", want: http.StatusNoContent},
 		{name: "reviewer session", authorization: "Bearer reviewer-token", want: http.StatusForbidden},
 		{name: "unknown session", authorization: "Bearer unknown-token", want: http.StatusUnauthorized},
 		{name: "not a bearer token", authorization: "Basic YWRhOnNlY3JldA==", want: http.StatusUnauthorized},
 		{name: "session check fails", authorization: "Bearer broken-token", want: http.StatusInternalServerError},
 		{name: "invalid session with valid key", apiKey: "service-key", authorization: "Bearer unknown-token", want: http.StatusUnauthorized},
-		{name: "operator key", apiKey: "operator-key", want: http.StatusUnauthorized},
+		{name: "operator key", apiKey: "admin-token", want: http.StatusUnauthorized},
 		{name: "nothing", want: http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,14 +95,14 @@ func TestConfigReadAcceptsServiceKeyOrAdminSession(t *testing.T) {
 	}
 }
 
-func TestConfigWriteAcceptsOperatorKeyOrAdminSession(t *testing.T) {
+func TestConfigWriteRequiresAdminSession(t *testing.T) {
 	for _, tc := range []accessCase{
-		{name: "operator key", apiKey: "operator-key", want: http.StatusNoContent, wantActor: "key-operator"},
+		{name: "operator key", apiKey: "admin-token", want: http.StatusUnauthorized},
 		{name: "admin session", authorization: "Bearer admin-token", want: http.StatusNoContent, wantActor: "ada"},
 		{name: "reviewer session", authorization: "Bearer reviewer-token", want: http.StatusForbidden},
 		{name: "unknown session", authorization: "Bearer unknown-token", want: http.StatusUnauthorized},
 		{name: "service key", apiKey: "service-key", want: http.StatusUnauthorized},
-		{name: "analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
+		{name: "legacy analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var actor string
@@ -124,9 +116,9 @@ func TestConfigWriteAcceptsOperatorKeyOrAdminSession(t *testing.T) {
 	}
 }
 
-func TestReviewAcceptsAnalystKeyOrReviewerOrAdminSession(t *testing.T) {
+func TestReviewRequiresReviewerOrAdminSession(t *testing.T) {
 	for _, tc := range []accessCase{
-		{name: "analyst key", apiKey: "analyst-key", want: http.StatusNoContent, wantActor: "key-analyst"},
+		{name: "legacy analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
 		{name: "reviewer session", authorization: "Bearer reviewer-token", want: http.StatusNoContent, wantActor: "rita"},
 		{name: "admin session", authorization: "Bearer admin-token", want: http.StatusNoContent, wantActor: "ada"},
 		{name: "unknown session", authorization: "Bearer unknown-token", want: http.StatusUnauthorized},
@@ -149,14 +141,14 @@ func TestSessionsWorkWithoutConfiguredKeys(t *testing.T) {
 		accessCase
 		handler func(Access, *string) http.Handler
 	}{
-		{accessCase{name: "review by key", apiKey: "analyst-key", want: http.StatusServiceUnavailable}, reviewHandler},
+		{accessCase{name: "review by key", apiKey: "analyst-key", want: http.StatusUnauthorized}, reviewHandler},
 		{accessCase{name: "review by session", authorization: "Bearer reviewer-token", want: http.StatusNoContent, wantActor: "rita"}, reviewHandler},
-		{accessCase{name: "write by key", apiKey: "operator-key", want: http.StatusServiceUnavailable}, configWriteHandler},
+		{accessCase{name: "write by key", apiKey: "admin-token", want: http.StatusUnauthorized}, configWriteHandler},
 		{accessCase{name: "write by session", authorization: "Bearer admin-token", want: http.StatusNoContent, wantActor: "ada"}, configWriteHandler},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var actor string
-			access := Access{ServiceKey: "service-key", Sessions: testSessions}
+			access := Access{Sessions: testSessions}
 
 			serveAccessCase(t, tc.handler(access, &actor), &actor, tc.accessCase)
 		})
@@ -181,15 +173,15 @@ func reviewHandler(access Access, actor *string) http.Handler {
 	})
 }
 
-func TestReviewTellsSessionsFromKeys(t *testing.T) {
+func TestReviewDerivesTheActorOnlyFromASession(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		header string
 		value  string
 		want   Actor
 	}{
-		{"analyst key", APIKeyHeader, "analyst-key", Actor{ID: "key-analyst"}},
-		{"reviewer session", "Authorization", "Bearer reviewer-token", Actor{ID: "rita", Session: true}},
+		{"legacy analyst key", APIKeyHeader, "analyst-key", Actor{}},
+		{"reviewer session", "Authorization", "Bearer reviewer-token", Actor{ID: "rita"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got Actor
@@ -220,8 +212,8 @@ func TestAdminAcceptsOnlyAnAdminSession(t *testing.T) {
 		{name: "admin session", authorization: "Bearer admin-token", want: http.StatusNoContent, wantActor: "ada"},
 		{name: "reviewer session", authorization: "Bearer reviewer-token", want: http.StatusForbidden},
 		{name: "service key", apiKey: "service-key", want: http.StatusUnauthorized},
-		{name: "operator key", apiKey: "operator-key", want: http.StatusUnauthorized},
-		{name: "analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
+		{name: "operator key", apiKey: "admin-token", want: http.StatusUnauthorized},
+		{name: "legacy analyst key", apiKey: "analyst-key", want: http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var actor string

@@ -113,21 +113,11 @@ func isLinkedValue(value string) bool {
 	return value != "" && len(value) <= maxLinkedValueBytes && !strings.ContainsFunc(value, unicode.IsControl)
 }
 
-// Decide saves the decision of an analyst with a key on a purchase awaiting
-// review. Each purchase gets one decision; a rejection can also blocklist the
-// purchase's device, card and player in the same transaction.
-func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error) {
+// Decide saves a signed-in account's decision only while it holds the claim.
+// Rejection and any requested blocks are saved in the same transaction.
+func (s *Service) Decide(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error) {
 	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: analystID, Blocks: blocks,
-	})
-}
-
-// DecideClaimed saves the decision of a signed-in account, which must hold
-// the claim on the purchase. It returns ErrNotClaimed otherwise. Like Decide,
-// a rejection can also blocklist the purchase's device, card and player.
-func (s *Service) DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error) {
-	return s.decide(ctx, models.ReviewDecision{
-		PurchaseID: purchaseID, Decision: decision, AnalystID: username, Blocks: blocks, ClaimedBy: &username,
+		PurchaseID: purchaseID, Decision: decision, AnalystID: username, Blocks: blocks,
 	})
 }
 

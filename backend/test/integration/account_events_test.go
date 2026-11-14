@@ -24,7 +24,7 @@ func TestAPasswordResetBeforeAPurchaseSendsItToReview(t *testing.T) {
 	reset := fmt.Sprintf(`{"event_id":"it-reset-1","player_id":"player-it-reset","event_type":"password_reset","event_time":%q}`, resetAt)
 	expect[map[string]any](t, a.do(t, http.MethodPost, "/account-events", serviceKey, reset), http.StatusCreated)
 	expect[map[string]any](t, a.do(t, http.MethodPost, "/account-events", serviceKey, reset), http.StatusOK)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, passwordResetRuleset), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, passwordResetRuleset), http.StatusCreated)
 
 	got := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-reset", 1999, "")), http.StatusOK)
 
@@ -36,5 +36,5 @@ func TestAPasswordResetBeforeAPurchaseSendsItToReview(t *testing.T) {
 func TestAccountEventsNeedTheServiceKey(t *testing.T) {
 	a := newApp(t)
 	body := `{"event_id":"it-login-1","player_id":"player-it","event_type":"login","event_time":"2026-11-08T10:00:00Z"}`
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/account-events", operatorKey, body), http.StatusUnauthorized)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/account-events", adminToken, body), http.StatusUnauthorized)
 }

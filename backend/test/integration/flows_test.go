@@ -58,14 +58,14 @@ func TestDuplicateTransactionRule(t *testing.T) {
 
 func TestRulesetPublishingChangesScoring(t *testing.T) {
 	a := newApp(t)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", serviceKey, highAmountRuleset), http.StatusUnauthorized)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", "", highAmountRuleset), http.StatusUnauthorized)
 
 	type rulesetResponse struct {
 		Version int    `json:"version"`
 		Note    string `json:"note"`
 	}
-	published := expect[rulesetResponse](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
-	active := expect[rulesetResponse](t, a.do(t, http.MethodGet, "/rulesets/active", serviceKey, ""), http.StatusOK)
+	published := expect[rulesetResponse](t, a.do(t, http.MethodPost, "/rulesets", adminToken, highAmountRuleset), http.StatusCreated)
+	active := expect[rulesetResponse](t, a.do(t, http.MethodGet, "/rulesets/active", adminToken, ""), http.StatusOK)
 	if active.Version != published.Version || active.Note != "integration test" {
 		t.Fatalf("active %+v, want the published version %d", active, published.Version)
 	}
@@ -76,8 +76,8 @@ func TestRulesetPublishingChangesScoring(t *testing.T) {
 	}
 
 	invalid := `{"review_threshold": 80, "block_threshold": 50, "rules": {}}`
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, invalid), http.StatusBadRequest)
-	again := expect[rulesetResponse](t, a.do(t, http.MethodGet, "/rulesets/active", serviceKey, ""), http.StatusOK)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, invalid), http.StatusBadRequest)
+	again := expect[rulesetResponse](t, a.do(t, http.MethodGet, "/rulesets/active", adminToken, ""), http.StatusOK)
 	if again.Version != published.Version {
 		t.Fatalf("an invalid ruleset changed the active version to %d", again.Version)
 	}
@@ -85,7 +85,7 @@ func TestRulesetPublishingChangesScoring(t *testing.T) {
 
 func TestReviewDecisionBlocksTheDevice(t *testing.T) {
 	a := newApp(t)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, highAmountRuleset), http.StatusCreated)
 	scored := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-review", 20000, "it-device")), http.StatusOK)
 	if scored.Outcome != "review" {
 		t.Fatalf("outcome %s, want review", scored.Outcome)
@@ -99,7 +99,7 @@ func TestReviewDecisionBlocksTheDevice(t *testing.T) {
 	}
 	expect[map[string]any](t, a.do(t, http.MethodGet, "/reviews", serviceKey, ""), http.StatusUnauthorized)
 	purchaseID := ""
-	for _, item := range expect[queue](t, a.do(t, http.MethodGet, "/reviews", analystKey, ""), http.StatusOK).Items {
+	for _, item := range expect[queue](t, a.do(t, http.MethodGet, "/reviews", reviewerToken, ""), http.StatusOK).Items {
 		if item.TransactionID == "it-review" {
 			purchaseID = item.PurchaseID
 		}
@@ -114,11 +114,11 @@ func TestReviewDecisionBlocksTheDevice(t *testing.T) {
 		AnalystID     string `json:"analyst_id"`
 		DeviceBlocked bool   `json:"device_blocked"`
 	}
-	saved := expect[decision](t, a.do(t, http.MethodPost, decisionPath, analystKey, reject), http.StatusCreated)
+	saved := expect[decision](t, a.do(t, http.MethodPost, decisionPath, reviewerToken, reject), http.StatusCreated)
 	if saved.AnalystID != analystID || !saved.DeviceBlocked {
 		t.Fatalf("decision %+v, want %s and a blocked device", saved, analystID)
 	}
-	expect[map[string]any](t, a.do(t, http.MethodPost, decisionPath, analystKey, `{"decision":"approve"}`), http.StatusConflict)
+	expect[map[string]any](t, a.do(t, http.MethodPost, decisionPath, reviewerToken, `{"decision":"approve"}`), http.StatusConflict)
 
 	next := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-after-review", 100, "it-device")), http.StatusOK)
 	if next.Outcome != "block" || len(next.FiredRules) != 1 || next.FiredRules[0].Name != "blocklist" {
@@ -135,7 +135,7 @@ func purchaseOf(transactionID, cardToken, playerID, deviceID string) string {
 
 func TestReviewDecisionBlocksTheCardAndPlayer(t *testing.T) {
 	a := newApp(t)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, highAmountRuleset), http.StatusCreated)
 	scored := expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-cp-review", 20000, "it-cp-device")), http.StatusOK)
 	if scored.Outcome != "review" {
 		t.Fatalf("outcome %s, want review", scored.Outcome)
@@ -151,7 +151,7 @@ func TestReviewDecisionBlocksTheCardAndPlayer(t *testing.T) {
 		PlayerBlocked bool `json:"player_blocked"`
 	}
 	reject := `{"decision":"reject","block_card":true,"block_player":true}`
-	saved := expect[decision](t, a.do(t, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", purchaseID), analystKey, reject), http.StatusCreated)
+	saved := expect[decision](t, a.do(t, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", purchaseID), reviewerToken, reject), http.StatusCreated)
 	if saved != (decision{CardBlocked: true, PlayerBlocked: true}) {
 		t.Fatalf("decision %+v, want the card and player blocked", saved)
 	}
@@ -169,7 +169,7 @@ func TestReviewDecisionBlocksTheCardAndPlayer(t *testing.T) {
 
 func TestReviewNetworkListsThePurchasesOfALinkedPlayer(t *testing.T) {
 	a := newApp(t)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, highAmountRuleset), http.StatusCreated)
 	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-other", 100, "it-net-device")), http.StatusOK)
 	expect[scoreResponse](t, a.do(t, http.MethodPost, "/score", serviceKey, purchase("it-net-review", 20000, "it-net-device")), http.StatusOK)
 	var purchaseID int64
@@ -188,12 +188,12 @@ func TestReviewNetworkListsThePurchasesOfALinkedPlayer(t *testing.T) {
 	}
 	path := fmt.Sprintf("/reviews/%d/network/purchases?anchor=device&value=player-it-net-other", purchaseID)
 	expect[map[string]any](t, a.do(t, http.MethodGet, path, serviceKey, ""), http.StatusUnauthorized)
-	got := expect[linkedPurchases](t, a.do(t, http.MethodGet, path, analystKey, ""), http.StatusOK)
+	got := expect[linkedPurchases](t, a.do(t, http.MethodGet, path, reviewerToken, ""), http.StatusOK)
 	if got.Total != 1 || len(got.Purchases) != 1 || got.Purchases[0].TransactionID != "it-net-other" ||
 		got.Purchases[0].Outcome != "allow" || got.Purchases[0].AwaitingReview {
 		t.Fatalf("linked purchases %+v, want the allowed it-net-other", got)
 	}
-	expect[map[string]any](t, a.do(t, http.MethodGet, fmt.Sprintf("/reviews/%d/network/purchases?anchor=ip&value=x", purchaseID), analystKey, ""), http.StatusBadRequest)
+	expect[map[string]any](t, a.do(t, http.MethodGet, fmt.Sprintf("/reviews/%d/network/purchases?anchor=ip&value=x", purchaseID), reviewerToken, ""), http.StatusBadRequest)
 }
 
 func TestRuntimeRoleCannotReadLabelsOrChangeDecisions(t *testing.T) {

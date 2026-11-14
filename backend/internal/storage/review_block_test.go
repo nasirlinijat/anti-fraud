@@ -104,6 +104,7 @@ func TestResolveBlocksTheRequestedValuesOfARejectedPurchase(t *testing.T) {
 			id := insertBlockablePurchase(t, tx, tt.txnID, "review", &device)
 			refresher := &spyRefresher{}
 
+			claimReviewFixture(t, tx, id, "analyst-1")
 			res, err := NewReviewStore(tx).UseBlocklistCache(refresher).Resolve(context.Background(), models.ReviewDecision{
 				PurchaseID: id, Decision: "reject", AnalystID: "analyst-1", Blocks: tt.blocks,
 			})
@@ -138,6 +139,7 @@ func TestResolveLeavesValuesThatAreAlreadyBlocked(t *testing.T) {
 	id := insertBlockablePurchase(t, tx, "rb-known", "review", &device)
 	refresher := &spyRefresher{}
 
+	claimReviewFixture(t, tx, id, "analyst-1")
 	res, err := NewReviewStore(tx).UseBlocklistCache(refresher).Resolve(ctx, models.ReviewDecision{
 		PurchaseID: id, Decision: "reject", AnalystID: "analyst-1", Blocks: models.ReviewBlocks{Device: true, Card: true, Player: true},
 	})
@@ -172,7 +174,7 @@ func TestResolveAddsNoEntriesWithoutASavedRejection(t *testing.T) {
 		{"approve", "rb-approve", "review",
 			models.ReviewDecision{Decision: "approve", AnalystID: "analyst-1", Blocks: every}, false, models.ResolutionSaved},
 		{"session without the claim", "rb-unclaimed", "review",
-			models.ReviewDecision{Decision: "reject", AnalystID: stranger, Blocks: every, ClaimedBy: &stranger}, false, models.ResolutionNotClaimed},
+			models.ReviewDecision{Decision: "reject", AnalystID: stranger, Blocks: every}, false, models.ResolutionNotClaimed},
 		{"already decided", "rb-decided", "review",
 			models.ReviewDecision{Decision: "reject", AnalystID: "analyst-1", Blocks: every}, true, models.ResolutionAlreadyResolved},
 		{"not under review", "rb-allowed", "allow",
@@ -186,6 +188,7 @@ func TestResolveAddsNoEntriesWithoutASavedRejection(t *testing.T) {
 			id := insertBlockablePurchase(t, tx, tt.txnID, tt.outcome, &device)
 			store := NewReviewStore(tx)
 			if tt.decidedFirst {
+				claimReviewFixture(t, tx, id, "analyst-2")
 				if _, err := store.Resolve(ctx, models.ReviewDecision{PurchaseID: id, Decision: "approve", AnalystID: "analyst-2"}); err != nil {
 					t.Fatal(err)
 				}
@@ -194,6 +197,9 @@ func TestResolveAddsNoEntriesWithoutASavedRejection(t *testing.T) {
 			d := tt.decision
 			d.PurchaseID = id
 
+			if tt.wantStatus == models.ResolutionSaved {
+				claimReviewFixture(t, tx, id, d.AnalystID)
+			}
 			res, err := store.UseBlocklistCache(refresher).Resolve(ctx, d)
 
 			if err != nil || res.Status != tt.wantStatus || res.Blocked != (models.ReviewBlocks{}) {
@@ -214,6 +220,7 @@ func TestResolveWithoutADeviceBlocksTheCardAndPlayer(t *testing.T) {
 	id := insertBlockablePurchase(t, tx, "rb-no-device", "review", nil)
 	refresher := &spyRefresher{}
 
+	claimReviewFixture(t, tx, id, "analyst-1")
 	res, err := NewReviewStore(tx).UseBlocklistCache(refresher).Resolve(context.Background(), models.ReviewDecision{
 		PurchaseID: id, Decision: "reject", AnalystID: "analyst-1", Blocks: models.ReviewBlocks{Device: true, Card: true, Player: true},
 	})

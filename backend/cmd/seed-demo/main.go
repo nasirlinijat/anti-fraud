@@ -117,7 +117,6 @@ func demoURL() (string, error) {
 type demo struct {
 	reset      demoreset.Config
 	serviceKey string
-	analystKey string
 	http       *http.Client
 }
 
@@ -128,16 +127,15 @@ func loadDemo() (demo, error) {
 	}
 	local := demo{
 		reset: demoreset.Config{
-			BaseURL: baseURL, OperatorKey: os.Getenv("RESET_OPERATOR_KEY"), SessionToken: os.Getenv("RESET_SESSION_TOKEN"),
+			BaseURL: baseURL, SessionToken: os.Getenv("RESET_SESSION_TOKEN"),
 		},
 		serviceKey: os.Getenv("API_KEY"),
-		analystKey: os.Getenv("SEED_ANALYST_KEY"),
 		http: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
 	}
-	if local.serviceKey == "" || local.analystKey == "" || os.Getenv("LABELS_DATABASE_URL") == "" {
-		return demo{}, fmt.Errorf("set API_KEY, SEED_ANALYST_KEY, and LABELS_DATABASE_URL")
+	if local.serviceKey == "" || local.reset.SessionToken == "" || os.Getenv("LABELS_DATABASE_URL") == "" {
+		return demo{}, fmt.Errorf("set API_KEY, RESET_SESSION_TOKEN, and LABELS_DATABASE_URL")
 	}
 	return local, nil
 }

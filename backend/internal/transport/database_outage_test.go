@@ -29,7 +29,7 @@ func consoleWithoutDatabase(t *testing.T) *http.ServeMux {
 	}
 	t.Cleanup(pool.Close)
 	sessions := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
-	access := platform.Access{ServiceKey: serviceTestKey, Analysts: testAnalystKeys(t), Sessions: sessions}
+	access := platform.Access{Sessions: sessions}
 	mux := http.NewServeMux()
 	RegisterAuthRoutes(mux, NewAuthHandler(sessions))
 	RegisterAccountRoutes(mux, NewAccountHandler(account.NewService(storage.NewAccountStore(pool))), access)
@@ -48,12 +48,12 @@ func TestConsoleAnswers503WhenTheDatabaseIsUnreachable(t *testing.T) {
 		{"sign-in check of a console session", http.MethodGet, "/admin/accounts", "Bearer some-session-token", ""},
 		{"signing in", http.MethodPost, "/auth/login", "", `{"username":"analyst","password":"a long enough password"}`},
 		{"current account", http.MethodGet, "/auth/me", "Bearer some-session-token", ""},
-		{"review queue with an analyst key", http.MethodGet, "/reviews", "", ""},
-		{"review case with an analyst key", http.MethodGet, "/reviews/7", "", ""},
-		{"rulesets with the service key", http.MethodGet, "/rulesets", "", ""},
-		{"active ruleset with the service key", http.MethodGet, "/rulesets/active", "", ""},
-		{"blocklist with the service key", http.MethodGet, "/blocklist", "", ""},
-		{"stats with the service key", http.MethodGet, "/stats", "", ""},
+		{"review queue with a reviewer session", http.MethodGet, "/reviews", "", ""},
+		{"review case with a reviewer session", http.MethodGet, "/reviews/7", "", ""},
+		{"rulesets with an admin session", http.MethodGet, "/rulesets", "", ""},
+		{"active ruleset with an admin session", http.MethodGet, "/rulesets/active", "", ""},
+		{"blocklist with an admin session", http.MethodGet, "/blocklist", "", ""},
+		{"stats with an admin session", http.MethodGet, "/stats", "", ""},
 		{"recent pipeline with a cursor", http.MethodGet, "/stats/pipeline/recent?after=1", "", ""},
 		{"recent pipeline without a cursor", http.MethodGet, "/stats/pipeline/recent", "", ""},
 	}
@@ -64,9 +64,9 @@ func TestConsoleAnswers503WhenTheDatabaseIsUnreachable(t *testing.T) {
 			case tt.auth != "":
 				req.Header.Set("Authorization", tt.auth)
 			case strings.HasPrefix(tt.path, "/reviews"):
-				req.Header.Set("X-API-Key", queueTestKey)
+				setTestCredential(req, queueTestKey)
 			case !strings.HasPrefix(tt.path, "/auth"):
-				req.Header.Set("X-API-Key", serviceTestKey)
+				setTestCredential(req, serviceTestKey)
 			}
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
@@ -81,7 +81,7 @@ func TestOtherServerErrorsStay500(t *testing.T) {
 	service := mocks.NewMockRulesetService(gomock.NewController(t))
 	service.EXPECT().List(gomock.Any()).Return(nil, errors.New("decode ruleset: unexpected end of JSON"))
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(service), platform.Access{ServiceKey: mockServiceKey})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(service), platform.Access{Sessions: consoleTestSessions})
 
 	rec := send(mux, http.MethodGet, "/rulesets", mockServiceKey, "")
 	if rec.Code != http.StatusInternalServerError || rec.Header().Get("Retry-After") != "" || !strings.Contains(rec.Body.String(), "internal error") {

@@ -11,7 +11,7 @@ import (
 func main() {
 	if err := demoreset.Reset(context.Background(), demoreset.Config{
 		BaseURL: os.Getenv("RESET_URL"), Port: os.Getenv("PORT"),
-		OperatorKey: os.Getenv("RESET_OPERATOR_KEY"), SessionToken: os.Getenv("RESET_SESSION_TOKEN"),
+		SessionToken: os.Getenv("RESET_SESSION_TOKEN"),
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

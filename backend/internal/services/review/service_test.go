@@ -44,11 +44,11 @@ func TestDecideChecksTheDecisionBeforeSaving(t *testing.T) {
 	}
 }
 
-func TestDecideClaimedRejectsABlockWithApprove(t *testing.T) {
+func TestDecideRejectsABlockWithApprove(t *testing.T) {
 	svc, store := newService(t)
 	store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Times(0)
 
-	_, err := svc.DecideClaimed(context.Background(), 1, "approve", "rita", models.ReviewBlocks{Card: true, Player: true})
+	_, err := svc.Decide(context.Background(), 1, "approve", "rita", models.ReviewBlocks{Card: true, Player: true})
 
 	if !errors.Is(err, review.ErrBlockNeedsReject) {
 		t.Fatalf("err = %v, want ErrBlockNeedsReject", err)
@@ -57,9 +57,8 @@ func TestDecideClaimedRejectsABlockWithApprove(t *testing.T) {
 
 func TestDecidePassesTheBlocksToTheStore(t *testing.T) {
 	blocks := models.ReviewBlocks{Device: true, Card: true, Player: true}
-	username := "rita"
 
-	t.Run("analyst key", func(t *testing.T) {
+	t.Run("reviewer session", func(t *testing.T) {
 		svc, store := newService(t)
 		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
 			PurchaseID: 7, Decision: "reject", AnalystID: "key-analyst", Blocks: blocks,
@@ -75,13 +74,13 @@ func TestDecidePassesTheBlocksToTheStore(t *testing.T) {
 	t.Run("session", func(t *testing.T) {
 		svc, store := newService(t)
 		store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
-			PurchaseID: 7, Decision: "reject", AnalystID: "rita", Blocks: blocks, ClaimedBy: &username,
+			PurchaseID: 7, Decision: "reject", AnalystID: "rita", Blocks: blocks,
 		}).Return(models.Resolution{Status: models.ResolutionSaved, Blocked: blocks}, nil)
 
-		got, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", blocks)
+		got, err := svc.Decide(context.Background(), 7, "reject", "rita", blocks)
 
 		if err != nil || got.Blocked != blocks {
-			t.Fatalf("DecideClaimed = %+v, %v; want every value blocked", got, err)
+			t.Fatalf("Decide = %+v, %v; want every value blocked", got, err)
 		}
 	})
 }
@@ -249,34 +248,22 @@ func TestCursorForModelOrderPutsMissingScoresLast(t *testing.T) {
 	}
 }
 
-func TestDecideClaimedRequiresTheUsernameToHoldTheClaim(t *testing.T) {
-	svc, store := newService(t)
-	username := "rita"
-	store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
-		PurchaseID: 7, Decision: "approve", AnalystID: "rita", ClaimedBy: &username,
-	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
-
-	if _, err := svc.DecideClaimed(context.Background(), 7, "approve", "rita", models.ReviewBlocks{}); err != nil {
-		t.Fatalf("DecideClaimed: %v", err)
-	}
-}
-
-func TestDecideWithAKeyNeedsNoClaim(t *testing.T) {
+func TestDecideRequiresTheUsernameToHoldTheClaim(t *testing.T) {
 	svc, store := newService(t)
 	store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
-		PurchaseID: 7, Decision: "approve", AnalystID: "key-analyst",
+		PurchaseID: 7, Decision: "approve", AnalystID: "rita",
 	}).Return(models.Resolution{Status: models.ResolutionSaved}, nil)
 
-	if _, err := svc.Decide(context.Background(), 7, "approve", "key-analyst", models.ReviewBlocks{}); err != nil {
+	if _, err := svc.Decide(context.Background(), 7, "approve", "rita", models.ReviewBlocks{}); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 }
 
-func TestDecideClaimedReportsAMissingClaim(t *testing.T) {
+func TestDecideReportsAMissingClaim(t *testing.T) {
 	svc, store := newService(t)
 	store.EXPECT().Resolve(gomock.Any(), gomock.Any()).Return(models.Resolution{Status: models.ResolutionNotClaimed}, nil)
 
-	_, err := svc.DecideClaimed(context.Background(), 7, "reject", "rita", models.ReviewBlocks{})
+	_, err := svc.Decide(context.Background(), 7, "reject", "rita", models.ReviewBlocks{})
 
 	if !errors.Is(err, review.ErrNotClaimed) {
 		t.Fatalf("err = %v, want ErrNotClaimed", err)
@@ -321,8 +308,8 @@ func TestClaimMapsTheStoreStatus(t *testing.T) {
 }
 
 func TestQueuePassesTheClaimFilter(t *testing.T) {
-	svc, store := newService(t)
 	username := "rita"
+	svc, store := newService(t)
 	store.EXPECT().Queue(gomock.Any(), review.PageSize+1, models.QueueByRuleScore, nil, &username).Return(nil, nil)
 
 	if _, err := svc.Queue(context.Background(), models.QueueByRuleScore, nil, &username); err != nil {

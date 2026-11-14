@@ -15,7 +15,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 )
 
-const blocklistOperatorKey = "operator-key"
+const blocklistAdminToken = "admin-token"
 const blocklistServiceKey = "service-key"
 
 type fakeEntries struct {
@@ -50,14 +50,10 @@ func (f *fakeEntries) Remove(_ context.Context, id int64, _ string) error {
 func call(t *testing.T, f *fakeEntries, method, path, body, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"blocklist-operator","key":"`+blocklistOperatorKey+`"}]`, blocklistServiceKey, platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(f)), platform.Access{ServiceKey: blocklistServiceKey, Operators: keys})
+	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(f)), platform.Access{Sessions: consoleTestSessions})
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
-		req.Header.Set("X-API-Key", key)
+		setTestCredential(req, key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -94,7 +90,7 @@ func TestAddEntry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fakeEntries{}
-			rec := call(t, f, http.MethodPost, "/blocklist", tt.body, blocklistOperatorKey)
+			rec := call(t, f, http.MethodPost, "/blocklist", tt.body, blocklistAdminToken)
 			if rec.Code != http.StatusCreated {
 				t.Fatalf("status = %d, want 201; body %s", rec.Code, rec.Body.String())
 			}
@@ -126,7 +122,7 @@ func TestAddRejectsInvalidEntries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fakeEntries{}
-			rec := call(t, f, http.MethodPost, "/blocklist", tt.body, blocklistOperatorKey)
+			rec := call(t, f, http.MethodPost, "/blocklist", tt.body, blocklistAdminToken)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400", rec.Code)
 			}
@@ -155,7 +151,7 @@ func TestAddRejectsInvalidEntries(t *testing.T) {
 		`{"type":"card","value":"a","reason":"r"}null`,
 	} {
 		f := &fakeEntries{}
-		if rec := call(t, f, http.MethodPost, "/blocklist", body, blocklistOperatorKey); rec.Code != http.StatusBadRequest {
+		if rec := call(t, f, http.MethodPost, "/blocklist", body, blocklistAdminToken); rec.Code != http.StatusBadRequest {
 			t.Errorf("body %s: status = %d, want 400", body, rec.Code)
 		}
 		if len(f.added) != 0 {
@@ -163,13 +159,13 @@ func TestAddRejectsInvalidEntries(t *testing.T) {
 		}
 	}
 	oversized := `{"type":"card","value":"a","reason":"` + strings.Repeat("r", maxBodyBytes) + `"}`
-	if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", oversized, blocklistOperatorKey); rec.Code != http.StatusRequestEntityTooLarge {
+	if rec := call(t, &fakeEntries{}, http.MethodPost, "/blocklist", oversized, blocklistAdminToken); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized body: status = %d, want 413", rec.Code)
 	}
 }
 
 func TestAddRejectsDuplicate(t *testing.T) {
-	rec := call(t, &fakeEntries{addErr: models.ErrBlocklistDuplicate}, http.MethodPost, "/blocklist", `{"type":"card","value":"a","reason":"r"}`, blocklistOperatorKey)
+	rec := call(t, &fakeEntries{addErr: models.ErrBlocklistDuplicate}, http.MethodPost, "/blocklist", `{"type":"card","value":"a","reason":"r"}`, blocklistAdminToken)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"value":"is already on the blocklist"`) {
 		t.Fatalf("status %d body %s, want 409 naming value", rec.Code, rec.Body.String())
 	}
@@ -177,14 +173,14 @@ func TestAddRejectsDuplicate(t *testing.T) {
 
 func TestRemoveEntry(t *testing.T) {
 	f := &fakeEntries{}
-	if rec := call(t, f, http.MethodDelete, "/blocklist/12", "", blocklistOperatorKey); rec.Code != http.StatusNoContent || len(f.removed) != 1 || f.removed[0] != 12 {
+	if rec := call(t, f, http.MethodDelete, "/blocklist/12", "", blocklistAdminToken); rec.Code != http.StatusNoContent || len(f.removed) != 1 || f.removed[0] != 12 {
 		t.Fatalf("status %d removed %v, want 204 and entry 12", rec.Code, f.removed)
 	}
-	if rec := call(t, &fakeEntries{rmErr: models.ErrBlocklistEntryNotFound}, http.MethodDelete, "/blocklist/12", "", blocklistOperatorKey); rec.Code != http.StatusNotFound {
+	if rec := call(t, &fakeEntries{rmErr: models.ErrBlocklistEntryNotFound}, http.MethodDelete, "/blocklist/12", "", blocklistAdminToken); rec.Code != http.StatusNotFound {
 		t.Errorf("missing entry: status = %d, want 404", rec.Code)
 	}
 	for _, id := range []string{"abc", "0", "-3"} {
-		if rec := call(t, &fakeEntries{}, http.MethodDelete, "/blocklist/"+id, "", blocklistOperatorKey); rec.Code != http.StatusBadRequest {
+		if rec := call(t, &fakeEntries{}, http.MethodDelete, "/blocklist/"+id, "", blocklistAdminToken); rec.Code != http.StatusBadRequest {
 			t.Errorf("id %s: status = %d, want 400", id, rec.Code)
 		}
 	}
@@ -206,8 +202,8 @@ func TestBlocklistInternalErrors(t *testing.T) {
 	boom := errors.New("database is down")
 	recs := []*httptest.ResponseRecorder{
 		call(t, &fakeEntries{err: boom}, http.MethodGet, "/blocklist", "", blocklistServiceKey),
-		call(t, &fakeEntries{addErr: boom}, http.MethodPost, "/blocklist", `{"type":"card","value":"a","reason":"r"}`, blocklistOperatorKey),
-		call(t, &fakeEntries{rmErr: boom}, http.MethodDelete, "/blocklist/1", "", blocklistOperatorKey),
+		call(t, &fakeEntries{addErr: boom}, http.MethodPost, "/blocklist", `{"type":"card","value":"a","reason":"r"}`, blocklistAdminToken),
+		call(t, &fakeEntries{rmErr: boom}, http.MethodDelete, "/blocklist/1", "", blocklistAdminToken),
 	}
 	for _, rec := range recs {
 		if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "database is down") {

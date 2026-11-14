@@ -49,7 +49,7 @@ func scoreRing(t *testing.T, a app, device string, transactionIDs ...string) []s
 
 func TestLinkedReviewsAreClaimedAndRejectedTogether(t *testing.T) {
 	a := newApp(t)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", operatorKey, highAmountRuleset), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/rulesets", adminToken, highAmountRuleset), http.StatusCreated)
 	ring := scoreRing(t, a, "it-ring-device", "it-ring-case", "it-ring-1", "it-ring-2", "it-ring-3")
 	alice, bob := a.signIn(t, "it-ring-alice"), a.signIn(t, "it-ring-bob")
 
@@ -69,7 +69,7 @@ func TestLinkedReviewsAreClaimedAndRejectedTogether(t *testing.T) {
 	}
 
 	expect[map[string]any](t, a.doAs(t, http.MethodPost, "/reviews/"+ring[2]+"/claim", bob, ""), http.StatusCreated)
-	expect[map[string]any](t, a.do(t, http.MethodPost, "/reviews/"+ring[3]+"/decision", analystKey, `{"decision":"approve"}`), http.StatusCreated)
+	expect[map[string]any](t, a.do(t, http.MethodPost, "/reviews/"+ring[3]+"/decision", reviewerToken, `{"decision":"approve"}`), http.StatusCreated)
 	ids := fmt.Sprintf(`["%s","%s","%s","%s"]`, ring[0], ring[1], ring[2], ring[3])
 
 	claims := expect[batchClaims](t, a.doAs(t, http.MethodPost, "/reviews/claims", alice, `{"purchase_ids":`+ids+`}`), http.StatusOK)

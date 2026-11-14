@@ -162,20 +162,16 @@ func ptrTo[T any](v T) *T { return &v }
 func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	tx := emptyTx(t)
 	mux := http.NewServeMux()
-	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"audit-operator","key":"operator-key"}]`, testKey, platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), platform.Access{ServiceKey: testKey, Operators: keys})
+	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), platform.Access{Sessions: consoleTestSessions})
 	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), testKey)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		key := testKey
 		if strings.HasPrefix(path, "/blocklist") {
-			key = "operator-key"
+			key = "admin-token"
 		}
-		req.Header.Set("X-API-Key", key)
+		setTestCredential(req, key)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
@@ -204,7 +200,7 @@ func TestNewEntryBlocksNextPurchase(t *testing.T) {
 	if err := tx.QueryRow(t.Context(), `
         SELECT array_agg(action ORDER BY id)
         FROM configuration_audit_events
-        WHERE resource_id = $1 AND actor_kind = 'operator' AND actor_id = 'audit-operator'
+        WHERE resource_id = $1 AND actor_kind = 'operator' AND actor_id = 'test-operator'
           AND details->>'value' = '198.51.100.4'
     `, id).Scan(&events); err != nil || !slices.Equal(events, []string{"blocklist.add", "blocklist.remove"}) {
 		t.Fatalf("audit events = %v, error = %v", events, err)

@@ -80,7 +80,7 @@ func TestConcurrentRulesetPublishesLeaveOneActiveVersion(t *testing.T) {
 	before := count(t, `SELECT max(version) FROM rulesets`)
 
 	responses := sendAll(t, n, func(int) (string, string, string, string) {
-		return http.MethodPost, "/rulesets", operatorKey, highAmountRule
+		return http.MethodPost, "/rulesets", adminToken, highAmountRule
 	})
 	versions := make([]int, 0, n)
 	for i, r := range responses {
@@ -107,7 +107,7 @@ func TestConcurrentRulesetPublishesLeaveOneActiveVersion(t *testing.T) {
 
 func TestTwoAnalystsDecidingOneReviewSaveOneDecision(t *testing.T) {
 	const purchases = 10
-	if r, err := send(http.MethodPost, "/rulesets", operatorKey, highAmountRule); err != nil || r.status != http.StatusCreated {
+	if r, err := send(http.MethodPost, "/rulesets", adminToken, highAmountRule); err != nil || r.status != http.StatusCreated {
 		t.Fatalf("publish: %v %+v", err, r)
 	}
 
@@ -118,13 +118,17 @@ func TestTwoAnalystsDecidingOneReviewSaveOneDecision(t *testing.T) {
 			t.Fatalf("score %s: %v %+v", transactionID, err, r)
 		}
 		purchaseID := count(t, `SELECT id FROM purchases WHERE transaction_id = $1`, transactionID)
+		claimPath := fmt.Sprintf("/reviews/%d/claim", purchaseID)
+		if r, err := send(http.MethodPost, claimPath, firstReviewer, ""); err != nil || r.status != 201 {
+			t.Fatalf("claim: %+v %v", r, err)
+		}
 		path := fmt.Sprintf("/reviews/%d/decision", purchaseID)
 
 		responses := sendAll(t, 2, func(i int) (string, string, string, string) {
 			if i == 0 {
-				return http.MethodPost, path, firstAnalyst, `{"decision":"approve"}`
+				return http.MethodPost, path, firstReviewer, `{"decision":"approve"}`
 			}
-			return http.MethodPost, path, secondAnalyst, `{"decision":"reject"}`
+			return http.MethodPost, path, secondReviewer, `{"decision":"reject"}`
 		})
 		statuses := []int{responses[0].status, responses[1].status}
 		slices.Sort(statuses)
@@ -146,7 +150,7 @@ type batchDecisionResponse struct {
 
 func TestTwoAnalystsDecidingOverlappingBatchesSaveOneDecisionEach(t *testing.T) {
 	const purchases = 10
-	if r, err := send(http.MethodPost, "/rulesets", operatorKey, highAmountRule); err != nil || r.status != http.StatusCreated {
+	if r, err := send(http.MethodPost, "/rulesets", adminToken, highAmountRule); err != nil || r.status != http.StatusCreated {
 		t.Fatalf("publish: %v %+v", err, r)
 	}
 	ids := make([]string, purchases)
@@ -158,13 +162,22 @@ func TestTwoAnalystsDecidingOverlappingBatchesSaveOneDecisionEach(t *testing.T) 
 		}
 		ids[p] = fmt.Sprint(count(t, `SELECT id FROM purchases WHERE transaction_id = $1`, transactionID))
 	}
+	for i, id := range ids {
+		owner := firstReviewer
+		if i >= 8 {
+			owner = secondReviewer
+		}
+		if r, err := send(http.MethodPost, "/reviews/"+id+"/claim", owner, ""); err != nil || r.status != 201 {
+			t.Fatalf("claim: %+v %v", r, err)
+		}
+	}
 	// The first analyst decides purchases 0 to 7 and the second 2 to 9, so
 	// purchases 2 to 7 are decided by both at the same moment.
 	batches := [][]string{ids[:8], ids[2:]}
 
 	responses := sendAll(t, 2, func(i int) (string, string, string, string) {
 		body := fmt.Sprintf(`{"decision":"approve","purchase_ids":["%s"]}`, strings.Join(batches[i], `","`))
-		return http.MethodPost, "/reviews/decisions", []string{firstAnalyst, secondAnalyst}[i], body
+		return http.MethodPost, "/reviews/decisions", []string{firstReviewer, secondReviewer}[i], body
 	})
 
 	statuses := map[string][]string{}
@@ -182,6 +195,9 @@ func TestTwoAnalystsDecidingOverlappingBatchesSaveOneDecisionEach(t *testing.T) 
 		want := []string{"already_decided", "saved"}
 		if p < 2 || p > 7 {
 			want = []string{"saved"}
+		}
+		if p >= 2 && p <= 7 && slices.Equal(got, []string{"not_claimed", "saved"}) {
+			continue
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("purchase %d: statuses %v, want %v", p, got, want)

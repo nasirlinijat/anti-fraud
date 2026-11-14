@@ -125,6 +125,6 @@ func TestReviewersCannotSeeAssignments(t *testing.T) {
 	byKey := reviewRequest(server.mux, http.MethodGet, "/admin/assignments", queueTestKey, "")
 
 	if bySession.Code != http.StatusForbidden || byKey.Code != http.StatusUnauthorized {
-		t.Fatalf("reviewer = %d, analyst key = %d; want 403 and 401", bySession.Code, byKey.Code)
+		t.Fatalf("reviewer = %d, invalid session = %d; want 403 and 401", bySession.Code, byKey.Code)
 	}
 }

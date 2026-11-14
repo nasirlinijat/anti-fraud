@@ -70,8 +70,6 @@ kubectl -n anti-fraud create secret generic anti-fraud-secrets \
   --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   --from-literal=RUNTIME_DB_PASSWORD="$RUNTIME_DB_PASSWORD" \
   --from-literal=LABELS_DB_PASSWORD="$LABELS_DB_PASSWORD" \
-  --from-literal=REVIEW_ANALYST_KEYS="$REVIEW_ANALYST_KEYS" \
-  --from-literal=OPERATOR_API_KEYS="$OPERATOR_API_KEYS" \
   --from-literal=CHARGEBACK_WEBHOOK_SECRET="$CHARGEBACK_WEBHOOK_SECRET"
 ```
 

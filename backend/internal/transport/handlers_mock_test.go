@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	mockServiceKey  = "mock-service-key"
-	mockOperatorKey = "mock-operator-key"
-	mockAnalystKey  = "mock-analyst-key"
+	mockServiceKey    = "mock-service-key"
+	mockAdminToken    = "mock-admin-token"
+	mockReviewerToken = "mock-reviewer-token"
 )
 
 var errServiceDown = errors.New("database is down")
@@ -29,20 +29,11 @@ var errServiceDown = errors.New("database is down")
 func send(mux http.Handler, method, path, key, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
-		req.Header.Set("X-API-Key", key)
+		setTestCredential(req, key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
-}
-
-func mockOperators(t *testing.T) platform.OperatorKeys {
-	t.Helper()
-	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"op-1","key":"`+mockOperatorKey+`"}]`, mockServiceKey, platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return keys
 }
 
 func wantResponse(t *testing.T, rec *httptest.ResponseRecorder, status int, bodyParts ...string) {
@@ -125,12 +116,8 @@ func TestScoreHandlerWithMockedService(t *testing.T) {
 func newMockReviewMux(t *testing.T) (*http.ServeMux, *mocks.MockReviewService) {
 	t.Helper()
 	service := mocks.NewMockReviewService(gomock.NewController(t))
-	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"analyst-1","key":"`+mockAnalystKey+`"}]`, mockServiceKey)
-	if err != nil {
-		t.Fatal(err)
-	}
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Analysts: keys})
+	RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Sessions: consoleTestSessions})
 	return mux, service
 }
 
@@ -142,13 +129,13 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 		next := models.QueueCursor{DecidedAt: at, PurchaseID: 5, ScoreKey: -60}
 		service.EXPECT().Queue(gomock.Any(), models.QueueByRuleScore, (*models.QueueCursor)(nil), (*string)(nil)).
 			Return(review.Page{Items: []models.QueueItem{{PurchaseID: 5, RuleScore: 60, DecidedAt: at}}, Next: &next}, nil)
-		wantResponse(t, send(mux, http.MethodGet, "/reviews", mockAnalystKey, ""), http.StatusOK, `"next_cursor":"`, `"model_enabled":true`)
+		wantResponse(t, send(mux, http.MethodGet, "/reviews", mockReviewerToken, ""), http.StatusOK, `"next_cursor":"`, `"model_enabled":true`)
 	})
 
 	t.Run("case not found", func(t *testing.T) {
 		mux, service := newMockReviewMux(t)
 		service.EXPECT().Case(gomock.Any(), int64(9)).Return(models.CaseItem{}, models.ErrReviewNotFound)
-		wantResponse(t, send(mux, http.MethodGet, "/reviews/9", mockAnalystKey, ""), http.StatusNotFound, "review case not found")
+		wantResponse(t, send(mux, http.MethodGet, "/reviews/9", mockReviewerToken, ""), http.StatusNotFound, "review case not found")
 	})
 
 	decisions := []struct {
@@ -169,7 +156,7 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 			mux, service := newMockReviewMux(t)
 			service.EXPECT().Decide(gomock.Any(), int64(7), "reject", "analyst-1", models.ReviewBlocks{Device: true}).
 				Return(models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at, Blocked: models.ReviewBlocks{Device: true}}, tt.err)
-			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, `{"decision":"reject","block_device":true}`)
+			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockReviewerToken, `{"decision":"reject","block_device":true}`)
 			wantResponse(t, rec, tt.status)
 			if tt.err == nil {
 				wantResponse(t, rec, tt.status, `"analyst_id":"analyst-1"`, `"device_blocked":true`, `"card_blocked":false`, `"player_blocked":false`)
@@ -177,9 +164,9 @@ func TestReviewHandlerWithMockedService(t *testing.T) {
 		})
 	}
 
-	t.Run("requests without an analyst key never reach the service", func(t *testing.T) {
+	t.Run("requests without a valid session never reach the service", func(t *testing.T) {
 		mux, _ := newMockReviewMux(t)
-		for _, key := range []string{"", mockServiceKey, "wrong"} {
+		for _, key := range []string{"", "unknown", "wrong"} {
 			if rec := send(mux, http.MethodGet, "/reviews", key, ""); rec.Code != http.StatusUnauthorized {
 				t.Errorf("key %q: status %d, want 401", key, rec.Code)
 			}
@@ -217,7 +204,7 @@ func TestReviewDecisionMapsTheBlockFields(t *testing.T) {
 			service.EXPECT().Decide(gomock.Any(), int64(7), "reject", "analyst-1", tt.blocks).
 				Return(models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at, Blocked: tt.blocked}, nil)
 
-			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, tt.body)
+			rec := send(mux, http.MethodPost, "/reviews/7/decision", mockReviewerToken, tt.body)
 
 			wantResponse(t, rec, http.StatusCreated, tt.want...)
 		})
@@ -225,7 +212,7 @@ func TestReviewDecisionMapsTheBlockFields(t *testing.T) {
 
 	t.Run("decision with an unknown block field never reaches the service", func(t *testing.T) {
 		mux, _ := newMockReviewMux(t)
-		rec := send(mux, http.MethodPost, "/reviews/7/decision", mockAnalystKey, `{"decision":"reject","block_ip":true}`)
+		rec := send(mux, http.MethodPost, "/reviews/7/decision", mockReviewerToken, `{"decision":"reject","block_ip":true}`)
 		wantResponse(t, rec, http.StatusBadRequest)
 	})
 }
@@ -234,7 +221,7 @@ func TestRulesetHandlerWithMockedService(t *testing.T) {
 	newMux := func(t *testing.T) (*http.ServeMux, *mocks.MockRulesetService) {
 		service := mocks.NewMockRulesetService(gomock.NewController(t))
 		mux := http.NewServeMux()
-		RegisterRulesetRoutes(mux, NewRulesetHandler(service), platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
+		RegisterRulesetRoutes(mux, NewRulesetHandler(service), platform.Access{Sessions: consoleTestSessions})
 		return mux, service
 	}
 	body := `{"review_threshold":50,"block_threshold":80,"note":"n","rules":{"high_amount":{"enabled":true,"weight":30,"limit":5000}}}`
@@ -246,20 +233,20 @@ func TestRulesetHandlerWithMockedService(t *testing.T) {
 			return d.ReviewThreshold == 50 && d.BlockThreshold == 80 && rule != nil && *rule.Weight == 30
 		})
 		service.EXPECT().Publish(gomock.Any(), draft, "op-1").Return(scoring.Ruleset{Version: 12, ReviewThreshold: 50, BlockThreshold: 80}, nil)
-		wantResponse(t, send(mux, http.MethodPost, "/rulesets", mockOperatorKey, body), http.StatusCreated, `"version":12`)
+		wantResponse(t, send(mux, http.MethodPost, "/rulesets", mockAdminToken, body), http.StatusCreated, `"version":12`)
 	})
 
 	t.Run("publish maps a validation error to 400 with the fields", func(t *testing.T) {
 		mux, service := newMux(t)
 		service.EXPECT().Publish(gomock.Any(), gomock.Any(), "op-1").
 			Return(scoring.Ruleset{}, &ruleset.ValidationError{Fields: map[string]string{"block_threshold": "must be positive and greater than review_threshold"}})
-		wantResponse(t, send(mux, http.MethodPost, "/rulesets", mockOperatorKey, body), http.StatusBadRequest, `"block_threshold":"must be positive`)
+		wantResponse(t, send(mux, http.MethodPost, "/rulesets", mockAdminToken, body), http.StatusBadRequest, `"block_threshold":"must be positive`)
 	})
 
-	t.Run("publish needs an operator key", func(t *testing.T) {
+	t.Run("publish needs an admin session", func(t *testing.T) {
 		mux, service := newMux(t)
 		service.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
-		wantResponse(t, send(mux, http.MethodPost, "/rulesets", mockServiceKey, body), http.StatusUnauthorized)
+		wantResponse(t, send(mux, http.MethodPost, "/rulesets", "bad", body), http.StatusUnauthorized)
 	})
 
 	t.Run("unknown version is 404", func(t *testing.T) {
@@ -281,7 +268,7 @@ func TestBlocklistHandlerWithMockedService(t *testing.T) {
 	newMux := func(t *testing.T) (*http.ServeMux, *mocks.MockBlocklistService) {
 		service := mocks.NewMockBlocklistService(gomock.NewController(t))
 		mux := http.NewServeMux()
-		RegisterBlocklistRoutes(mux, NewBlocklistHandler(service), platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
+		RegisterBlocklistRoutes(mux, NewBlocklistHandler(service), platform.Access{Sessions: consoleTestSessions})
 		return mux, service
 	}
 	body := `{"type":"card","value":"card-1","reason":"stolen"}`
@@ -302,20 +289,20 @@ func TestBlocklistHandlerWithMockedService(t *testing.T) {
 		t.Run("add "+tt.name, func(t *testing.T) {
 			mux, service := newMux(t)
 			service.EXPECT().Add(gomock.Any(), entry, "op-1").Return(models.StoredBlocklistEntry{ID: 4, Type: entry.Type, Value: entry.Value, Reason: entry.Reason}, tt.err)
-			wantResponse(t, send(mux, http.MethodPost, "/blocklist", mockOperatorKey, body), tt.status, tt.body)
+			wantResponse(t, send(mux, http.MethodPost, "/blocklist", mockAdminToken, body), tt.status, tt.body)
 		})
 	}
 
 	t.Run("remove unknown entry is 404", func(t *testing.T) {
 		mux, service := newMux(t)
 		service.EXPECT().Remove(gomock.Any(), int64(12), "op-1").Return(models.ErrBlocklistEntryNotFound)
-		wantResponse(t, send(mux, http.MethodDelete, "/blocklist/12", mockOperatorKey, ""), http.StatusNotFound)
+		wantResponse(t, send(mux, http.MethodDelete, "/blocklist/12", mockAdminToken, ""), http.StatusNotFound)
 	})
 
 	t.Run("remove", func(t *testing.T) {
 		mux, service := newMux(t)
 		service.EXPECT().Remove(gomock.Any(), int64(12), "op-1").Return(nil)
-		wantResponse(t, send(mux, http.MethodDelete, "/blocklist/12", mockOperatorKey, ""), http.StatusNoContent)
+		wantResponse(t, send(mux, http.MethodDelete, "/blocklist/12", mockAdminToken, ""), http.StatusNoContent)
 	})
 }
 
@@ -324,7 +311,7 @@ func TestStatsHandlerWithMockedService(t *testing.T) {
 	mux := http.NewServeMux()
 	h := NewStatsHandler(service)
 	h.now = func() time.Time { return statsNow }
-	RegisterStatsRoutes(mux, h, platform.Access{ServiceKey: mockServiceKey})
+	RegisterStatsRoutes(mux, h, platform.Access{Sessions: consoleTestSessions})
 
 	window := models.StatsWindow{Since: statsNow.Add(-time.Hour), Until: statsNow, BucketWidth: 5 * time.Minute}
 	service.EXPECT().Window("1h", statsNow).Return(window, nil)
@@ -346,7 +333,7 @@ func TestResolvedReviewHandlerReturnsTheAnalystDecision(t *testing.T) {
 		QueueItem:  models.QueueItem{PurchaseID: 9, TransactionID: "resolved-transaction"},
 		Resolution: &models.CaseResolution{Decision: "approve", AnalystID: "reviewer-one", ResolvedAt: at},
 	}, nil)
-	rec := send(mux, http.MethodGet, "/reviews/9/resolved", mockAnalystKey, "")
+	rec := send(mux, http.MethodGet, "/reviews/9/resolved", mockReviewerToken, "")
 	wantResponse(t, rec, http.StatusOK, `"transaction_id":"resolved-transaction"`)
 	got := decodeJSON[resolvedCaseResponse](t, rec)
 	if got.Resolution.Decision != "approve" || got.Resolution.AnalystID != "reviewer-one" || !got.Resolution.ResolvedAt.Equal(at) {
@@ -359,7 +346,7 @@ func TestReviewHandlerReturnsNumberedQueueTotals(t *testing.T) {
 	service.EXPECT().QueuePage(gomock.Any(), models.QueueByModelScore, int64(4), (*string)(nil)).
 		Return(models.NumberedReviewPage{Number: 3, TotalItems: 207}, nil)
 
-	rec := send(mux, http.MethodGet, "/reviews?sort=model_score&page=4", mockAnalystKey, "")
+	rec := send(mux, http.MethodGet, "/reviews?sort=model_score&page=4", mockReviewerToken, "")
 	wantResponse(t, rec, http.StatusOK)
 	page := decodeJSON[queueResponse](t, rec)
 	want := queuePagination{Page: 3, TotalPages: 3, TotalItems: 207}
@@ -371,7 +358,7 @@ func TestReviewHandlerReturnsNumberedQueueTotals(t *testing.T) {
 func TestReviewHandlerRejectsInvalidPageNumbers(t *testing.T) {
 	mux, _ := newMockReviewMux(t)
 	for _, query := range []string{"page=0", "page=-1", "page=abc", "page=1&page=2", "page=9223372036854775808"} {
-		rec := send(mux, http.MethodGet, "/reviews?"+query, mockAnalystKey, "")
+		rec := send(mux, http.MethodGet, "/reviews?"+query, mockReviewerToken, "")
 		wantResponse(t, rec, http.StatusBadRequest)
 	}
 }

@@ -45,7 +45,7 @@ func (s *ReviewStore) UseBlocklistCache(r BlocklistRefresher) *ReviewStore {
 
 // resolveReview saves a decision for a purchase still awaiting review and
 // reports what happened: saved, not_found, not_review, already_resolved, or
-// not_claimed. When $4 is set, the decision is saved only while that username
+// not_claimed. The decision is saved only while its analyst
 // holds the claim on the purchase.
 //
 // A review purchase that was not saved although its claim is held lost the
@@ -57,11 +57,11 @@ WITH candidate AS (
     FROM decisions d
     WHERE d.purchase_id = $1
 ), claim AS (
-    SELECT $4::text IS NULL OR EXISTS (
+    SELECT EXISTS (
         SELECT 1
         FROM review_claims c
         JOIN accounts a ON a.id = c.account_id
-        WHERE c.purchase_id = $1 AND a.username = $4::text
+        WHERE c.purchase_id = $1 AND a.username = $3::text
     ) AS held
 ), saved AS (
     INSERT INTO review_resolutions (purchase_id, decision, analyst_id)
@@ -115,7 +115,7 @@ func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (mod
 func saveResolution(ctx context.Context, tx pgx.Tx, d models.ReviewDecision) (models.Resolution, error) {
 	var result models.Resolution
 	var resolvedAt *time.Time
-	err := tx.QueryRow(ctx, resolveReview, d.PurchaseID, d.Decision, d.AnalystID, d.ClaimedBy).Scan(&result.Status, &resolvedAt)
+	err := tx.QueryRow(ctx, resolveReview, d.PurchaseID, d.Decision, d.AnalystID).Scan(&result.Status, &resolvedAt)
 	if err != nil {
 		return models.Resolution{}, fmt.Errorf("resolve review: %w", err)
 	}

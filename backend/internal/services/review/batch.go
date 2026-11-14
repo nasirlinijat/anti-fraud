@@ -49,7 +49,7 @@ type DecisionResult struct {
 }
 
 // BatchDecision is one decision for several purchases. AnalystID is the
-// username of a session or the analyst ID of a key.
+// username of the signed-in account.
 type BatchDecision struct {
 	PurchaseIDs []int64
 	Decision    string
@@ -57,8 +57,6 @@ type BatchDecision struct {
 	// Blocks apply to each purchase's own device, card and player.
 	Blocks models.ReviewBlocks
 }
-
-type decideFunc func(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error)
 
 // ClaimMany claims each purchase for the signed-in account with Claim, one
 // after another in the given order, and reports what happened to each. It
@@ -98,28 +96,9 @@ func (s *Service) claimOne(ctx context.Context, purchaseID int64, username strin
 	return result
 }
 
-// DecideMany saves the decision of an analyst with a key on each purchase,
-// with Decide, which needs no claim.
-//
-// The batch is deliberately not atomic: each purchase is decided in its own
-// transaction, one after another in the given order, so that a purchase
-// someone else decided meanwhile cannot undo the decisions on the others.
-// It returns ErrInvalidBatchSize, ErrDuplicatePurchaseID, ErrInvalidDecision
-// or ErrBlockNeedsReject before saving anything. An unexpected error on one
-// purchase gives it BatchError and the rest are still decided.
+// DecideMany decides each claimed purchase in its own transaction.
+// One purchase's failure does not undo successful decisions on the others.
 func (s *Service) DecideMany(ctx context.Context, d BatchDecision) ([]DecisionResult, error) {
-	return decideMany(ctx, d, s.Decide)
-}
-
-// DecideManyClaimed saves the decision of a signed-in account on each
-// purchase with DecideClaimed, so that a purchase the account has not
-// claimed gets BatchNotClaimed. Otherwise it works like DecideMany, one
-// transaction per purchase.
-func (s *Service) DecideManyClaimed(ctx context.Context, d BatchDecision) ([]DecisionResult, error) {
-	return decideMany(ctx, d, s.DecideClaimed)
-}
-
-func decideMany(ctx context.Context, d BatchDecision, decide decideFunc) ([]DecisionResult, error) {
 	if err := checkBatch(d.PurchaseIDs); err != nil {
 		return nil, err
 	}
@@ -128,16 +107,16 @@ func decideMany(ctx context.Context, d BatchDecision, decide decideFunc) ([]Deci
 	}
 	results := make([]DecisionResult, 0, len(d.PurchaseIDs))
 	for _, id := range d.PurchaseIDs {
-		results = append(results, decideOne(ctx, id, d, decide))
+		results = append(results, s.decideOne(ctx, id, d))
 	}
 	return results, nil
 }
 
-func decideOne(ctx context.Context, purchaseID int64, d BatchDecision, decide decideFunc) DecisionResult {
+func (s *Service) decideOne(ctx context.Context, purchaseID int64, d BatchDecision) DecisionResult {
 	if err := ctx.Err(); err != nil {
 		return DecisionResult{PurchaseID: purchaseID, Status: BatchError, Err: err}
 	}
-	resolution, err := decide(ctx, purchaseID, d.Decision, d.AnalystID, d.Blocks)
+	resolution, err := s.Decide(ctx, purchaseID, d.Decision, d.AnalystID, d.Blocks)
 	if err == nil {
 		return DecisionResult{PurchaseID: purchaseID, Status: BatchSaved, Resolution: resolution}
 	}

@@ -53,7 +53,7 @@ Backfill simulates event times, so a day of traffic can be sent in a few minutes
 
 ## Seed the demo
 
-Follow [Populate the demo](../../README.md#populate-the-demo) and run `make seed`. It targets the local API at `127.0.0.1:$PORT`, uses the reset endpoint with `RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN`, and uses `API_KEY` for scoring. `SEED_ANALYST_KEY` must match a configured analyst key. `LABELS_DATABASE_URL` must point to the same database as the backend, using the evaluation role. Pause other traffic and review work while it runs.
+Follow [Populate the demo](../../README.md#populate-the-demo) and run `make seed`. It targets the local API at `127.0.0.1:$PORT`, uses the reset endpoint with `RESET_SESSION_TOKEN`, and uses `API_KEY` for scoring. The token must belong to an admin. `LABELS_DATABASE_URL` must point to the same database as the backend, using the evaluation role. Pause other traffic and review work while it runs.
 
 The command generates purchases from January 5 through January 11, 2026 UTC with seed 42. It uses the active ruleset and loaded model. After scoring completes, it uses finalized simulator labels to approve legitimate purchases and reject fraud through the review API, leaving up to 10 of the newest reviews open. It adds no blocklist entries. If a run fails after reset, fix the reported error and rerun `make seed` to start from empty demo data.
 
@@ -110,17 +110,17 @@ The simulator keeps pattern names local and prints the score API's actual outcom
 
 ## Console simulation API
 
-Set `SIMULATION_ENABLED=true` and configure an individual operator key to enable console-managed traffic. Restart the backend after changing the setting. It defaults to false, including production. These routes are available through the console host; the public production API hostname does not expose them.
+Set `SIMULATION_ENABLED=true` and sign in as an admin to control console-managed traffic. Restart the backend after changing the setting. It defaults to false, including production. These routes are available through the console host; the public production API hostname does not expose them.
 
-`POST /simulations` uses an operator key and accepts, for example:
+`POST /simulations` uses an admin session and accepts, for example:
 
 ```json
 {"request_id":"backfill-42-first","mode":"backfill","seed":42,"rate":5,"count":500,"scenarios":["normal","card_testing"]}
 ```
 
-It returns 202 with the run ID and a Location header. For live traffic use `mode: "live"` and omit count. Poll `GET /simulations/{id}` with the service key, or `GET /simulations?limit=20` for history; pass its `next_cursor` as `before` for the next page. `POST /simulations/{id}/stop` uses an operator key and drains the current purchase. Stopping an already finished run is safe.
+It returns 202 with the run ID and a Location header. For live traffic use `mode: "live"` and omit count. Poll `GET /simulations/{id}` with an admin session, or `GET /simulations?limit=20` for history; pass its `next_cursor` as `before` for the next page. `POST /simulations/{id}/stop` uses an admin session and drains the current purchase. Stopping an already finished run is safe.
 
-Matching start retries with the same operator and request_id return the original run with 200, including after completion. Changed settings or another active run return 409. Rates are 1–50 purchases/second; backfills allow up to 10,000 purchases and default to 500. Seeds are nonnegative JavaScript-safe integers. Omitted scenarios select all patterns. Normal plus special scenarios keeps the existing 10 percent special-event share; without normal, every event starts one of the selected special scenarios. Bursts can produce unequal purchase shares.
+Matching start retries with the same account and request_id return the original run with 200, including after completion. Changed settings or another active run return 409. Rates are 1–50 purchases/second; backfills allow up to 10,000 purchases and default to 500. Seeds are nonnegative JavaScript-safe integers. Omitted scenarios select all patterns. Normal plus special scenarios keeps the existing 10 percent special-event share; without normal, every event starts one of the selected special scenarios. Bursts can produce unequal purchase shares.
 
 History and counters are saved in PostgreSQL. `sent` counts saved decisions and is the sum of allowed, reviewed and blocked. The worker records an in-flight transaction before scoring and checkpoints its result afterwards. On recovery it reconciles that transaction against saved decisions and marks unfinished runs `interrupted`; it does not automatically continue their traffic. `pending: true` means an outcome still cannot be confirmed. A new run needs a new request_id. Database failures stop dispatch until recovery. Only console-managed runs share the active-run guard; separately launched CLI simulators are not controlled.
 
@@ -129,12 +129,11 @@ A seed determines traffic given the same generator settings and time anchor. Act
 ## Reset demonstration data
 
 Pause external traffic, replay, label import/recovery, and mock-bank jobs and
-let in-flight work finish. With `SIMULATION_ENABLED=true`, an admin session or
-operator key can call `POST /simulations/reset`. Success returns 204; an active
+let in-flight work finish. With `SIMULATION_ENABLED=true`, an admin session can call `POST /simulations/reset`. Success returns 204; an active
 console simulation returns 409, and a disabled feature returns 404.
 
 `make reset` calls the same endpoint on the running backend. Set
-`RESET_OPERATOR_KEY` or `RESET_SESSION_TOKEN` in the environment; optionally set
+`RESET_SESSION_TOKEN` in the environment; optionally set
 `RESET_URL` to override `http://127.0.0.1:$PORT` (port 8080 by default).
 `RESET_URL` must be an absolute HTTP or HTTPS URL. A base path is supported;
 user information, query strings, fragments, and invalid ports are rejected.

@@ -13,8 +13,8 @@ import (
 
 // Config selects the backend and the credential used to reset its demo data.
 type Config struct {
-	BaseURL, Port             string
-	OperatorKey, SessionToken string
+	BaseURL, Port string
+	SessionToken  string
 }
 
 // Reset clears demonstration data through the backend's reset endpoint.
@@ -31,10 +31,9 @@ func Reset(ctx context.Context, cfg Config) error {
 	}
 	if token := cfg.SessionToken; token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
-	} else if key := cfg.OperatorKey; key != "" {
-		req.Header.Set("X-API-Key", key)
+
 	} else {
-		return fmt.Errorf("set RESET_OPERATOR_KEY or RESET_SESSION_TOKEN")
+		return fmt.Errorf("set RESET_SESSION_TOKEN")
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req) // #nosec G704 -- The destination is operator configuration, not server input, and redirects are disabled.

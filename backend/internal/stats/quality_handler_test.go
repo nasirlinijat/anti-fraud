@@ -29,10 +29,10 @@ func (f *fakeQuality) Runs(_ context.Context, source, after string, limit int) (
 }
 func qualityGet(src QualitySource, path string, keys ...string) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
-	RegisterQualityRoutes(mux, src, platform.Access{ServiceKey: "quality-key"})
+	RegisterQualityRoutes(mux, src, platform.Access{Sessions: qualitySessions{}})
 	req := httptest.NewRequest("GET", path, nil)
 	for _, key := range keys {
-		req.Header.Add("X-API-Key", key)
+		req.Header.Add("Authorization", "Bearer "+key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -124,4 +124,13 @@ func TestQualityRatesWithMissingClasses(t *testing.T) {
 			}
 		}
 	}
+}
+
+type qualitySessions struct{}
+
+func (qualitySessions) Identify(_ context.Context, token string) (platform.Identity, error) {
+	if token != "quality-key" {
+		return platform.Identity{}, platform.ErrNoSession
+	}
+	return platform.Identity{Username: "quality-admin", Role: platform.RoleAdmin}, nil
 }

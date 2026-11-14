@@ -4,27 +4,27 @@ This review covers the Docker Compose stack, its AWS gateway, and the Vite devel
 
 ## Trust boundaries
 
-- The browser sends console requests to Caddy or Vite. The proxy supplies the service key for scoring, statistics, rulesets, and blocklist requests. Review requests carry the analyst's individual key. Configuration writes carry the operator's individual key.
+- The browser sends its account session to Caddy or Vite. Console routes require sessions and enforce account roles. Only the score proxy adds the service key; the production Caddy proxy first verifies the session with the backend.
 - Clients can also call the Go API directly on its published loopback port. The API validates credentials and input independently of the proxy.
 - The API connects to PostgreSQL over the Compose network or a local connection during host development. The migration runner uses the database administrator. The API connects as the restricted `antifraud_api` role.
-- Protected assets include service and analyst keys, purchase and device history, model scores, rulesets, blocklist entries, and the analyst's decision record.
+- Protected assets include the service key and console sessions, purchase and device history, model scores, rulesets, blocklist entries, and the analyst's decision record.
 
 ## Review
 
 | Threat | Go API | Caddy and Vite | PostgreSQL | React console |
 |---|---|---|---|---|
-| Spoofing | The service key and individual analyst keys are separate. The API checks a single credential header and derives the analyst ID from the configured key. | Caddy checks the host, origin, and cross-site write metadata. Vite checks the host and origin of protected routes before forwarding credentials. | PostgreSQL requires its own credential. The host port binds to loopback. | The analyst enters an individual key. The browser sends it with review requests and holds it in memory. |
+| Spoofing | The service key authenticates scoring and account events. Console routes accept one Bearer session header and derive identity and role from its account. | Caddy checks the host, origin, and cross-site write metadata. Vite checks the host and origin of protected routes before forwarding credentials. | PostgreSQL requires its own credential. The host port binds to loopback. | The user signs in with a username and password. The browser sends the returned session token. |
 | Tampering | Write endpoints validate fields and reject trailing JSON. Scoring retries with different purchase data conflict. | The proxies set the service credential upstream and pass through the review credential. Their origin checks restrict browser requests before routing. | Parameterized queries, uniqueness constraints, and transactions protect saved decisions, ruleset publication, and review rejections that block the purchase's device, card or player. | React renders transaction values and error strings as text. The decision dialog identifies the transaction and requires confirmation. |
 | Repudiation | Reviews record the authenticated analyst and server time. Configuration writes record the authenticated actor, target, action, and server time in the same transaction. | The proxy routes requests under the applicable credential. Actor attribution comes from the backend. | Each review has at most one resolution. The API can insert audit events and lacks permission to read, update, or delete them. | The console shows the saved decision or an error, and refreshes to reconcile an uncertain outcome. |
-| Information disclosure | Protected responses use `Cache-Control: no-store`. JSON responses use `nosniff`. Server errors return generic messages. | Both proxies keep the configured service key server-side. Caddy strips the service key from upstream response headers. | Review queries project case evidence and device activity counts. The database retains the underlying tokens and history. | The analyst key stays in component state. The console renders the evidence returned by the API. |
+| Information disclosure | Protected responses use `Cache-Control: no-store`. JSON responses use `nosniff`. Server errors return generic messages. | Both proxies keep the configured service key server-side. Caddy strips the service key from upstream response headers. | Review queries project case evidence and device activity counts. The database retains the underlying tokens and history. | Session tokens are retained in browser storage and cleared on sign-out or session rejection. The console renders the evidence returned by the API. |
 | Denial of service | The HTTP server bounds header size and connection times. JSON write handlers limit request bodies, and review reads are paginated. | Compose publishes the console on loopback. Both proxies reject requests that fail their local browser checks. | The connection pool bounds concurrent database connections. Indexes support review and scoring queries. | Requests time out. Polling avoids overlapping reads and supports cancellation. |
-| Elevation of privilege | Analyst credentials authorize review endpoints. The service credential authorizes scoring, statistics, and configuration reads. Configuration writes require an operator key. A reviewer or analyst key can add a blocklist entry only by rejecting a pending case, and only for that purchase's own device, card and player. A session must hold the claim on the purchase, and each entry's reason records the reviewer's username or analyst ID. Every other blocklist change requires an admin session or an operator key. | The proxy supplies the service key for its configured API routes. Configuration writes forward the operator key. The AWS gateway requires HTTPS and team authentication for the console. | Database grants apply to the configured role. The API role has explicit table privileges and lacks schema creation and migration permissions. | The API enforces permissions. Hiding a control in the browser has no effect on authorization. |
+| Elevation of privilege | Reviewers can use review routes and model information. Admin sessions manage accounts, configuration, statistics and simulations. Every decision requires the actor's claim. Reviewers can block only the rejected purchase's own device, card and player, atomically with rejection. | Console requests forward sessions. The production score proxy verifies the session before adding the service key. The edge uses HTTPS. | The API role has explicit table privileges and lacks schema creation and migration permissions. | The API enforces roles independently of visible controls. |
 
 ## Verification
 
 - PostgreSQL integration tests verify that the API role can change configuration through the application and cannot read or alter audit records or create application tables.
-- The backend tests cover duplicate credential headers, protected response headers, invalid and oversized blocklist bodies, distinct analyst keys, and review resolution.
-- The Vite proxy integration test checks same-origin service access, analyst key forwarding, and rejection of requests with a foreign origin or host before they reach the backend.
+- The backend tests cover duplicate credential headers, protected response headers, invalid and oversized blocklist bodies, distinct reviewer sessions, and review resolution.
+- The Vite proxy integration test checks same-origin service access, reviewer session forwarding, and rejection of requests with a foreign origin or host before they reach the backend.
 
 ## Operational follow-ups
 
@@ -62,8 +62,7 @@ gitleaks ignores two fingerprints in `.gitleaksignore`: the documented local dev
 ## Simulation control
 
 Simulation routes are absent unless `SIMULATION_ENABLED=true`. Starting and
-stopping traffic requires an individual operator key; status and history use the
-service key. Console proxies preserve these credentials and same-origin checks.
+stopping traffic requires an admin session; status and history also require an admin session. Console proxies preserve these credentials and same-origin checks.
 The public API hostname does not forward simulation routes. The controller uses
 a fixed loopback scoring URL, bounded rate and backfill size, a database active-run
 constraint and an advisory lock. History records the initiating and stopping
@@ -84,7 +83,7 @@ include per-purchase answers.
 
 
 Quality reporting reads the separate evaluation connection in read-only
-transactions. Its service-key endpoints expose per-run aggregates and run IDs,
+transactions. Its admin-session endpoints expose per-run aggregates and run IDs,
 never purchase-level answers. Source and run ID scope every evaluation. Scoring
 credentials remain unable to read the answer tables. Optional evaluation failures
 do not disable scoring; simulation dispatch still requires successful private

@@ -52,10 +52,10 @@ func getStatsPath(t *testing.T, src stats.Store, key, path string) *httptest.Res
 	h := NewStatsHandler(stats.NewService(src))
 	h.now = func() time.Time { return statsNow }
 	mux := http.NewServeMux()
-	RegisterStatsRoutes(mux, h, platform.Access{ServiceKey: testKey})
+	RegisterStatsRoutes(mux, h, platform.Access{Sessions: consoleTestSessions})
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	if key != "" {
-		req.Header.Set("X-API-Key", key)
+		setTestCredential(req, key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

@@ -32,11 +32,11 @@ import (
 )
 
 const (
-	serviceKey  = "integration-service-key"
-	operatorKey = "integration-operator-key"
-	analystKey  = "integration-analyst-key"
-	operatorID  = "integration-operator"
-	analystID   = "integration-analyst"
+	serviceKey    = "integration-service-key"
+	adminToken    = "integration-admin-session"
+	reviewerToken = "integration-reviewer-session"
+	operatorID    = "integration-operator"
+	analystID     = "integration-analyst"
 )
 
 var (
@@ -137,15 +137,6 @@ func newApp(t *testing.T) app {
 	}
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 
-	analysts, err := platform.ParseAnalystKeys(`[{"analyst_id":"`+analystID+`","key":"`+analystKey+`"}]`, serviceKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	operators, err := platform.ParseOperatorKeys(`[{"operator_id":"`+operatorID+`","key":"`+operatorKey+`"}]`, serviceKey, analysts)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	rulesets := storage.NewRulesetStore(tx)
 	rawBlocklist := storage.NewBlocklistStore(tx)
 	var blocklistSvc score.Blocklist = rawBlocklist
@@ -167,7 +158,7 @@ func newApp(t *testing.T) app {
 
 	mux := http.NewServeMux()
 	sessions := auth.NewService(storage.NewAccountStore(tx), storage.NewSessionStore(tx))
-	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators, Sessions: sessions}
+	access := platform.Access{Sessions: sessions}
 	accountEvents := storage.NewAccountEventStore(tx)
 	scoreService := score.NewService(rulesets, blocklistSvc, storage.NewPurchaseStore(tx)).UseAccountEvents(accountEvents)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), serviceKey)
@@ -185,6 +176,33 @@ func (a app) do(t *testing.T, method, path, key, body string) *httptest.Response
 		req.Header.Set("X-API-Key", key)
 	}
 	rec := httptest.NewRecorder()
+	if !strings.HasPrefix(path, "/score") && !strings.HasPrefix(path, "/account-events") && (key == adminToken || key == reviewerToken) {
+		role := models.RoleReviewer
+		username := analystID
+		if key == adminToken {
+			role = models.RoleAdmin
+			username = "integration-admin"
+		}
+		var id int64
+		err := a.tx.QueryRow(context.Background(), "SELECT id FROM accounts WHERE username=$1", username).Scan(&id)
+		if err != nil {
+			if _, err = a.accounts.Create(context.Background(), account.NewAccount{Username: username, Password: "integration password", Role: role}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		session, err := a.sessions.Login(context.Background(), username, "integration password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if method == http.MethodPost && strings.HasSuffix(path, "/decision") {
+			id := strings.TrimSuffix(strings.TrimPrefix(path, "/reviews/"), "/decision")
+			if _, err := a.tx.Exec(context.Background(), `INSERT INTO review_claims(purchase_id,account_id) SELECT d.purchase_id,a.id FROM decisions d JOIN accounts a ON a.username=$2 WHERE d.purchase_id=$1::bigint AND d.outcome='review' ON CONFLICT(purchase_id) DO NOTHING`, id, username); err != nil {
+				t.Fatal(err)
+			}
+		}
+		req.Header.Del("X-API-Key")
+		req.Header.Set("Authorization", "Bearer "+session.Token)
+	}
 	a.mux.ServeHTTP(rec, req)
 	return rec
 }

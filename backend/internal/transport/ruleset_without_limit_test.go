@@ -21,7 +21,7 @@ var rulesWithoutLimit = []scoring.RuleName{
 
 func TestPublishRejectsInvalidRulesWithoutLimit(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{Sessions: consoleTestSessions})
 	tests := []struct {
 		name, rule, field string
 	}{
@@ -34,7 +34,7 @@ func TestPublishRejectsInvalidRulesWithoutLimit(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(string(name)+" "+tt.name, func(t *testing.T) {
 				body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{%q:%s}}`, name, tt.rule)
-				rec := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
+				rec := rulesetRequest(mux, "POST", "/rulesets", body, adminTestToken)
 
 				field := "rules." + string(name)
 				if tt.field != "" {
@@ -52,7 +52,7 @@ func TestPublishRejectsInvalidRulesWithoutLimit(t *testing.T) {
 func TestPublishAcceptsRulesWithoutLimit(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolatedRulesetPool(t)))),
-		platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+		platform.Access{Sessions: consoleTestSessions})
 	body := `{"review_threshold":50,"block_threshold":80,"rules":{
 		"cvv_mismatch":{"enabled":true,"weight":30},
 		"avs_mismatch":{"enabled":false,"weight":15,"limit":0},
@@ -61,7 +61,7 @@ func TestPublishAcceptsRulesWithoutLimit(t *testing.T) {
 		"anonymous_ip":{"enabled":false,"weight":20}
 	}}`
 
-	published := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
+	published := rulesetRequest(mux, "POST", "/rulesets", body, adminTestToken)
 	active := rulesetRequest(mux, "GET", "/rulesets/active", "", "test-key")
 
 	if published.Code != http.StatusCreated {

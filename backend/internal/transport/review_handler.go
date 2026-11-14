@@ -31,11 +31,9 @@ type ReviewService interface {
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
 	Decide(ctx context.Context, purchaseID int64, decision, analystID string, blocks models.ReviewBlocks) (models.Resolution, error)
-	DecideClaimed(ctx context.Context, purchaseID int64, decision, username string, blocks models.ReviewBlocks) (models.Resolution, error)
 	Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error)
 	ClaimMany(ctx context.Context, purchaseIDs []int64, username string) ([]review.ClaimResult, error)
 	DecideMany(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
-	DecideManyClaimed(ctx context.Context, d review.BatchDecision) ([]review.DecisionResult, error)
 	Assignments(ctx context.Context) ([]models.ReviewerWork, error)
 	ReleaseClaim(ctx context.Context, purchaseID int64) error
 }
@@ -50,7 +48,7 @@ func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 }
 
 // RegisterReviewRoutes exposes the queue, case evidence, claims, and decisions
-// to analysts with a key and to signed-in reviewers and admins. Only
+// to signed-in reviewers and admins. Only
 // signed-in accounts can claim, and they decide only what they have claimed.
 // The batch routes claim and decide several purchases, each on its own.
 func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.Access) {
@@ -450,9 +448,6 @@ func claimFilter(values []string, actor platform.Actor) (*string, error) {
 	if len(values) != 1 || values[0] != "mine" {
 		return nil, errors.New("claimed must be mine")
 	}
-	if !actor.Session {
-		return nil, errors.New("claimed=mine needs a signed-in account")
-	}
 	return &actor.ID, nil
 }
 
@@ -461,10 +456,6 @@ func (h *ReviewHandler) serveClaim(w http.ResponseWriter, r *http.Request, actor
 	purchaseID, ok := parsePurchaseID(id)
 	if !ok {
 		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
-		return
-	}
-	if !actor.Session {
-		platform.WriteError(w, http.StatusForbidden, claimNeedsSessionMessage)
 		return
 	}
 	claim, err := h.service.Claim(r.Context(), purchaseID, actor.ID)
@@ -530,15 +521,6 @@ func parsePurchaseID(id string) (int64, bool) {
 	return purchaseID, true
 }
 
-// decide saves a decision. A signed-in account must hold the claim on the
-// purchase; an analyst key decides without one, as before claims existed.
-func (h *ReviewHandler) decide(ctx context.Context, purchaseID int64, body decisionRequest, actor platform.Actor) (models.Resolution, error) {
-	if actor.Session {
-		return h.service.DecideClaimed(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
-	}
-	return h.service.Decide(ctx, purchaseID, body.Decision, actor.ID, body.blocks())
-}
-
 func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
 	id := r.PathValue("purchase_id")
 	purchaseID, ok := parsePurchaseID(id)
@@ -551,7 +533,7 @@ func (h *ReviewHandler) serveDecision(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
-	result, err := h.decide(r.Context(), purchaseID, body, actor)
+	result, err := h.service.Decide(r.Context(), purchaseID, body.Decision, actor.ID, body.blocks())
 	if err != nil {
 		writeReviewError(r.Context(), w, purchaseID, err, "save review decision")
 		return

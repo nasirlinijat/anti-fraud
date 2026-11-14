@@ -288,6 +288,7 @@ func TestClaimReportsPurchasesThatCannotBeClaimed(t *testing.T) {
 	allowed := insertReviewDecision(t, tx, "claim-allowed", "allow", at, nil, `[]`)
 	decided := insertReviewDecision(t, tx, "claim-decided", "review", at, nil, `[]`)
 	store := NewReviewStore(tx)
+	claimReviewFixture(t, tx, decided, "key-analyst")
 	if _, err := store.Resolve(context.Background(), models.ReviewDecision{PurchaseID: decided, Decision: "approve", AnalystID: "key-analyst"}); err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +342,7 @@ func TestResolveCallsBlocklistRefresherOnDeviceBlock(t *testing.T) {
 	refresher := &spyRefresher{}
 	store := NewReviewStore(tx).UseBlocklistCache(refresher)
 
+	claimReviewFixture(t, tx, id, "analyst-1")
 	res, err := store.Resolve(ctx, models.ReviewDecision{
 		PurchaseID: id,
 		Decision:   "reject",
@@ -408,5 +410,17 @@ SELECT purchase_id, reviewer.id FROM reviewer CROSS JOIN unnest($2::bigint[]) AS
 	}
 	if page.Number != 2 || page.TotalItems != 2 || len(page.Items) != 1 || page.Items[0].PurchaseID != last {
 		t.Fatalf("unexpected numbered page: %+v", page)
+	}
+}
+
+func claimReviewFixture(t *testing.T, tx pgx.Tx, id int64, username string) {
+	t.Helper()
+	_, err := tx.Exec(context.Background(), `INSERT INTO accounts(username,password_hash,role) VALUES($1,'fixture-hash','reviewer') ON CONFLICT(username) DO NOTHING`, username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(context.Background(), `INSERT INTO review_claims(purchase_id,account_id) SELECT d.purchase_id,a.id FROM decisions d JOIN accounts a ON a.username=$2 WHERE d.purchase_id=$1 AND d.outcome='review' ON CONFLICT(purchase_id) DO NOTHING`, id, username)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

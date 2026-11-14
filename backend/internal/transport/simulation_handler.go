@@ -39,7 +39,7 @@ func NewSimulationHandler(service SimulationService) *SimulationHandler {
 }
 
 // RegisterSimulationRoutes registers the simulation routes: starting and
-// stopping a run need an operator key, reading needs the service key. It
+// stopping and reading a run require an admin session. It
 // registers nothing when simulations are disabled.
 func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled bool, access platform.Access) {
 	if !enabled {

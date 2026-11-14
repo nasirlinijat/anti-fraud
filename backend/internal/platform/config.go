@@ -39,10 +39,8 @@ type Config struct {
 	// When empty, the cache is disabled and scoring queries PostgreSQL directly.
 	RedisURL string
 	// APIKey authenticates requests to the score endpoint.
-	APIKey       string
-	AnalystKeys  AnalystKeys
-	OperatorKeys OperatorKeys
-	ScoreLimits  ScoreLimits
+	APIKey      string
+	ScoreLimits ScoreLimits
 	// ChargebackWebhookSecret signs chargeback webhook deliveries. While it
 	// is empty, the chargeback endpoint returns 503.
 	ChargebackWebhookSecret string
@@ -107,20 +105,12 @@ func LoadConfig() (Config, error) {
 		}
 		cfg.RedisURL = raw
 	}
-	keys, err := ParseAnalystKeys(os.Getenv("REVIEW_ANALYST_KEYS"), cfg.APIKey)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.AnalystKeys = keys
-	cfg.OperatorKeys, err = ParseOperatorKeys(os.Getenv("OPERATOR_API_KEYS"), cfg.APIKey, keys)
-	if err != nil {
-		return Config{}, err
-	}
+	var err error
 	cfg.ScoreLimits, err = loadScoreLimits()
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.ChargebackWebhookSecret, err = loadChargebackWebhookSecret(cfg.APIKey, cfg.AnalystKeys, cfg.OperatorKeys)
+	cfg.ChargebackWebhookSecret, err = loadChargebackWebhookSecret(cfg.APIKey)
 	if err != nil {
 		return Config{}, err
 	}

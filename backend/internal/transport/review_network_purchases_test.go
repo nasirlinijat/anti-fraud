@@ -18,7 +18,7 @@ func newNetworkPurchasesMux(t *testing.T) (*http.ServeMux, *mocks.MockReviewServ
 	t.Helper()
 	service := mocks.NewMockReviewService(gomock.NewController(t))
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(service, true), platform.Access{Sessions: consoleTestSessions})
 	return mux, service
 }
 

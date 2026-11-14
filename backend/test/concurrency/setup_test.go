@@ -17,7 +17,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/chargeback"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
@@ -29,9 +32,9 @@ import (
 
 const (
 	serviceKey     = "concurrency-service-key"
-	operatorKey    = "concurrency-operator-key"
-	firstAnalyst   = "concurrency-analyst-1"
-	secondAnalyst  = "concurrency-analyst-2"
+	adminToken     = "concurrency-admin-session"
+	firstReviewer  = "concurrency-analyst-1"
+	secondReviewer = "concurrency-analyst-2"
 	operatorID     = "concurrency-operator"
 	webhookSecret  = "concurrency-webhook-secret-of-32-bytes"
 	highAmountRule = `{
@@ -86,17 +89,21 @@ func run(m *testing.M) int {
 }
 
 func newMux(pool *pgxpool.Pool) (*http.ServeMux, error) {
-	analysts, err := platform.ParseAnalystKeys(`[{"analyst_id":"analyst-1","key":"`+firstAnalyst+`"},{"analyst_id":"analyst-2","key":"`+secondAnalyst+`"}]`, serviceKey)
-	if err != nil {
-		return nil, err
-	}
-	operators, err := platform.ParseOperatorKeys(`[{"operator_id":"`+operatorID+`","key":"`+operatorKey+`"}]`, serviceKey, analysts)
-	if err != nil {
-		return nil, err
+	sessions := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
+	accounts := account.NewService(storage.NewAccountStore(pool))
+	for credential, role := range map[string]models.Role{adminToken: models.RoleAdmin, firstReviewer: models.RoleReviewer, secondReviewer: models.RoleReviewer} {
+		if _, err := accounts.Create(context.Background(), account.NewAccount{Username: credential, Password: "concurrency password", Role: role}); err != nil {
+			return nil, err
+		}
+		session, err := sessions.Login(context.Background(), credential, "concurrency password")
+		if err != nil {
+			return nil, err
+		}
+		sessionTokens[credential] = session.Token
 	}
 	rulesets := storage.NewRulesetStore(pool)
 	mux := http.NewServeMux()
-	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
+	access := platform.Access{Sessions: sessions}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, storage.NewBlocklistStore(pool), storage.NewPurchaseStore(pool))), serviceKey)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(storage.NewReviewStore(pool)), false), access)
@@ -114,7 +121,11 @@ func send(method, path, key, body string) (response, error) {
 	if err != nil {
 		return response{}, err
 	}
-	req.Header.Set("X-API-Key", key)
+	if path == "/score" {
+		req.Header.Set("X-API-Key", key)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+sessionTokens[key])
+	}
 	resp, err := server.Client().Do(req)
 	if err != nil {
 		return response{}, err
@@ -174,3 +185,5 @@ func count(t *testing.T, query string, args ...any) int {
 	}
 	return n
 }
+
+var sessionTokens = map[string]string{}

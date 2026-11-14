@@ -21,7 +21,7 @@ import (
 )
 
 // sessionTestServer serves the review, blocklist, and account routes against
-// the test transaction, to sessions and to the test analyst keys.
+// the test transaction, to sessions and to the test reviewer sessions.
 type sessionTestServer struct {
 	mux      *http.ServeMux
 	accounts *account.Service
@@ -31,7 +31,7 @@ type sessionTestServer struct {
 func newSessionTestServer(t *testing.T, tx pgx.Tx) *sessionTestServer {
 	t.Helper()
 	sessions := auth.NewService(storage.NewAccountStore(tx), storage.NewSessionStore(tx))
-	access := platform.Access{Analysts: testAnalystKeys(t), Sessions: sessions}
+	access := platform.Access{Sessions: sessions}
 	mux := http.NewServeMux()
 	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), access)
 	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), access)
@@ -172,20 +172,18 @@ func TestQueueShowsClaimsAndFiltersOwnClaims(t *testing.T) {
 	}
 }
 
-func TestAnalystKeysCannotClaimButStillDecide(t *testing.T) {
+func TestLegacyCredentialsCannotReview(t *testing.T) {
 	tx := testTx(t)
 	server := newSessionTestServer(t, tx)
-	id := insertOpenReview(t, tx, "session-key-analyst")
-
-	claim := reviewRequest(server.mux, http.MethodPost, "/reviews/"+id+"/claim", queueTestKey, "")
-	mine := reviewRequest(server.mux, http.MethodGet, "/reviews?claimed=mine", queueTestKey, "")
-	decision := reviewRequest(server.mux, http.MethodPost, "/reviews/"+id+"/decision", queueTestKey, `{"decision":"approve"}`)
-
-	if claim.Code != http.StatusForbidden || mine.Code != http.StatusBadRequest {
-		t.Fatalf("claim = %d, claimed=mine = %d, want 403 and 400", claim.Code, mine.Code)
-	}
-	if decision.Code != http.StatusCreated || savedAnalyst(t, tx, id) != "first" {
-		t.Fatalf("key decision = %d %s, want saved by first", decision.Code, decision.Body)
+	id := insertOpenReview(t, tx, "legacy-credentials")
+	for _, path := range []string{"/reviews/" + id + "/claim", "/reviews/" + id + "/decision"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"decision":"approve"}`))
+		req.Header.Set("X-API-Key", queueTestKey)
+		rec := httptest.NewRecorder()
+		server.mux.ServeHTTP(rec, req)
+		if rec.Code != 401 || savedAnalyst(t, tx, id) != "" {
+			t.Fatalf("legacy credential accepted: %d", rec.Code)
+		}
 	}
 }
 

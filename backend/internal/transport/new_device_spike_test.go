@@ -141,19 +141,15 @@ func newSpikeServer(t *testing.T) spikeServer {
 	t.Helper()
 	tx := testTx(t)
 	srv := spikeServer{tx: tx, mux: http.NewServeMux(), rules: storage.NewRulesetStore(tx), purchases: &trustedHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}}
-	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"test","key":"review-test-key"}]`, testKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	RegisterRulesetRoutes(srv.mux, NewRulesetHandler(ruleset.NewService(srv.rules)), platform.Access{ServiceKey: testKey, Operators: testOperators(t)})
-	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: keys})
+	RegisterRulesetRoutes(srv.mux, NewRulesetHandler(ruleset.NewService(srv.rules)), platform.Access{Sessions: consoleTestSessions})
+	RegisterReviewRoutes(srv.mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Sessions: consoleTestSessions})
 	registerScore(srv.mux, newHandler(srv.rules, storage.NewBlocklistStore(tx), srv.purchases), testKey)
 	return srv
 }
 
 func (srv spikeServer) request(ctx context.Context, method, path, body, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
-	req.Header.Set(platform.APIKeyHeader, key)
+	setTestCredential(req, key)
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
 	return rec
@@ -186,7 +182,7 @@ func (srv spikeServer) publishSpikeRuleset(t *testing.T, previous scoring.Rulese
 	published := srv.request(ctx, http.MethodPost, "/rulesets", `{
 		"review_threshold":20,"block_threshold":40,"rules":{"new_device_spike":{
 			"enabled":true,"weight":50,"limit":3,"window_days":30,"min_amount_minor":1500,"amount_multiplier":4}}
-	}`, operatorTestKey)
+	}`, adminTestToken)
 	if published.Code != http.StatusCreated {
 		t.Fatalf("publish: %d %s", published.Code, published.Body)
 	}
@@ -235,7 +231,8 @@ func TestScoreNewDeviceSpikeWithPostgres(t *testing.T) {
 
 	spikeVersion := srv.publishSpikeRuleset(t, originalRuleset)
 
-	approved := srv.request(ctx, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", reviewID), `{"decision":"approve"}`, "review-test-key")
+	claimReviewFixture(t, srv.tx, reviewID, "test")
+	approved := srv.request(ctx, http.MethodPost, fmt.Sprintf("/reviews/%d/decision", reviewID), `{"decision":"approve"}`, "spike-reviewer-token")
 	if approved.Code != http.StatusCreated {
 		t.Fatalf("approve prior review: %d %s", approved.Code, approved.Body)
 	}
