@@ -221,8 +221,8 @@ paths:
         '401': {description: "Missing or invalid operator key. With an Authorization header, a missing or invalid session."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
-        '409': {description: Active run conflict (includes active_run_id when available), or request_id settings conflict.}
-        '503': {description: Operator access, database or simulation controller unavailable.}
+        '409': {description: "Active run conflict (includes active_run_id when available), or request_id settings conflict."}
+        '503': {description: "Operator access, database or simulation controller unavailable."}
     get:
       tags: [Simulations]
       operationId: listSimulations
@@ -831,7 +831,7 @@ paths:
                   source: {type: string, enum: [simulator, ieee-cis]}
                   run_ids: {type: array, items: {type: string}}
                   next_cursor: {type: string, description: Absent after the final page.}
-        '400': {description: Invalid, duplicate or unsupported query parameters.}
+        '400': {description: "Invalid, duplicate or unsupported query parameters."}
         '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '503': {description: Evaluation access is absent or temporarily unavailable.}
