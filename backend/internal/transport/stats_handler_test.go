@@ -31,6 +31,14 @@ func (f *fakeSource) RecentPipeline(_ context.Context, after int64, limit int) (
 	return f.recent, f.err
 }
 
+func (f *fakeSource) CountDecisions(context.Context, models.StatsWindow) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeSource) ExportDecisions(context.Context, models.StatsWindow, int, func(models.DecisionExport) error) error {
+	return nil
+}
+
 func (f *fakeSource) LatestDecisionID(context.Context) (int64, error) {
 	return f.latest, f.err
 }

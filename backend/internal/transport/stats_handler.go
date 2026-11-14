@@ -16,6 +16,8 @@ type StatsService interface {
 	Window(period string, now time.Time) (models.StatsWindow, error)
 	Summary(ctx context.Context, window models.StatsWindow) (models.StatsSummary, error)
 	Recent(ctx context.Context, after *int64) (models.RecentPipeline, error)
+	CountDecisions(ctx context.Context, window models.StatsWindow) (int64, error)
+	Export(ctx context.Context, window models.StatsWindow, emit func(models.DecisionExport) error) error
 }
 
 var errInvalidAfter = errors.New("must be a non-negative integer")
@@ -35,6 +37,7 @@ func NewStatsHandler(service StatsService) *StatsHandler {
 func RegisterStatsRoutes(mux *http.ServeMux, h *StatsHandler, access platform.Access) {
 	mux.Handle("GET /stats", access.ConfigRead(h))
 	mux.Handle("GET /stats/pipeline/recent", access.ConfigRead(http.HandlerFunc(h.recent)))
+	mux.Handle("GET /stats/export", access.ConfigRead(http.HandlerFunc(h.export)))
 }
 
 type statsResponse struct {
