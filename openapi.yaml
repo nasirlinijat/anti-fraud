@@ -374,6 +374,52 @@ paths:
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Database unavailable.}
+  /simulations/{id}/answers:
+    get:
+      tags: [Simulations]
+      operationId: listSimulationAnswers
+      summary: Compare saved simulator decisions with finalized synthetic answers
+      description: Admin console only. Uses the restricted evaluation connection and returns only rows for the selected console run. Pending or missing answers are unknown.
+      security: [{SessionAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - in: query
+          name: before
+          description: Exclusive cursor returned by the preceding page.
+          schema: {type: string, pattern: '^[1-9][0-9]*$'}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+        - in: query
+          name: filter
+          description: Select Fraud + Allow, Legitimate + Review, and Legitimate + Block before paging.
+          schema: {type: string, enum: [exceptions]}
+      responses:
+        '200':
+          description: Saved comparisons, newest purchase ID first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [purchase_id, transaction_id, outcome, answer]
+                      properties:
+                        purchase_id: {type: string}
+                        transaction_id: {type: string}
+                        outcome: {type: string, enum: [allow, review, block]}
+                        answer: {type: string, enum: [fraud, legitimate, unknown]}
+                  next_cursor: {type: string}
+        '400': {description: Invalid query.}
+        '401': {description: Missing or invalid session.}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
+        '404': {description: Unknown run or disabled simulator.}
+        '503': {description: Evaluation connection unavailable.}
   /simulations/{id}/stop:
     post:
       tags: [Simulations]
@@ -3084,6 +3130,8 @@ components:
         - type: object
           required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events, ip_intel, model_reasons]
           properties:
+            card_velocity_evidence:
+              $ref: "#/components/schemas/CardVelocityEvidence"
             ruleset_version:
               type: integer
               format: int32
@@ -3273,6 +3321,54 @@ components:
                 type: integer
               uncertain:
                 type: boolean
+
+    CardVelocityEvidence:
+      type: object
+      description: Saved Card velocity evidence. Omitted when no observation was saved for this decision.
+      required: [count, limit, window_start, window_end, records_available, context_truncated, purchases]
+      properties:
+        count:
+          type: integer
+          description: Number of matching purchases counted at scoring.
+        limit:
+          type: integer
+          description: Minimum count that fired the rule in the saved ruleset.
+        window_start:
+          type: string
+          format: date-time
+          description: Exclusive start of the rule window in UTC.
+        window_end:
+          type: string
+          format: date-time
+          description: Inclusive end of the rule window in UTC.
+        records_available:
+          type: boolean
+          description: Whether the complete set of contributor references has been verified.
+        context_truncated:
+          type: boolean
+          description: Whether more than 20 investigation records matched the rule window.
+        purchases:
+          type: array
+          maxItems: 70
+          description: Up to 50 saved references and 20 additional investigation records, ordered by purchase time.
+          items:
+            type: object
+            required: [transaction_id, event_time, amount_minor, contributed, recorded_after_decision]
+            properties:
+              transaction_id:
+                type: string
+              event_time:
+                type: string
+                format: date-time
+              amount_minor:
+                type: string
+                description: Amount in USD minor units.
+              contributed:
+                type: boolean
+                description: Verified as counted in the original rule evaluation.
+              recorded_after_decision:
+                type: boolean
+                description: Investigation record whose saved receipt timestamp follows the decision timestamp.
 
     ResolvedReviewCase:
       allOf:

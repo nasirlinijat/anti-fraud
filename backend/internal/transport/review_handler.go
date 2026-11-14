@@ -146,6 +146,7 @@ type caseResponse struct {
 	AccountEvents   []caseAccountEventResponse `json:"account_events"`
 	IPIntel         *ipIntelResponse           `json:"ip_intel"`
 	ModelReasons    []modelReasonResponse      `json:"model_reasons"`
+	CardVelocity    *cardVelocityResponse      `json:"card_velocity_evidence,omitempty"`
 }
 
 type modelReasonResponse struct {
@@ -423,6 +424,7 @@ func newCaseResponse(item models.CaseItem) caseResponse {
 		ThreeDSResult:   item.ThreeDSResult,
 		AccountEvents:   newCaseAccountEvents(item.AccountEvents, item.DecidedAt),
 		IPIntel:         newIPIntelResponse(item.IPIntel),
+		CardVelocity:    newCardVelocityResponse(item.CardVelocity),
 	}
 }
 

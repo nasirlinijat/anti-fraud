@@ -69,7 +69,7 @@ func (s *purchases) FindSavedDecision(_ context.Context, p models.Purchase) (*mo
 	return &decision, nil
 }
 
-func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
+func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (models.CardVelocityHistory, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
@@ -78,7 +78,7 @@ func (s *purchases) CardPurchasesLastHour(_ context.Context, card string, at tim
 			n++
 		}
 	}
-	return n, nil
+	return models.CardVelocityHistory{Count: n}, nil
 }
 
 func (s *purchases) FeatureHistory(context.Context, features.Input) (features.History, error) {

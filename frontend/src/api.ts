@@ -326,6 +326,25 @@ export interface ReviewCase extends Review {
   account_events: AccountEvent[]
   ip_intel: IpIntel | null
   model_reasons?: ModelReason[]
+  card_velocity_evidence?: CardVelocityEvidence
+}
+
+export interface CardVelocityPurchase {
+  transaction_id: string
+  event_time: string
+  amount_minor: string
+  contributed: boolean
+  recorded_after_decision: boolean
+}
+
+export interface CardVelocityEvidence {
+  count: number
+  limit: number
+  window_start: string
+  window_end: string
+  records_available: boolean
+  context_truncated: boolean
+  purchases: CardVelocityPurchase[]
 }
 
 export interface PurchaseMatch {
@@ -619,6 +638,25 @@ export interface SimulationHistory {
   items: SimulationRun[]
   next_cursor?: string
   available_scenarios: string[]
+}
+
+export interface SimulationAnswerPage {
+  items: SimulationAnswer[]
+  next_cursor?: string
+}
+
+export interface SimulationAnswer {
+  purchase_id: string
+  transaction_id: string
+  outcome: Outcome
+  answer: 'fraud' | 'legitimate' | 'unknown'
+}
+
+export function listSimulationAnswers(id: string, before: string | undefined, exceptions: boolean, signal: AbortSignal): Promise<SimulationAnswerPage> {
+  const params = new URLSearchParams({ limit: '20' })
+  if (before) params.set('before', before)
+  if (exceptions) params.set('filter', 'exceptions')
+  return request(`/simulations/${encodeURIComponent(id)}/answers?${params}`, { signal })
 }
 export function listSimulations(signal?: AbortSignal): Promise<SimulationHistory> {
   return request('/simulations?limit=10', { signal })

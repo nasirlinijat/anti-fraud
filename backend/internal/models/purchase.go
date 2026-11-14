@@ -70,6 +70,8 @@ type Decision struct {
 	// It is evidence and a rule input; the model sees only the kind of
 	// network, never the address.
 	IPIntel *ipintel.Result
+	// CardVelocity is present when the rule fired and its observation was captured.
+	CardVelocity *CardVelocitySnapshot
 }
 
 // ErrDuplicateTransaction means a purchase with the same transaction ID is already saved.

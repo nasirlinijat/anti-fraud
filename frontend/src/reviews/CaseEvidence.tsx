@@ -1,10 +1,11 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import type { AvsResult, CvvResult, IpIntel, ReviewCase, ThreeDsResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
 import type { TimeDisplay } from '../useTimeDisplay'
 import { EmptyState } from '../ViewState'
 import { AccountEvents } from './AccountEvents'
+import { CardVelocityEvidence } from './CardVelocityEvidence'
 import { reasonLabel, reasonStrength, reasonValue, type ModelReason } from './modelReasons'
 
 export function CaseEvidence({ review, time, children }: { review: ReviewCase; time: TimeDisplay; children?: ReactNode }) {
@@ -33,7 +34,7 @@ export function CaseEvidence({ review, time, children }: { review: ReviewCase; t
         </section>
         <section className="panel" aria-labelledby={`${id}-rules`}>
           <h4 id={`${id}-rules`}>Fired rules</h4>
-          <FiredRules review={review} />
+          <FiredRules review={review} time={time} />
         </section>
         {review.model_score !== null && (
           <section className="panel" aria-labelledby={`${id}-reasons`}>
@@ -146,29 +147,44 @@ function IpIntelFacts({ intel }: { intel: IpIntel | null | undefined }) {
   )
 }
 
-function FiredRules({ review }: { review: ReviewCase }) {
+function FiredRules({ review, time }: { review: ReviewCase; time: TimeDisplay }) {
+  const [expanded, setExpanded] = useState(false)
+  const detailsId = useId()
+  const cardVelocity = review.fired_rules.find(rule => rule.name === 'card_velocity')
   if (review.fired_rules.length === 0) return <EmptyState>No rules fired.</EmptyState>
   return (
-    <div className="table-scroll" role="region" tabIndex={0} aria-label="Fired rule evidence">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Rule</th>
-            <th scope="col">Why it fired</th>
-            <th scope="col" className="num">Points</th>
-          </tr>
-        </thead>
-        <tbody>
-          {review.fired_rules.map(rule => (
-            <tr key={rule.name}>
-              <th scope="row"><code>{rule.name}</code></th>
-              <td>{rule.message}</td>
-              <td className="num">{rule.points}</td>
+    <>
+      <div className="table-scroll" role="region" tabIndex={0} aria-label="Fired rule evidence">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Rule</th>
+              <th scope="col">Why it fired</th>
+              <th scope="col" className="num">Points</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {review.fired_rules.map(rule => (
+              <tr key={rule.name}>
+                <th scope="row">
+                  {rule.name === 'card_velocity' ? (
+                    <button className="rule-evidence-trigger" type="button" aria-expanded={expanded} aria-controls={detailsId}
+                      onClick={() => setExpanded(current => !current)}>Card velocity</button>
+                  ) : <code>{rule.name}</code>}
+                </th>
+                <td>{rule.message}</td>
+                <td className="num">{rule.points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {cardVelocity && (
+        <div id={detailsId} hidden={!expanded}>
+          {expanded && <CardVelocityEvidence rule={cardVelocity} evidence={review.card_velocity_evidence} time={time} />}
+        </div>
+      )}
+    </>
   )
 }
 

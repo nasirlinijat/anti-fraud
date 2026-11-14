@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
@@ -414,7 +415,7 @@ func explainScorebenchReads(t *testing.T, conn *pgx.Conn, profiles [3][]scoreben
 		{"CardHistory", features.CardHistorySQL, "purchases_card_event_time", []any{at, p.CardToken, txn, region}},
 		{"DeviceIDHistory", features.DeviceIDHistorySQL, "purchases_device_event_time", []any{"bench-shared-0", at, txn}},
 		{"PlayerEarlierModelScores", storage.PlayerEarlierModelScoresSQL, "purchases_player_event_time", []any{p.PlayerID, at, txn}},
-		{"CardPurchasesLastHour", storage.CountCardPurchasesLastHourSQL, "purchases_card_event_time", []any{p.CardToken, at}},
+		{"CardPurchasesLastHour", storage.CardPurchasesLastHourSQL, "purchases_card_event_time", []any{p.CardToken, at.Add(-time.Hour), at, models.CardVelocityReferenceLimit}},
 		{"DeviceDistinctCardsLastHour", storage.CountDeviceCardsLastHourSQL, "purchases_device_event_time", []any{"bench-shared-0", at, p.CardToken}},
 		{"TrustedPurchaseHistory", storage.TrustedPurchaseHistorySQL, "purchases_player_event_time", []any{"bench-plan-device", p.PlayerID, at.AddDate(0, 0, -90), at, txn}},
 	} {

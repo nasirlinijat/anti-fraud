@@ -24,6 +24,7 @@ import { PageHeader } from '../ui/PageHeader'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
+import { SimulationAnswers } from './SimulationAnswers'
 
 type Attempt = { settings: SimulationSettings }
 const number = new Intl.NumberFormat('en-US')
@@ -78,7 +79,8 @@ export default function SimulatorPage() {
         {outcome.notice}
         {run ? ` Run status: ${statusNames[run.status].toLowerCase()}.` : ''}
       </p>
-      {run && <BlockedPurchases key={run.id} run={run} time={time} />}
+      {run && <SimulationAnswers key={`answers-${run.id}`} run={run} />}
+      {run && <BlockedPurchases key={`blocked-${run.id}`} run={run} time={time} />}
       {history && history.items.length > 0 && (
         <RecentRuns items={history.items} currentId={run?.id} onFollow={runs.follow} />
       )}
