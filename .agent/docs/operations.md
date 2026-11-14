@@ -88,3 +88,7 @@ The backend writes one JSON object per line to standard output with `log/slog`, 
 - API keys, card tokens and IP addresses are never logged; a test checks this.
 
 The same middleware sets the security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` and `Referrer-Policy: no-referrer`. HTTPS and HSTS are added by the Caddy edge in production.
+
+## Saved decision status
+
+`GET /decision-status` uses SCORE_RATE_LIMIT, SCORE_RATE_BURST and SCORE_TIMEOUT with its own rate bucket, separate from POST /score. Invalid credentials do not consume tokens. Reads are indexed, uncached, and return 503 with Retry-After on deadline/database failure. Default polling guidance is five seconds per pending purchase.

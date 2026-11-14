@@ -4,7 +4,7 @@
 
 ```
 Internet ──► Service edge (80, 443, 443/udp) ──► Caddy with deploy/Caddyfile
-               ├── API_HOST      ──► Service backend   /score, /health, /ready only
+               ├── API_HOST      ──► Service backend   /score, /decision-status, /health, /ready only
                └── CONSOLE_HOST  ──► Service frontend  ──► Service backend
 Service db     ──► StatefulSet db, PostgreSQL with a 5 GiB volume
 Service redis  ──► Deployment redis, the blocklist cache without persistence
@@ -24,7 +24,7 @@ Job dbsetup    ──► runs the migrations, then backend/runtime-role.sql
 ## Why the chart looks like this
 
 - **Fixed Service names.** The Services are called `db`, `redis`, `backend`, `frontend` and `edge`, the same names as the Compose services. `frontend/Caddyfile` proxies to `backend:{$BACKEND_PORT}` and `deploy/Caddyfile` to `backend` and `frontend:8080`, so both Caddyfiles work unchanged. The cost is one release per namespace.
-- **Caddy instead of an Ingress controller.** The console Caddy accepts only `Host: localhost` and a matching `Origin`, and the edge Caddy rewrites both before it forwards. The edge also allows only three API paths and gets its own certificates. An Ingress controller plus cert-manager would have to repeat all of that in annotations, so the chart runs the edge Caddy we already trust in production.
+- **Caddy instead of an Ingress controller.** The console Caddy accepts only `Host: localhost` and a matching `Origin`, and the edge Caddy rewrites both before it forwards. The edge also allows only the explicitly allowed API paths and gets its own certificates. An Ingress controller plus cert-manager would have to repeat all of that in annotations, so the chart runs the edge Caddy we already trust in production.
 - **Database setup before the new code.** On `helm install` the setup Job is a normal resource: it starts with everything else and the backend's init container waits until the runtime role can read `simulation_runs`, which exists only after the migrations and the grants. On `helm upgrade` the Job is a `pre-upgrade` hook, so Helm runs the new migrations and grants first and only then rolls out the new backend. A failed migration stops the upgrade and the old backend keeps serving.
 - **One backend replica.** The score rate limiter and the sign-in throttle count requests in memory per process. Two replicas would double both limits, so `backend.replicas` stays 1 until those counters move to Redis.
 - **Rolling update without downtime.** The backend uses `maxUnavailable: 0`: the new pod must pass `/ready` before the old one stops. The old pod first waits 5 seconds (`preStop`) so the Service stops sending it requests, then the backend's own shutdown finishes the requests in progress.

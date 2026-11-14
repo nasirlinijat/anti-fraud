@@ -59,7 +59,7 @@ const decision = await response.json()
 | Outcome | What your shop does |
 |---|---|
 | `allow` | Charge the player and deliver the item. |
-| `review` | Hold the order. A fraud analyst approves or rejects it in the Anti-Fraud console, usually within minutes. |
+| `review` | Hold the order. Poll the status endpoint until an analyst approves or rejects it in the Anti-Fraud console. |
 | `block` | Decline the purchase. Show the player a neutral message, never the reason. |
 
 `score` and `fired_rules` explain the decision for your support team. `model_score` is the fraud model's risk from 0 to 1; the model can send a purchase to review or clear a review, but it never blocks on its own.
@@ -81,3 +81,33 @@ Do not retry `400`, `401`, `409` or `413`: fix the request first. Every error ha
 ## 5. Check the service
 
 `GET /health` answers while the service runs. `GET /ready` answers `ready` only when purchases can be scored. Neither needs an API key.
+
+## Retrieve a held order's review result
+
+Use the same server-side service key with an exact transaction ID:
+
+```bash
+curl --get "$API/decision-status" \
+  -H "X-API-Key: $API_KEY" \
+  --data-urlencode "transaction_id=order-10042"
+```
+
+```json
+{"transaction_id":"order-10042","outcome":"review","review_status":"approved","resolved_at":"2026-11-14T15:00:00Z"}
+```
+
+The original `outcome` stays unchanged. `review_status` is `not_required` for
+original allow/block decisions, `pending` for an open review, or `approved` /
+`rejected` for a resolved review. `resolved_at` is null until resolution and for
+`not_required`. This is a risk decision, not confirmation of payment or delivery.
+Your backend remains responsible for charging and idempotent fulfillment.
+
+Poll pending reviews every five seconds; stop on a final result. Back off after
+network errors and honor `Retry-After` on 429/503. A 404 means there is no saved
+scored purchase, not approval or rejection. If the original score request timed
+out, recover it with the same idempotent POST /score request first. Retrying that
+POST still returns its original scoring outcome, even after review resolution.
+
+This deployment has one service key and no per-shop data isolation. Keep the key
+on your server. Console sessions cannot call this endpoint, and the service key
+cannot browse console investigation details. Status responses are not cached.

@@ -69,3 +69,7 @@ err := conn.QueryRow(ctx, getActiveRuleset).Scan(&rs.Version, &rs.ReviewThreshol
 ```
 
 Pass nil pointers for NULL values and scan nullable columns into pointers. A query on a new table needs its migration first. A query on the scoring or dashboard path should be added to the index check in `backend/internal/queryplans/`, which fails when PostgreSQL would answer it with a sequential scan.
+
+## Saved decision status
+
+The service-authenticated `GET /decision-status?transaction_id=...` reads minimal saved status. It has no console UI or proxy credential injection. Public routing is explicitly allowed in deploy/Caddyfile and deploy/Dockerfile.edge includes it in the generated public API reference. The integration guide documents polling and fulfillment responsibilities.

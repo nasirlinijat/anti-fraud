@@ -48,3 +48,7 @@ When upgrading an existing Compose installation, add a separate `RUNTIME_DB_PASS
 The [STRIDE threat model](../../docs/threat-model.md) describes the local deployment's trust boundaries, controls, and remaining requirements for shared access.
 
 When upgrading, verify an admin can sign in before removing obsolete console credentials from local environment files and deployment secrets. Existing accounts, sessions, claims, and audit records are retained.
+
+## Saved decision status
+
+`GET /decision-status?transaction_id=...` accepts only the deployment-wide service key. It returns original outcome, review status and UTC resolution time without analyst identity or investigation evidence. Existing runtime SELECT grants suffice; console endpoints remain session-only. There is no per-merchant ownership isolation.

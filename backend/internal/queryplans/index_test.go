@@ -62,6 +62,7 @@ func TestFeatureQueriesUseIndexes(t *testing.T) {
 		{"CountReviewQueue", storage.CountReviewQueueSQL, nil},
 		{"CountModelEffects", storage.CountModelEffectsSQL, []any{at, until}},
 		{"RecentPipeline", storage.RecentPipelineSQL, []any{int64(1000), string(scoring.RuleBlocklist), int32(5000)}},
+		{"DecisionStatus", storage.DecisionStatusSQL, []any{"txn-1"}},
 		{"LatestDecisionID", storage.LatestDecisionIDSQL, nil},
 		{"QualityMetrics", stats.QualityMetricsSQL, []any{"simulator", "run-1"}},
 		{"QualityPending", stats.QualityPendingSQL, []any{"simulator", "run-1"}},

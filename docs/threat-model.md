@@ -89,3 +89,7 @@ credentials remain unable to read the answer tables. Optional evaluation failure
 do not disable scoring; simulation dispatch still requires successful private
 persistence preflight. Quality routes are exposed through the console proxy and
 remain excluded from the public production API hostname.
+
+## Saved decision status
+
+The service key also authorizes exact transaction-ID status lookup. Responses contain original scoring outcome, review state and resolution time only, with no-store and a separate polling rate bucket/deadline. The query reads committed data without row/advisory locks or writes. It cannot expose analyst identity or case evidence. This deployment has one service key, so status access does not isolate merchants; a multi-merchant deployment needs a separate ownership design.

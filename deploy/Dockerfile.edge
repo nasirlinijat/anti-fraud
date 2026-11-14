@@ -1,7 +1,7 @@
 FROM mikefarah/yq:4.44.3 AS spec
 WORKDIR /tmp/spec
 COPY openapi.yaml deploy/docs/integration.md ./
-RUN yq '.info.description = load_str("integration.md") | .servers = [{"url": "/", "description": "This server"}] | .paths = (.paths | with_entries(select(.key == "/score" or .key == "/health" or .key == "/ready"))) | .tags = [.tags[] | select(.name == "Score" or .name == "Health")]' openapi.yaml > public.yaml
+RUN yq '.info.description = load_str("integration.md") | .servers = [{"url": "/", "description": "This server"}] | .paths = (.paths | with_entries(select(.key == "/decision-status" or .key == "/score" or .key == "/health" or .key == "/ready"))) | .tags = [.tags[] | select(.name == "Score" or .name == "Health")]' openapi.yaml > public.yaml
 
 FROM swaggerapi/swagger-ui:v5.31.0 AS swagger
 

@@ -22,7 +22,7 @@
 {$API_HOST} {
 	import access_log
 	encode zstd gzip
-	@api path /score /health /ready
+	@api path /score /decision-status /health /ready
 	handle @api {
 		reverse_proxy backend:{$BACKEND_PORT}
 	}
