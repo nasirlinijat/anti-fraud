@@ -28,7 +28,7 @@ Job dbsetup    ──► runs the migrations, then backend/runtime-role.sql
 - **Database setup before the new code.** On `helm install` the setup Job is a normal resource: it starts with everything else and the backend's init container waits until the runtime role can read `simulation_runs`, which exists only after the migrations and the grants. On `helm upgrade` the Job is a `pre-upgrade` hook, so Helm runs the new migrations and grants first and only then rolls out the new backend. A failed migration stops the upgrade and the old backend keeps serving.
 - **One backend replica.** The score rate limiter and the sign-in throttle count requests in memory per process. Two replicas would double both limits, so `backend.replicas` stays 1 until those counters move to Redis.
 - **Rolling update without downtime.** The backend uses `maxUnavailable: 0`: the new pod must pass `/ready` before the old one stops. The old pod first waits 5 seconds (`preStop`) so the Service stops sending it requests, then the backend's own shutdown finishes the requests in progress.
-- **Secrets restart the pods that read them.** The backend and frontend pods carry a checksum of the Secret, so `helm upgrade` with a new key restarts them. PostgreSQL does not, because it reads `POSTGRES_PASSWORD` only when it creates an empty database.
+- **Secrets restart the pods that read them.** The backend and frontend pods carry a checksum of the Secret, so `helm upgrade` with a new key restarts them. With `existingSecret` the chart cannot see the values, so `deploy/k8s-deploy.sh` passes a hash of them as `secretsChecksum`. PostgreSQL does not restart, because it reads `POSTGRES_PASSWORD` only when it creates an empty database.
 - **Least privilege.** The backend runs as a non-root user with a read-only root filesystem and no Linux capabilities. The setup Job runs as the `postgres` user (uid 70). The two Caddy containers keep the image defaults because the `caddy` binary needs its `cap_net_bind_service` file capability.
 
 ## Values
@@ -50,10 +50,16 @@ The full list with defaults is in [`anti-fraud/values.yaml`](anti-fraud/values.y
 | `edge.service.type` | `LoadBalancer` | k3s answers it on the node's ports 80 and 443. `ClusterIP` for tests |
 | `edge.persistence.enabled` | `true` | keep certificates on a 1 GiB volume |
 | `postgres.storage`, `postgres.storageClass` | `5Gi`, cluster default | database volume |
+| `secretsChecksum` | empty | any text that changes when the values in `existingSecret` change, so the pods restart |
+| `backup.enabled`, `schedule`, `keep`, `storage` | `false`, `0 3 * * *` UTC, `7`, `5Gi` | nightly `pg_dump` CronJob, see Backups |
+| `datadog.enabled` | `false` | Datadog service tags and log sources on the pods; the backend sends DogStatsD to the node's agent (`status.hostIP:8125`) |
+| `datadog.tracing`, `datadog.tracingSampleRatio` | `true`, `1` | with `datadog.enabled`, traces go to the agent's OTLP port `4317` on the node |
 
 Database passwords go into connection URLs, so use letters and digits only (`openssl rand -hex 24`), as with `.env`.
 
 ## Install
+
+On our server `deploy/k8s-deploy.sh` does all of this from `~/anti-fraud/.env`; see "Kubernetes on the same server" in [`deploy/README.md`](../README.md). By hand:
 
 The Secret should not live in a values file in Git. Create it from the server's `.env` style values, then point the chart at it:
 
@@ -101,19 +107,20 @@ helm rollback anti-fraud <revision> -n anti-fraud --wait
 
 ## Backups
 
-The nightly `deploy/backup.sh` runs `pg_dump` inside the Compose `db` container. On Kubernetes the same dump is:
+With `backup.enabled=true` the CronJob `db-backup` runs `pg_dump` every night at 03:00 UTC and writes `antifraud-<UTC time>.sql.gz` to the volume `db-backups`, keeping the newest 7. It is the same format as `deploy/backup.sh`, so the same restore steps work. The database pod mounts the same volume read-only at `/backups`; that makes the volume exist from the first install, and it is where you list, copy and restore dumps:
 
 ```bash
-kubectl -n anti-fraud exec db-0 -- sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > anti-fraud-$(date -u +%F).dump
+kubectl -n anti-fraud create job --from=cronjob/db-backup manual-backup
+kubectl -n anti-fraud exec db-0 -c postgres -- ls -l /backups
 ```
 
-The EBS snapshot policy keeps working on a k3s server, because k3s stores volumes on the same disk.
+The volume is kept on `helm uninstall`, like the database. On k3s it lives on the server disk, so the daily EBS snapshots cover it.
 
 ## CI
 
 `.github/workflows/helm.yml` runs on every pull request that touches the backend, the console, the Caddyfile or the chart:
 
-1. `helm lint` and `helm template` with [`ci-values.yaml`](ci-values.yaml), and once more with production-like values (existing Secret, LoadBalancer, persistence, pull secret).
+1. `helm lint` and `helm template` with [`ci-values.yaml`](ci-values.yaml), once more with production-like values (existing Secret, LoadBalancer, persistence, pull secret), and with [`values-production.yaml`](values-production.yaml) as `k8s-deploy.sh` uses it.
 2. A render without secrets must fail, so the `required` checks stay in place.
 3. `kubeconform -strict` checks every rendered object against the Kubernetes schemas.
 4. A kind cluster builds and loads the four images, installs the chart, waits for the setup Job, and through the edge checks `/health`, `/ready`, a real `POST /score`, the console page, that the API host hides `/admin`, and a console sign-in with an account made by `create-account`.

@@ -8,6 +8,8 @@ on:
       - deploy/Caddyfile
       - deploy/Dockerfile.edge
       - deploy/helm/**
+      - deploy/datadog/**
+      - deploy/k8s-deploy.sh
       - .github/workflows/helm.yml
   push:
     branches: [main]
@@ -17,6 +19,8 @@ on:
       - deploy/Caddyfile
       - deploy/Dockerfile.edge
       - deploy/helm/**
+      - deploy/datadog/**
+      - deploy/k8s-deploy.sh
       - .github/workflows/helm.yml
   workflow_dispatch:
 
@@ -56,6 +60,7 @@ jobs:
             --set edge.service.type=LoadBalancer \
             --set existingSecret=anti-fraud-secrets \
             --set 'images.pullSecrets[0].name=ghcr' > rendered-production.yaml
+          helm template anti-fraud "$CHART" -f deploy/helm/values-production.yaml             --set edge.consoleHost=console.example.sslip.io             --set edge.apiHost=api.example.sslip.io             --set-string images.tag=sha-0000000             --set-string secretsChecksum=ci > rendered-k3s.yaml
 
       - name: Missing secrets fail the render
         run: |
@@ -67,7 +72,7 @@ jobs:
       - name: Validate against Kubernetes schemas
         run: |
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz kubeconform
-          ./kubeconform -strict -summary rendered.yaml rendered-production.yaml
+          ./kubeconform -strict -summary rendered.yaml rendered-production.yaml rendered-k3s.yaml
 
   kind:
     needs: lint
@@ -137,6 +142,13 @@ jobs:
           token=$(console -X POST http://127.0.0.1:8088/auth/login -H "Content-Type: application/json" \
             -d "{\"username\":\"ci-admin\",\"password\":\"$password\"}" | jq -r .token)
           console -H "Authorization: Bearer $token" http://127.0.0.1:8088/auth/me | grep -q ci-admin
+
+      - name: Backup CronJob writes a dump
+        run: |
+          kubectl -n "$NS" create job --from=cronjob/db-backup ci-backup
+          kubectl -n "$NS" wait --for=condition=complete job/ci-backup --timeout 2m
+          kubectl -n "$NS" exec db-0 -c postgres -- sh -c 'gunzip -c /backups/antifraud-*.sql.gz | grep -q "^COPY public.purchases"'
+          kubectl -n "$NS" delete job ci-backup
 
       - name: Upgrade runs the database setup first
         run: |

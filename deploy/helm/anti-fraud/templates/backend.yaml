@@ -33,8 +33,10 @@ spec:
     metadata:
       labels:
         {{- include "antifraud.labels" (dict "component" "backend" "root" .) | nindent 8 }}
+        {{- with include "antifraud.datadogLabels" (dict "service" "anti-fraud-backend" "version" (default .Values.images.tag .Values.images.backend.tag) "root" .) }}{{ . | trim | nindent 8 }}{{- end }}
       annotations:
         {{- include "antifraud.checksum" . | nindent 8 }}
+        {{- with include "antifraud.datadogLogs" (dict "container" "backend" "source" "go" "service" "anti-fraud-backend" "root" .) }}{{ . | trim | nindent 8 }}{{- end }}
     spec:
       {{- with .Values.images.pullSecrets }}
       imagePullSecrets:
@@ -93,7 +95,25 @@ spec:
               value: {{ $b.simulationEnabled | quote }}
             - name: IP_INTEL_PROVIDER
               value: {{ $b.ipIntelProvider | quote }}
-            {{- range $name, $value := dict "SCORE_RATE_LIMIT" $b.scoreRateLimit "SCORE_RATE_BURST" $b.scoreRateBurst "SCORE_TIMEOUT" $b.scoreTimeout "DB_MAX_CONNS" $b.dbMaxConns "TRACING_ENDPOINT" $b.tracingEndpoint "TRACING_SAMPLE_RATIO" $b.tracingSampleRatio "DOGSTATSD_ADDR" $b.dogstatsdAddr }}
+            {{- $tuning := dict "SCORE_RATE_LIMIT" $b.scoreRateLimit "SCORE_RATE_BURST" $b.scoreRateBurst "SCORE_TIMEOUT" $b.scoreTimeout "DB_MAX_CONNS" $b.dbMaxConns "TRACING_ENDPOINT" $b.tracingEndpoint "TRACING_SAMPLE_RATIO" $b.tracingSampleRatio "DOGSTATSD_ADDR" $b.dogstatsdAddr }}
+            {{- if .Values.datadog.enabled }}
+            {{- $_ := unset $tuning "DOGSTATSD_ADDR" }}
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DOGSTATSD_ADDR
+              value: "$(DD_AGENT_HOST):8125"
+            {{- if .Values.datadog.tracing }}
+            {{- $_ := unset $tuning "TRACING_ENDPOINT" }}
+            {{- $_ := unset $tuning "TRACING_SAMPLE_RATIO" }}
+            - name: TRACING_ENDPOINT
+              value: "$(DD_AGENT_HOST):4317"
+            - name: TRACING_SAMPLE_RATIO
+              value: {{ .Values.datadog.tracingSampleRatio | quote }}
+            {{- end }}
+            {{- end }}
+            {{- range $name, $value := $tuning }}
             {{- if ne (toString $value) "" }}
             - name: {{ $name }}
               value: {{ $value | quote }}

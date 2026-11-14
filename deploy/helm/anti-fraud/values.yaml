@@ -22,6 +22,7 @@ images:
     tag: 8-alpine
 
 existingSecret: ""
+secretsChecksum: ""
 secrets:
   apiKey: ""
   postgresPassword: ""
@@ -103,3 +104,22 @@ edge:
       memory: 32Mi
     limits:
       memory: 128Mi
+
+backup:
+  enabled: false
+  schedule: "0 3 * * *"
+  keep: 7
+  storage: 5Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+datadog:
+  enabled: false
+  env: production
+  tracing: true
+  tracingSampleRatio: "1"

@@ -19,3 +19,7 @@ edge:
 
 postgres:
   storage: 1Gi
+
+backup:
+  enabled: true
+  storage: 1Gi

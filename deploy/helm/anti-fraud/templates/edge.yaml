@@ -59,6 +59,11 @@ spec:
     metadata:
       labels:
         {{- include "antifraud.labels" (dict "component" "edge" "root" .) | nindent 8 }}
+        {{- with include "antifraud.datadogLabels" (dict "service" "anti-fraud-gateway" "root" .) }}{{ . | nindent 8 }}{{- end }}
+      {{- with include "antifraud.datadogLogs" (dict "container" "edge" "source" "caddy" "service" "anti-fraud-gateway" "root" .) }}
+      annotations:
+        {{- . | trim | nindent 8 }}
+      {{- end }}
     spec:
       {{- with .Values.images.pullSecrets }}
       imagePullSecrets:

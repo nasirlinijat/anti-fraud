@@ -27,8 +27,10 @@ spec:
     metadata:
       labels:
         {{- include "antifraud.labels" (dict "component" "frontend" "root" .) | nindent 8 }}
+        {{- with include "antifraud.datadogLabels" (dict "service" "anti-fraud-console" "version" (default .Values.images.tag .Values.images.frontend.tag) "root" .) }}{{ . | trim | nindent 8 }}{{- end }}
       annotations:
         {{- include "antifraud.checksum" . | nindent 8 }}
+        {{- with include "antifraud.datadogLogs" (dict "container" "frontend" "source" "caddy" "service" "anti-fraud-console" "root" .) }}{{ . | trim | nindent 8 }}{{- end }}
     spec:
       {{- with .Values.images.pullSecrets }}
       imagePullSecrets:

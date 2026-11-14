@@ -1,5 +1,6 @@
 ad_identifiers:
   - caddy
+  - anti-fraud-edge
 
 init_config:
 

@@ -262,6 +262,121 @@ Running it again updates the dashboard and monitors with the same names instead 
 
 Remove the `DD_` lines from `~/anti-fraud/.env` and run `bash deploy/deploy.sh` again; the agent container is removed.
 
+## Kubernetes on the same server (k3s)
+
+The same stack can run on [k3s](https://k3s.io), a small Kubernetes, with the Helm chart in [`helm/`](helm/README.md) and the images from GitHub Container Registry. Compose stays installed as the way back. Nothing in this section is needed while production runs on Compose.
+
+| | Compose (today) | k3s |
+|---|---|---|
+| Deploy | `deploy/deploy.sh` builds on the server | `deploy/k8s-deploy.sh` pulls the `sha-` images CI built for a `main` commit |
+| Update | containers are replaced, a short gap | rolling update, the new backend must pass `/ready` first; a failed upgrade rolls back by itself |
+| Undo | deploy the previous commit again | `helm rollback` |
+| Secrets | `~/anti-fraud/.env` | the same `.env`; the script turns it into the Secret `anti-fraud-secrets` |
+| Backups | cron runs `backup.sh` | CronJob `db-backup`, same file format, keeps 7, on the volume `db-backups` |
+| Datadog | agent container | official Datadog chart with [`helm/datadog-values.yaml`](helm/datadog-values.yaml); same host name, checks, dashboard and monitors |
+
+Server size: k3s, the Datadog agent and the app need about 3 GiB, so the server moves from `t3.small` (2 GiB) to `t3.medium` (4 GiB), about 17 USD a month more.
+
+### 1. Prepare (no downtime except the resize)
+
+1. **Resize**, in the AWS console: EC2, select the instance, **Instance state, Stop**. When it is stopped, **Actions, Instance settings, Change instance type**, choose `t3.medium`, then **Instance state, Start**. The Elastic IP and the disk stay; Compose starts again by itself. Raise the AWS budget alert from 20 to 40 USD.
+2. **Install k3s and Helm** on the server. Traefik is turned off because the chart's own Caddy answers on ports 80 and 443:
+
+   ```bash
+   ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP
+   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC="--disable traefik" sh -
+   mkdir -p ~/.kube && sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config && sudo chown ubuntu: ~/.kube/config && chmod 600 ~/.kube/config
+   curl -fsSL https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz | tar -xz linux-amd64/helm && sudo install linux-amd64/helm /usr/local/bin/helm && rm -r linux-amd64
+   kubectl get nodes
+   ```
+
+   k3s runs next to Docker. It takes ports 80 and 443 only when the chart's `edge` Service exists, which happens in step 2.
+
+### 2. Move production (about 15 minutes of downtime)
+
+Tell the team first. `$IP` is the Elastic IP; the commands marked *server* run in `~/anti-fraud/app` over SSH, the others on your computer in the repository.
+
+0. Deploy the newest `main` with Compose as usual (`bash deploy/deploy.sh ubuntu@$IP origin/main ~/.ssh/anti-fraud.pem`), so the server has `deploy/row-counts.sql` and the old and new database are on the same migration.
+1. *server*: stop traffic, count the rows, take the moving dump, then stop every Compose container (the Datadog agent too):
+
+   ```bash
+   alias dc='docker compose -p antifraud --env-file ../.env -f docker-compose.yml -f deploy/compose.prod.yml'
+   dc stop edge backend
+   dc exec -T db psql -X -A -F' ' -t -U antifraud -d antifraud < deploy/row-counts.sql > ~/anti-fraud/backups/counts-before.txt
+   dc exec -T db pg_dump --clean --if-exists -U antifraud -d antifraud | gzip > ~/anti-fraud/backups/move.sql.gz
+   docker stop $(docker ps -q --filter label=com.docker.compose.project=antifraud)
+   crontab -l | grep -v backup.sh | crontab -
+   ```
+
+2. Deploy the newest `main` commit. The database is empty, so the setup Job creates the schema and roles:
+
+   ```bash
+   bash deploy/k8s-deploy.sh ubuntu@$IP origin/main ~/.ssh/anti-fraud.pem
+   ```
+
+3. *server*: stop the backend, load the dump into the new database, compare the counts. `diff` prints nothing when every table matches:
+
+   ```bash
+   kubectl -n anti-fraud scale deploy/backend --replicas=0
+   gunzip -c ~/anti-fraud/backups/move.sql.gz | kubectl -n anti-fraud exec -i db-0 -c postgres -- sh -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+   kubectl -n anti-fraud exec -i db-0 -c postgres -- sh -c 'psql -X -A -F" " -t -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < deploy/row-counts.sql > ~/anti-fraud/backups/counts-after.txt
+   diff ~/anti-fraud/backups/counts-before.txt ~/anti-fraud/backups/counts-after.txt && echo "all rows moved"
+   ```
+
+4. Deploy once more. The setup hook gives the restricted roles their rights on the restored tables and the backend starts again:
+
+   ```bash
+   bash deploy/k8s-deploy.sh ubuntu@$IP origin/main ~/.ssh/anti-fraud.pem
+   ```
+
+5. Check: the console signs in with your usual account, `curl https://api.$DASHED.sslip.io/ready` answers `ready`, the five Datadog monitors are OK, and a first backup works:
+
+   ```bash
+   kubectl -n anti-fraud create job --from=cronjob/db-backup first-backup
+   kubectl -n anti-fraud wait --for=condition=complete job/first-backup --timeout 2m
+   kubectl -n anti-fraud exec db-0 -c postgres -- ls -l /backups
+   ```
+
+Caddy asks Let's Encrypt for new certificates at the first start, which takes a few seconds. If Let's Encrypt refuses, Caddy uses ZeroSSL instead.
+
+**Going back during the move.** Nothing on the Compose side was deleted, so:
+
+```bash
+helm -n anti-fraud uninstall anti-fraud datadog
+docker start $(docker ps -aq --filter label=com.docker.compose.project=antifraud)
+(crontab -l; echo '0 3 * * * bash /home/ubuntu/anti-fraud/app/deploy/backup.sh >> /home/ubuntu/anti-fraud/backups/backup.log 2>&1') | crontab -
+```
+
+Purchases scored on k3s after the move are not in the Compose database. To keep them, take a dump from `db-0` and restore it with the steps under [Backups](#backups) before starting the backend.
+
+### Operating on k3s
+
+| Task | Command |
+|---|---|
+| Deploy a merged commit | `bash deploy/k8s-deploy.sh ubuntu@$IP <commit or origin/main> ~/.ssh/anti-fraud.pem` |
+| See what runs | *server*: `kubectl -n anti-fraud get pods` and `helm -n anti-fraud history anti-fraud` |
+| Undo the last deploy | *server*: `helm -n anti-fraud rollback anti-fraud --wait` |
+| Backend logs | *server*: `kubectl -n anti-fraud logs -f deploy/backend` |
+| Change a setting or key | edit `~/anti-fraud/.env`, deploy again; changed keys restart the pods that use them |
+| List backups | *server*: `kubectl -n anti-fraud exec db-0 -c postgres -- ls -l /backups` |
+| Copy a backup to your computer | `ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP "kubectl -n anti-fraud exec db-0 -c postgres -- cat /backups/<file>" > <file>` |
+| Create a console account | *server*: `kubectl -n anti-fraud exec -it deploy/backend -c backend -- /create-account -username <name>` |
+
+`k8s-deploy.sh` deploys only commits on `main`, because only those have images. It reads `MODEL_FILE`, `SIMULATION_ENABLED`, `IP_INTEL_PROVIDER`, `SCORE_RATE_*`, `DB_MAX_CONNS`, `CONSOLE_HOST`, `API_HOST`, the `DD_` settings and every secret from `.env`. With `DD_API_KEY` set it also installs or updates the Datadog chart; `DD_APM_ENABLED=false` turns tracing off as before. Values in `.env` must not be quoted.
+
+Restoring a nightly dump over the live database on k3s (take a fresh backup first; this replaces all data):
+
+```bash
+kubectl -n anti-fraud create job --from=cronjob/db-backup before-restore
+kubectl -n anti-fraud scale deploy/backend --replicas=0
+kubectl -n anti-fraud exec db-0 -c postgres -- sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+kubectl -n anti-fraud exec db-0 -c postgres -- sh -c 'gunzip -c /backups/<file> | psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Then deploy again from your computer; the setup hook restores the roles' rights and starts the backend.
+
+The EBS snapshot policy keeps working: k3s keeps its volumes, including the database and `db-backups`, under `/var/lib/rancher/k3s/storage` on the same disk.
+
 ## Security notes
 
 - PostgreSQL, the backend port and the console port listen only inside the server; only the gateway is public.

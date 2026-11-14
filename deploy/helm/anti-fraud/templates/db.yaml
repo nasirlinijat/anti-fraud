@@ -29,6 +29,11 @@ spec:
     metadata:
       labels:
         {{- include "antifraud.labels" (dict "component" "db" "root" .) | nindent 8 }}
+        {{- with include "antifraud.datadogLabels" (dict "service" "anti-fraud-db" "root" .) }}{{ . | nindent 8 }}{{- end }}
+      {{- with include "antifraud.datadogLogs" (dict "container" "postgres" "source" "postgresql" "service" "anti-fraud-db" "root" .) }}
+      annotations:
+        {{- . | trim | nindent 8 }}
+      {{- end }}
     spec:
       {{- with .Values.images.pullSecrets }}
       imagePullSecrets:
@@ -64,6 +69,17 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql
+            {{- if .Values.backup.enabled }}
+            - name: backups
+              mountPath: /backups
+              readOnly: true
+            {{- end }}
+      {{- if .Values.backup.enabled }}
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: db-backups
+      {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
