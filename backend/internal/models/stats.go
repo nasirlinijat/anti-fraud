@@ -80,3 +80,19 @@ type DecisionSeries struct {
 	BucketSeconds int64            `json:"bucket_seconds"`
 	Buckets       []DecisionBucket `json:"buckets"`
 }
+
+type DecisionExport struct {
+	DecidedAt      time.Time
+	TransactionID  string
+	PlayerID       string
+	AmountMinor    int64
+	Outcome        string
+	RuleScore      int
+	FiredRules     string
+	ModelScore     *float64
+	ModelVersion   *string
+	RulesetVersion int
+	Review         string
+	ReviewedBy     *string
+	ReviewedAt     *time.Time
+}

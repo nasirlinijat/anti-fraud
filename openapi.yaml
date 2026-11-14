@@ -961,6 +961,79 @@ paths:
         "503":
           $ref: "#/components/responses/DatabaseUnavailable"
 
+  /stats/export:
+    get:
+      tags: [Stats]
+      operationId: exportDecisions
+      summary: Download the decisions of a period as CSV
+      description: |
+        Streams the decisions of the period as a CSV file, newest first, for
+        reports and offline analysis. The file starts with a UTF-8 byte order
+        mark so spreadsheet programs read it as UTF-8. Text cells that start
+        with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'`,
+        so a spreadsheet does not run them as formulas.
+
+        Columns: `decided_at`, `transaction_id`, `player_id`, `amount_usd`,
+        `outcome`, `rule_score`, `fired_rules` (rule names separated by `;`),
+        `model_score`, `model_version`, `ruleset_version`, `review` (`open`,
+        `approved`, `rejected`, or empty when the purchase was not reviewed),
+        `reviewed_by`, `reviewed_at`.
+
+        A file holds at most 50,000 decisions. `X-Export-Truncated` is `true`
+        when the period has more; choose a shorter period for the rest.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: Which decisions to export. The default is `24h`.
+          schema:
+            type: string
+            enum: ["15m", "1h", "24h", "7d", "all"]
+            default: "24h"
+      responses:
+        "200":
+          description: The CSV file.
+          headers:
+            Content-Disposition:
+              description: The file name, for example `decisions-24h-20261114T1305Z.csv`.
+              schema:
+                type: string
+            X-Export-Rows:
+              description: How many decisions the file holds.
+              schema:
+                type: integer
+            X-Export-Truncated:
+              description: "`true` when the period has more decisions than the file holds."
+              schema:
+                type: boolean
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                decided_at,transaction_id,player_id,amount_usd,outcome,rule_score,fired_rules,model_score,model_version,ruleset_version,review,reviewed_by,reviewed_at
+                2026-11-14T13:04:00Z,order-10042,player-381,19.99,review,50,high_amount,0.6200,lgbm-game-v9,3,approved,reviewer-one,2026-11-14T13:10:00Z
+        "400":
+          description: The period is not one of the allowed values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "500":
+          description: The decisions could not be counted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
+
   /stats/pipeline/recent:
     get:
       tags: [Stats]

@@ -29,6 +29,8 @@ type Store interface {
 	Summary(ctx context.Context, window models.StatsWindow, maxRules int) (models.StatsSummary, error)
 	RecentPipeline(ctx context.Context, after int64, limit int) (models.RecentPipeline, error)
 	LatestDecisionID(ctx context.Context) (int64, error)
+	CountDecisions(ctx context.Context, window models.StatsWindow) (int64, error)
+	ExportDecisions(ctx context.Context, window models.StatsWindow, limit int, emit func(models.DecisionExport) error) error
 }
 
 type Service struct {
@@ -67,4 +69,14 @@ func (s *Service) Recent(ctx context.Context, after *int64) (models.RecentPipeli
 	recent, err := s.store.RecentPipeline(ctx, *after, maxRecentDecisions)
 	recent.After = after
 	return recent, err
+}
+
+const ExportLimit = 50_000
+
+func (s *Service) CountDecisions(ctx context.Context, window models.StatsWindow) (int64, error) {
+	return s.store.CountDecisions(ctx, window)
+}
+
+func (s *Service) Export(ctx context.Context, window models.StatsWindow, emit func(models.DecisionExport) error) error {
+	return s.store.ExportDecisions(ctx, window, ExportLimit, emit)
 }

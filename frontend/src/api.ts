@@ -64,6 +64,24 @@ export function getStats(period: Period, signal?: AbortSignal): Promise<Stats> {
   return request(`/stats?period=${period}`, { signal })
 }
 
+export interface DecisionsExport {
+  file: Blob
+  filename: string
+  rows: number
+  truncated: boolean
+}
+
+export function exportDecisions(period: Period): Promise<DecisionsExport> {
+  return request(`/stats/export?period=${period}`, {
+    read: async response => ({
+      file: await response.blob(),
+      filename: /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? `decisions-${period}.csv`,
+      rows: Number(response.headers.get('X-Export-Rows') ?? 0),
+      truncated: response.headers.get('X-Export-Truncated') === 'true',
+    }),
+  })
+}
+
 export interface RecentPipeline {
   after: number | null
   next_after: number | null

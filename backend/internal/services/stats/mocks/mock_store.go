@@ -41,6 +41,35 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 	return m.recorder
 }
 
+// CountDecisions mocks base method.
+func (m *MockStore) CountDecisions(ctx context.Context, window models.StatsWindow) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountDecisions", ctx, window)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountDecisions indicates an expected call of CountDecisions.
+func (mr *MockStoreMockRecorder) CountDecisions(ctx, window any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountDecisions", reflect.TypeOf((*MockStore)(nil).CountDecisions), ctx, window)
+}
+
+// ExportDecisions mocks base method.
+func (m *MockStore) ExportDecisions(ctx context.Context, window models.StatsWindow, limit int, emit func(models.DecisionExport) error) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExportDecisions", ctx, window, limit, emit)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ExportDecisions indicates an expected call of ExportDecisions.
+func (mr *MockStoreMockRecorder) ExportDecisions(ctx, window, limit, emit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExportDecisions", reflect.TypeOf((*MockStore)(nil).ExportDecisions), ctx, window, limit, emit)
+}
+
 // LatestDecisionID mocks base method.
 func (m *MockStore) LatestDecisionID(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()

@@ -649,3 +649,17 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
 @media (max-width: 23rem) {
   .headline-metrics { grid-template-columns: minmax(0, 1fr); }
 }
+
+.dashboard-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.export-decisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}

@@ -493,6 +493,35 @@ func (m *MockStatsService) EXPECT() *MockStatsServiceMockRecorder {
 	return m.recorder
 }
 
+// CountDecisions mocks base method.
+func (m *MockStatsService) CountDecisions(ctx context.Context, window models.StatsWindow) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountDecisions", ctx, window)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountDecisions indicates an expected call of CountDecisions.
+func (mr *MockStatsServiceMockRecorder) CountDecisions(ctx, window any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountDecisions", reflect.TypeOf((*MockStatsService)(nil).CountDecisions), ctx, window)
+}
+
+// Export mocks base method.
+func (m *MockStatsService) Export(ctx context.Context, window models.StatsWindow, emit func(models.DecisionExport) error) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Export", ctx, window, emit)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Export indicates an expected call of Export.
+func (mr *MockStatsServiceMockRecorder) Export(ctx, window, emit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Export", reflect.TypeOf((*MockStatsService)(nil).Export), ctx, window, emit)
+}
+
 // Recent mocks base method.
 func (m *MockStatsService) Recent(ctx context.Context, after *int64) (models.RecentPipeline, error) {
 	m.ctrl.T.Helper()
