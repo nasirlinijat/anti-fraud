@@ -275,16 +275,25 @@ The same stack can run on [k3s](https://k3s.io), a small Kubernetes, with the He
 | Backups | cron runs `backup.sh` | CronJob `db-backup`, same file format, keeps 7, on the volume `db-backups` |
 | Datadog | agent container | official Datadog chart with [`helm/datadog-values.yaml`](helm/datadog-values.yaml); same host name, checks, dashboard and monitors |
 
-Server size: k3s, the Datadog agent and the app need about 3 GiB, so the server moves from `t3.small` (2 GiB) to `t3.medium` (4 GiB), about 17 USD a month more.
+Server size: the server stays a `t3.small` (2 GiB), because the AWS Free plan allows no larger type except the much more expensive `c7i-flex.large`. With Compose the server uses about 0.85 GiB; k3s adds about 0.5 GiB, so step 1 adds 2 GiB of swap as a safety margin and `values-production.yaml` keeps the memory requests small. The Datadog monitor "Anti-fraud server is low on memory" warns before it gets tight.
 
-### 1. Prepare (no downtime except the resize)
+### 1. Prepare (no downtime)
 
-1. **Resize**, in the AWS console: EC2, select the instance, **Instance state, Stop**. When it is stopped, **Actions, Instance settings, Change instance type**, choose `t3.medium`, then **Instance state, Start**. The Elastic IP and the disk stay; Compose starts again by itself. Raise the AWS budget alert from 20 to 40 USD.
-2. **Install k3s and Helm** on the server. Traefik is turned off because the chart's own Caddy answers on ports 80 and 443:
+1. **Add swap** (2 GiB, kept after reboots):
 
    ```bash
    ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP
-   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC="--disable traefik" sh -
+   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf && sudo sysctl -p /etc/sysctl.d/99-swappiness.conf
+   free -m
+   ```
+
+2. **Install k3s and Helm** on the server. Traefik is turned off because the chart's own Caddy answers on ports 80 and 443, and metrics-server because nothing uses it and it costs memory:
+
+   ```bash
+   ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP
+   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC="--disable traefik --disable metrics-server" sh -
    mkdir -p ~/.kube && sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config && sudo chown ubuntu: ~/.kube/config && chmod 600 ~/.kube/config
    curl -fsSL https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz | tar -xz linux-amd64/helm && sudo install linux-amd64/helm /usr/local/bin/helm && rm -r linux-amd64
    kubectl get nodes

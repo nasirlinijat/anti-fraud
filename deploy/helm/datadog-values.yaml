@@ -51,6 +51,6 @@ agents:
       resources:
         requests:
           cpu: 100m
-          memory: 256Mi
+          memory: 192Mi
         limits:
-          memory: 512Mi
+          memory: 384Mi
