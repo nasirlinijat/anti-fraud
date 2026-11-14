@@ -65,6 +65,7 @@ test('local console proxy checks origin and adds the service key only to score',
   assert.equal(await call(port, '/model', 'GET', { authorization }), 204)
   assert.equal(await call(port, '/model', 'GET', { origin: 'https://example.invalid' }), 403)
   assert.equal(await call(port, '/reviews?sort=model_score', 'GET', { authorization }), 204)
+  assert.equal(await call(port, '/purchases/search?q=player-1', 'GET', { authorization }), 204)
   assert.equal(await call(port, '/reviews/7/claim', 'POST', { origin, authorization }), 204)
   assert.equal(await call(port, '/rulesets', 'GET', { origin }), 204)
   assert.equal(await call(port, '/blocklist/1', 'DELETE', { origin, authorization }), 204)
@@ -85,6 +86,7 @@ test('local console proxy checks origin and adds the service key only to score',
     ['/auth/me', undefined, authorization],
     ['/model', undefined, authorization],
     ['/reviews?sort=model_score', undefined, authorization],
+    ['/purchases/search?q=player-1', undefined, authorization],
     ['/reviews/7/claim', undefined, authorization],
     ['/rulesets', undefined, undefined],
     ['/blocklist/1', undefined, authorization],

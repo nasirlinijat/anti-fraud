@@ -2032,6 +2032,97 @@ paths:
         "503":
           $ref: "#/components/responses/ReviewAccessUnavailable"
 
+  /purchases/search:
+    get:
+      tags: [Reviews]
+      operationId: searchPurchases
+      summary: Find purchases by transaction ID, player ID or card token
+      description: >-
+        Returns up to 20 purchases whose transaction ID, player ID or card
+        token equals the query exactly, newest first, with their outcome and
+        review state. Reviewers and admins can search.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: The exact value to look for; spaces around it are ignored.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        "200":
+          description: The matching purchases, possibly none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 20
+                    items:
+                      $ref: "#/components/schemas/PurchaseMatch"
+        "400":
+          description: The query is empty or longer than 200 characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
+
+  /purchases/{purchase_id}:
+    get:
+      tags: [Reviews]
+      operationId: getPurchase
+      summary: The evidence and decision of any purchase
+      description: >-
+        Returns the same evidence as a review case for a purchase with any
+        outcome, with its outcome and, for a resolved review, the analyst's
+        decision.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: purchase_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]*$"
+      responses:
+        "200":
+          description: The purchase.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseDetails"
+        "400":
+          description: The purchase ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "404":
+          description: No purchase has this ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
+
   /reviews/{purchase_id}/resolved:
     get:
       tags: [Reviews]
@@ -2884,6 +2975,59 @@ components:
           format: double
           description: How much the feature raised (positive) or lowered (negative) the score, in log-odds.
           example: 0.81
+
+    PurchaseMatch:
+      type: object
+      required: [purchase_id, transaction_id, player_id, amount_minor, event_time, outcome, review, matched_by]
+      properties:
+        purchase_id:
+          type: string
+          example: "55"
+        transaction_id:
+          type: string
+        player_id:
+          type: string
+        amount_minor:
+          type: string
+          example: "72609"
+        event_time:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum: [allow, review, block]
+        review:
+          type: string
+          nullable: true
+          enum: [open, approved, rejected, null]
+          description: The review state, or null when the purchase was not sent to review.
+        matched_by:
+          type: string
+          enum: [transaction, player, card]
+
+    PurchaseDetails:
+      allOf:
+        - $ref: "#/components/schemas/ReviewCase"
+        - type: object
+          required: [outcome, resolution]
+          properties:
+            outcome:
+              type: string
+              enum: [allow, review, block]
+            resolution:
+              type: object
+              nullable: true
+              description: The analyst's decision, or null when the purchase was not reviewed or the review is still open.
+              required: [decision, analyst_id, resolved_at]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                analyst_id:
+                  type: string
+                resolved_at:
+                  type: string
+                  format: date-time
 
     ResolvedReviewCase:
       allOf:

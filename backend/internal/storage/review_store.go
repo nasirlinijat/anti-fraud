@@ -383,12 +383,25 @@ func (s *ReviewStore) ResolvedCase(ctx context.Context, purchaseID int64) (model
 }
 
 func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *models.CaseResolution) (models.CaseItem, error) {
-	c := models.CaseItem{Resolution: resolution}
-	var ipIntel, modelInputs []byte
-	dest := []any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel, &modelInputs}
+	var extra []any
 	if resolution != nil {
-		dest = append(dest, &resolution.Decision, &resolution.AnalystID, &resolution.ResolvedAt)
+		extra = []any{&resolution.Decision, &resolution.AnalystID, &resolution.ResolvedAt}
 	}
+	c, err := s.readCaseWith(ctx, row, extra...)
+	if err != nil {
+		return models.CaseItem{}, err
+	}
+	if resolution != nil {
+		resolution.ResolvedAt = resolution.ResolvedAt.UTC()
+		c.Resolution = resolution
+	}
+	return c, nil
+}
+
+func (s *ReviewStore) readCaseWith(ctx context.Context, row pgx.Row, extra ...any) (models.CaseItem, error) {
+	var c models.CaseItem
+	var ipIntel, modelInputs []byte
+	dest := append([]any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel, &modelInputs}, extra...)
 	item, err := scanQueueItem(row, dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.CaseItem{}, models.ErrReviewNotFound
@@ -397,9 +410,6 @@ func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *mod
 		return models.CaseItem{}, fmt.Errorf("get review case: %w", err)
 	}
 	c.QueueItem = item
-	if resolution != nil {
-		resolution.ResolvedAt = resolution.ResolvedAt.UTC()
-	}
 	if ipIntel != nil {
 		if err := json.Unmarshal(ipIntel, &c.IPIntel); err != nil {
 			return models.CaseItem{}, fmt.Errorf("decode IP intelligence of case %d: %w", item.PurchaseID, err)

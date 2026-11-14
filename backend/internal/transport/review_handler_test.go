@@ -70,6 +70,14 @@ func (fakeReviewReads) QueuePage(context.Context, int, models.QueueOrder, int64,
 	panic("unexpected numbered queue read")
 }
 
+func (fakeReviewReads) PurchaseCase(context.Context, int64) (models.PurchaseCase, error) {
+	panic("unexpected purchase read")
+}
+
+func (fakeReviewReads) SearchPurchases(context.Context, string, int) ([]models.PurchaseMatch, error) {
+	panic("unexpected purchase search")
+}
+
 func (fakeReviewReads) ResolvedCase(context.Context, int64) (models.CaseItem, error) {
 	panic("unexpected resolved case read")
 }

@@ -296,6 +296,31 @@ export interface ReviewCase extends Review {
   model_reasons?: ModelReason[]
 }
 
+export interface PurchaseMatch {
+  purchase_id: string
+  transaction_id: string
+  player_id: string
+  amount_minor: string
+  event_time: string
+  outcome: Outcome
+  review: 'open' | 'approved' | 'rejected' | null
+  matched_by: 'transaction' | 'player' | 'card'
+}
+
+export async function searchPurchases(query: string, signal?: AbortSignal): Promise<PurchaseMatch[]> {
+  const result = await request<{ items: PurchaseMatch[] }>(`/purchases/search?q=${encodeURIComponent(query)}`, { signal })
+  return result.items
+}
+
+export interface PurchaseDetails extends ReviewCase {
+  outcome: Outcome
+  resolution: { decision: Decision; analyst_id: string; resolved_at: string } | null
+}
+
+export function getPurchase(purchaseId: string, signal?: AbortSignal): Promise<PurchaseDetails> {
+  return request(`/purchases/${encodeURIComponent(purchaseId)}`, { signal })
+}
+
 export interface ResolvedReviewCase extends ReviewCase {
   resolution: { decision: Decision; analyst_id: string; resolved_at: string }
 }

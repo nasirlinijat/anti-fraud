@@ -358,3 +358,60 @@
 @media (forced-colors: active) {
   .console-navigation a[aria-current='page'] { outline: 2px solid Highlight; }
 }
+
+.purchase-search {
+  position: relative;
+  flex: 1 1 14rem;
+  max-inline-size: 22rem;
+  margin: 0;
+}
+
+.purchase-search input { inline-size: 100%; }
+
+.purchase-search-results {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(100% + var(--space-xs));
+  z-index: 10;
+  max-block-size: 60vh;
+  overflow: auto;
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.purchase-search-results p { margin: var(--space-xs); }
+
+.purchase-search-results ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.purchase-search-results li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: 6px;
+}
+
+.purchase-search-results li:hover { background: var(--surface-subtle); }
+
+.purchase-search-results a {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.purchase-search-results a:hover .purchase-search-title,
+.purchase-search-results a:focus-visible .purchase-search-title { text-decoration: underline; }
+
+.purchase-search-title { font-weight: 600; overflow-wrap: anywhere; }

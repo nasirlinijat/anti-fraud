@@ -131,6 +131,21 @@ func (mr *MockStoreMockRecorder) NetworkPurchases(ctx, purchaseID, anchor, value
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NetworkPurchases", reflect.TypeOf((*MockStore)(nil).NetworkPurchases), ctx, purchaseID, anchor, value)
 }
 
+// PurchaseCase mocks base method.
+func (m *MockStore) PurchaseCase(ctx context.Context, purchaseID int64) (models.PurchaseCase, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PurchaseCase", ctx, purchaseID)
+	ret0, _ := ret[0].(models.PurchaseCase)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PurchaseCase indicates an expected call of PurchaseCase.
+func (mr *MockStoreMockRecorder) PurchaseCase(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PurchaseCase", reflect.TypeOf((*MockStore)(nil).PurchaseCase), ctx, purchaseID)
+}
+
 // Queue mocks base method.
 func (m *MockStore) Queue(ctx context.Context, limit int, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) ([]models.QueueItem, error) {
 	m.ctrl.T.Helper()
@@ -204,4 +219,19 @@ func (m *MockStore) ResolvedCase(ctx context.Context, purchaseID int64) (models.
 func (mr *MockStoreMockRecorder) ResolvedCase(ctx, purchaseID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvedCase", reflect.TypeOf((*MockStore)(nil).ResolvedCase), ctx, purchaseID)
+}
+
+// SearchPurchases mocks base method.
+func (m *MockStore) SearchPurchases(ctx context.Context, query string, limit int) ([]models.PurchaseMatch, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SearchPurchases", ctx, query, limit)
+	ret0, _ := ret[0].([]models.PurchaseMatch)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SearchPurchases indicates an expected call of SearchPurchases.
+func (mr *MockStoreMockRecorder) SearchPurchases(ctx, query, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchPurchases", reflect.TypeOf((*MockStore)(nil).SearchPurchases), ctx, query, limit)
 }

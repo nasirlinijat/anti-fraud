@@ -29,6 +29,8 @@ type ReviewService interface {
 	QueuePage(ctx context.Context, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	PurchaseCase(ctx context.Context, purchaseID int64) (models.PurchaseCase, error)
+	SearchPurchases(ctx context.Context, query string) ([]models.PurchaseMatch, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
@@ -63,6 +65,12 @@ func RegisterReviewRoutes(mux *http.ServeMux, h *ReviewHandler, access platform.
 	mux.HandleFunc("GET /reviews", access.Review(h.serveQueue))
 	mux.HandleFunc("GET /reviews/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveCase(w, r)
+	}))
+	mux.HandleFunc("GET /purchases/search", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.serveSearch(w, r)
+	}))
+	mux.HandleFunc("GET /purchases/{purchase_id}", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
+		h.servePurchase(w, r)
 	}))
 	mux.HandleFunc("GET /reviews/{purchase_id}/resolved", access.Review(func(w http.ResponseWriter, r *http.Request, _ platform.Actor) {
 		h.serveResolvedCase(w, r)
