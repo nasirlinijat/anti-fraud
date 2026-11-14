@@ -15,7 +15,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  backend:
+  backend-tests:
+    name: backend-tests (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, cpu]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -46,6 +51,8 @@ jobs:
           --health-retries 15
     env:
       TEST_DATABASE_URL: postgres://antifraud:antifraud@localhost:5432/antifraud?sslmode=disable
+      TEST_RUNTIME_DATABASE_URL: postgres://antifraud_api:ci-runtime-password@localhost:5432/antifraud?sslmode=disable
+      TEST_LABELS_DATABASE_URL: postgres://antifraud_labels:ci-labels-password@localhost:5432/antifraud?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v7
@@ -56,6 +63,7 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - name: Check formatting
+        if: matrix.shard == 'core'
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
@@ -65,6 +73,7 @@ jobs:
           fi
 
       - name: Vet
+        if: matrix.shard == 'core'
         run: go vet ./...
 
       - name: Migrate
@@ -82,42 +91,99 @@ jobs:
           postgres:18-alpine
           psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U antifraud -d antifraud -f /runtime-role.sql
 
-      - name: Test
-        env:
-          TEST_RUNTIME_DATABASE_URL: postgres://antifraud_api:ci-runtime-password@localhost:5432/antifraud?sslmode=disable
-          TEST_LABELS_DATABASE_URL: postgres://antifraud_labels:ci-labels-password@localhost:5432/antifraud?sslmode=disable
-        # Packages share one test database, so their tests run one package at a time.
-        run: go test -race -p 1 -coverprofile=coverage.out ./...
+      - name: Test CI coverage helper
+        if: matrix.shard == 'core'
+        working-directory: .
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
+      - name: Test assigned packages
+        working-directory: .
+        run: >-
+          python3 scripts/ci/backend_checks.py run --shard '${{ matrix.shard }}'
+          --output-dir '${{ runner.temp }}/backend-coverage/${{ matrix.shard }}'
+
+      - name: Verify modules
+        if: matrix.shard == 'core'
+        run: go mod verify
+
+      - name: Build
+        if: matrix.shard == 'core'
+        run: go build ./...
+
+      - name: Upload shard coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-${{ matrix.shard }}
+          path: ${{ runner.temp }}/backend-coverage/${{ matrix.shard }}/
+          if-no-files-found: error
+
+  backend-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: ""
+      TEST_RUNTIME_DATABASE_URL: ""
+      TEST_LABELS_DATABASE_URL: ""
+      TEST_REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Integration, concurrency and reset tests
+        run: go test -race -count=1 -p 1 -tags=integration ./test/...
+
+  backend:
+    name: backend
+    needs: [backend-tests, backend-integration]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-core
+          path: ${{ runner.temp }}/coverage-core
+      - uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-cpu
+          path: ${{ runner.temp }}/coverage-cpu
+      - name: Validate prerequisites and combine coverage
+        env:
+          BACKEND_NEEDS: ${{ toJSON(needs) }}
+        run: >-
+          python3 scripts/ci/backend_checks.py merge
+          --core '${{ runner.temp }}/coverage-core'
+          --cpu '${{ runner.temp }}/coverage-cpu'
+          --output-dir backend
+          --needs-json "$BACKEND_NEEDS"
       - name: Coverage
+        working-directory: backend
         run: |
-          grep -v "/mocks/" coverage.out > coverage.txt
           go tool cover -func=coverage.txt > coverage-by-function.txt
           go tool cover -html=coverage.txt -o coverage.html
           total="$(tail -1 coverage-by-function.txt | awk '{print $NF}')"
           echo "Backend unit test coverage: $total"
           echo "### Backend coverage: $total" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload coverage
         uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
+          if-no-files-found: error
           path: |
             backend/coverage.txt
             backend/coverage-by-function.txt
             backend/coverage.html
-
-      - name: Integration and concurrency tests
-        env:
-          TEST_DATABASE_URL: ""
-          TEST_REDIS_URL: ""
-        run: go test -race -p 1 -tags=integration ./test/...
-
-      - name: Verify modules
-        run: go mod verify
-
-      - name: Build
-        run: go build ./...
 
   secrets:
     runs-on: ubuntu-latest
@@ -156,8 +222,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: docker/setup-buildx-action@v4
       - name: Build the backend image
-        run: docker build -t anti-fraud-backend:ci backend
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          file: backend/Dockerfile
+          tags: anti-fraud-backend:ci
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=backend
 
       - name: Scan the image
         run: |
@@ -192,7 +269,7 @@ jobs:
         run: npm run build
 
       - name: Install browser
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
 
       - name: Browser checks
         run: npm run test:browser -- --project=chromium

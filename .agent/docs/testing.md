@@ -39,6 +39,21 @@ The concurrency suite also holds review changes uncommitted while competing requ
 
 `make test-integration` runs both folders one after the other (`go test -p 1 -tags=integration ./test/...`).
 
+## Authentication fixtures
+
+Transport session fixtures seed separate accounts in each test transaction using
+one immutable cost-12 hash of the fixture password. Each account still signs in
+through the real authentication service; account-creation requests and dedicated
+password, session, expiry, disabled-account and role tests retain their real paths.
+Only the hash is shared across tests, never accounts or session tokens.
+
+The tagged integration app creates and signs in its admin/reviewer lazily, then
+reuses that session within the app transaction. Cached sessions are never refreshed
+automatically after logout or account disable. Explicit reviewer sign-ins remain
+explicit. Single-review decisions still prepare their claim on every request.
+Fixture regressions cover one session per role, authorization, revocation and
+isolation after rollback. All database state is discarded with the transaction.
+
 ## Clean demo start
 
 Ask a teammate who did not write the change to start from a fresh checkout. With Docker already running and the README prerequisites installed, use a fresh Compose project with an empty volume. Start a timer before copying `.env.example`, follow the [quick start and demo seed instructions](../../README.md#quick-start), and stop the timer when an admin can sign in and see the populated dashboard and review queue. Record the elapsed time, whether it was under 10 minutes, and any corrections needed in the README.
@@ -84,3 +99,69 @@ The linked-review accessibility checks in `e2e/console.spec.ts` initialize light
 ## Saved decision status
 
 Decision-status service/transport tests cover state mapping, credentials, strict query parsing, limits and failures. PostgreSQL integration tests cover pending-to-approved/rejected transitions, identical score retries after resolution, and visibility before commit/after rollback using separate runtime connections. The lookup is included in queryplans, and the Helm smoke checks public routing and authentication.
+
+## Parallel backend CI and coverage
+
+CI runs two regular-test shards and the complete tagged suite independently.
+The `cpu` shard owns exactly `internal/lgbm` and `internal/simulator`; `core`
+receives every other package from unfiltered `go list ./...`, including packages
+without tests. Newly added packages automatically enter core. Both regular
+shards get private PostgreSQL/Redis services, all migrations and runtime/labels
+roles. Packages within a shard remain serial (`-p 1`). All test commands retain
+race detection and use `-count=1` so build caches cannot replace stateful tests.
+The tagged job runs all of `./test/...`, including reset tests, with database
+variables empty so Testcontainers owns its services.
+
+The existing `CI / backend` check is the final gate: failed, cancelled, skipped
+or missing prerequisites cannot pass it. Only the regular suites contribute to
+the existing `backend-coverage` report. Raw zero-hit statements are retained;
+only the existing `/mocks/` exclusion is applied to the final reports.
+Shard artifacts have unique names (`backend-coverage-core` and
+`backend-coverage-cpu`) and contain `coverage.out`, `tests.jsonl` and a versioned
+`manifest.json`. The manifest identifies the checkout, Go version, exact package
+assignment and profile checksum. Aggregation rejects incomplete/mismatched
+artifacts, non-atomic profiles, duplicate blocks or wrong package ownership.
+Download those artifacts by exact name; Docker build-record artifacts are not
+coverage inputs.
+
+Run the helper tests from the repository root:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+```
+
+For local equivalents, provision separate migrated PostgreSQL and Redis instances
+for each concurrent shard. Set TEST_DATABASE_URL, TEST_RUNTIME_DATABASE_URL,
+TEST_LABELS_DATABASE_URL and TEST_REDIS_URL for each process. From the root:
+
+```bash
+python3 scripts/ci/backend_checks.py run --shard core --output-dir /tmp/ci-core
+python3 scripts/ci/backend_checks.py run --shard cpu --output-dir /tmp/ci-cpu
+python3 scripts/ci/backend_checks.py merge --core /tmp/ci-core --cpu /tmp/ci-cpu --output-dir /tmp/ci-merged
+```
+
+The regular shard commands may run concurrently only with independent services.
+For the tagged job, from backend, unset all four TEST_ connection variables and
+run `go test -race -count=1 -p 1 -tags=integration ./test/...`.
+
+Before changing shard assignments, capture a reference from the same Go source,
+toolchain and platform with fresh equivalent services:
+`go test -json -race -count=1 -p 1 -covermode=atomic -coverprofile=/tmp/ci-reference.out ./...`.
+Compare it with the combined raw profile using:
+
+```bash
+python3 scripts/ci/backend_checks.py compare --reference /tmp/ci-reference.out --candidate /tmp/ci-merged/coverage.out
+```
+
+Block coordinates and statement totals must match exactly; positive hit counts
+may differ, but losing a covered block fails comparison. Investigate only affected
+packages with three fresh runs per topology if timing-dependent differences
+occur. Do not weaken the check with a percentage tolerance. A profile comparison
+is valid only for identical Go source, toolchain and platform; old profiles are
+not a baseline for newly added tests. Compare package/test inventories too.
+
+Go caches remain dependency/build caches. In Docker workflows, Images is the
+only GHA layer-cache writer. Image scanning and Helm restore component caches,
+load local single-platform images, and still execute every scan/smoke check.
+Cache misses perform complete builds. Browser installation uses Chromium's
+headless shell; the Chromium project, two CI workers and assertions are unchanged.

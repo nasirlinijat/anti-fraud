@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
@@ -116,7 +117,7 @@ func TestBlocklistCacheFallbackWhenRedisStopped(t *testing.T) {
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(cachedBlocklist)), access)
-	a := app{mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
+	a := app{fixtureSessions: make(map[string]models.Session), mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
 
 	// Add entry
 	addBody := `{"type":"card","value":"card-redis-down","reason":"test fallback"}`

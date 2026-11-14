@@ -94,12 +94,58 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Build images
-        run: |
-          docker build -t "ghcr.io/nasirlinijat/anti-fraud-backend:$TAG" backend
-          docker build -t "ghcr.io/nasirlinijat/anti-fraud-dbsetup:$TAG" -f backend/Dockerfile.dbsetup backend
-          docker build -t "ghcr.io/nasirlinijat/anti-fraud-frontend:$TAG" frontend
-          docker build -t "ghcr.io/nasirlinijat/anti-fraud-edge:$TAG" -f deploy/Dockerfile.edge .
+      - uses: docker/setup-buildx-action@v4
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          file: backend/Dockerfile
+          tags: ghcr.io/nasirlinijat/anti-fraud-backend:${{ env.TAG }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=backend
+
+      - name: Build dbsetup image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          file: backend/Dockerfile.dbsetup
+          tags: ghcr.io/nasirlinijat/anti-fraud-dbsetup:${{ env.TAG }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=dbsetup
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          tags: ghcr.io/nasirlinijat/anti-fraud-frontend:${{ env.TAG }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=frontend
+
+      - name: Build edge image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile.edge
+          tags: ghcr.io/nasirlinijat/anti-fraud-edge:${{ env.TAG }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=edge
 
       - uses: helm/kind-action@v1
         with:
