@@ -1,0 +1,90 @@
+{{- if .Values.backup.enabled }}
+{{- $b := .Values.backup -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-backups
+  labels:
+    {{- include "antifraud.labels" (dict "component" "backup" "root" .) | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $b.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $b.storage }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  labels:
+    {{- include "antifraud.labels" (dict "component" "backup" "root" .) | nindent 4 }}
+spec:
+  schedule: {{ $b.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "antifraud.labels" (dict "component" "backup" "root" .) | nindent 12 }}
+        spec:
+          {{- with .Values.images.pullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+          containers:
+            - name: backup
+              image: {{ include "antifraud.image" (dict "component" "postgres" "root" .) }}
+              imagePullPolicy: {{ .Values.images.pullPolicy }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  set -o pipefail
+                  file="/backups/antifraud-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+                  pg_dump | gzip > "$file.partial"
+                  mv "$file.partial" "$file"
+                  ls -1t /backups/antifraud-*.sql.gz | tail -n +"$((KEEP + 1))" | xargs -r rm --
+                  ls -l /backups
+              env:
+                - name: KEEP
+                  value: {{ $b.keep | quote }}
+                - name: PGHOST
+                  value: db
+                - name: PGUSER
+                  value: {{ .Values.postgres.user | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.postgres.database | quote }}
+                - name: PGPASSWORD
+                  {{- include "antifraud.secretRef" (dict "key" "POSTGRES_PASSWORD" "root" .) | nindent 18 }}
+              resources:
+                {{- toYaml $b.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: db-backups
+{{- end }}

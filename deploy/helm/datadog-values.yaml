@@ -1,0 +1,56 @@
+datadog:
+  apiKeyExistingSecret: datadog-secret
+  site: datadoghq.eu
+  clusterName: anti-fraud
+  tags:
+    - project:anti-fraud
+  operator:
+    enabled: false
+  containerExclude: "kube_namespace:.*"
+  containerInclude: "kube_namespace:anti-fraud"
+  kubelet:
+    tlsVerify: false
+  logs:
+    enabled: true
+    containerCollectAll: true
+  discovery:
+    enabled: false
+  processAgent:
+    processCollection: true
+  dogstatsd:
+    useHostPort: true
+    nonLocalTraffic: true
+  otlp:
+    receiver:
+      protocols:
+        grpc:
+          enabled: true
+          endpoint: 0.0.0.0:4317
+          useHostPort: true
+  env:
+    - name: DD_HOSTNAME
+      value: anti-fraud-prod
+    - name: DD_ENV
+      value: production
+    - name: POSTGRES_USER
+      value: antifraud
+    - name: POSTGRES_DB
+      value: antifraud
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: anti-fraud-secrets
+          key: POSTGRES_PASSWORD
+
+clusterAgent:
+  enabled: false
+
+agents:
+  containers:
+    agent:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi

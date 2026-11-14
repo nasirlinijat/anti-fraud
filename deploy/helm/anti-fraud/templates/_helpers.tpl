@@ -31,5 +31,21 @@ valueFrom:
 {{- end }}
 
 {{- define "antifraud.checksum" -}}
-checksum/secrets: {{ include (print .Template.BasePath "/secret.yaml") . | sha256sum }}
+checksum/secrets: {{ printf "%s%s" (include (print .Template.BasePath "/secret.yaml") .) .Values.secretsChecksum | sha256sum }}
+{{- end }}
+
+{{- define "antifraud.datadogLabels" -}}
+{{- if .root.Values.datadog.enabled }}
+tags.datadoghq.com/env: {{ .root.Values.datadog.env | quote }}
+tags.datadoghq.com/service: {{ .service | quote }}
+{{- with .version }}
+tags.datadoghq.com/version: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "antifraud.datadogLogs" -}}
+{{- if .root.Values.datadog.enabled }}
+ad.datadoghq.com/{{ .container }}.logs: {{ printf "[{\"source\": %q, \"service\": %q}]" .source .service | squote }}
+{{- end }}
 {{- end }}
