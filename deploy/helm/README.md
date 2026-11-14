@@ -123,7 +123,7 @@ On failure the job prints the pods, events and the last 100 log lines of every c
 
 ## Try it on your computer
 
-With Docker Desktop's Kubernetes turned on and Helm installed, build the images with the `ci` tag, load them into the cluster node and install with the CI values:
+With Docker Desktop's Kubernetes turned on and Helm installed, build the images with the `ci` tag, load them into the cluster node and install with the CI values. PostgreSQL and Redis are pulled by the cluster itself:
 
 ```bash
 docker build -t ghcr.io/nasirlinijat/anti-fraud-backend:ci backend
@@ -131,7 +131,6 @@ docker build -t ghcr.io/nasirlinijat/anti-fraud-dbsetup:ci -f backend/Dockerfile
 docker build -t ghcr.io/nasirlinijat/anti-fraud-frontend:ci frontend
 docker build -t ghcr.io/nasirlinijat/anti-fraud-edge:ci -f deploy/Dockerfile.edge deploy
 for i in backend dbsetup frontend edge; do docker save ghcr.io/nasirlinijat/anti-fraud-$i:ci | docker exec -i desktop-control-plane ctr -n k8s.io images import -; done
-for i in postgres:18-alpine redis:8-alpine; do docker pull $i && docker save --platform linux/amd64 $i | docker exec -i desktop-control-plane ctr -n k8s.io images import --platform linux/amd64 -; done
 helm install af deploy/helm/anti-fraud -f deploy/helm/ci-values.yaml --set images.tag=ci -n af-test --create-namespace --wait
 kubectl -n af-test port-forward svc/edge 8088:80
 ```

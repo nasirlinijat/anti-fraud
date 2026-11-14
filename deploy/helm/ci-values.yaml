@@ -1,5 +1,5 @@
 images:
-  pullPolicy: Never
+  pullPolicy: IfNotPresent
 
 secrets:
   apiKey: ci-service-key-0123456789abcdef

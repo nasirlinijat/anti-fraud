@@ -89,8 +89,6 @@ jobs:
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-dbsetup:$TAG" -f backend/Dockerfile.dbsetup backend
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-frontend:$TAG" frontend
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-edge:$TAG" -f deploy/Dockerfile.edge deploy
-          docker pull postgres:18-alpine
-          docker pull redis:8-alpine
 
       - uses: helm/kind-action@v1
         with:
@@ -102,7 +100,6 @@ jobs:
           for image in backend dbsetup frontend edge; do
             kind load docker-image --name anti-fraud "ghcr.io/nasirlinijat/anti-fraud-$image:$TAG"
           done
-          kind load docker-image --name anti-fraud postgres:18-alpine redis:8-alpine
 
       - name: Install
         run: |
