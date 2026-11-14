@@ -739,3 +739,13 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
 }
 
 .velocity-context { color: var(--muted); }
+
+.simulation-answers .button-row {
+  margin-block: var(--space-md);
+}
+
+.simulation-answers label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}

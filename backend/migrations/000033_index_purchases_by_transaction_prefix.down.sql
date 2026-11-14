@@ -1,0 +1,1 @@
+DROP INDEX purchases_transaction_prefix;

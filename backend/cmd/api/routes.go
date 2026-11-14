@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/labels"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/metrics"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
@@ -84,6 +85,7 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 	cache, _ := blocklistStorage.(simulation.ResetCache)
 	manager := newSimulationManager(cfg, pool, evaluation, cache)
 	transport.RegisterSimulationRoutes(mux, transport.NewSimulationHandler(manager), cfg.SimulationEnabled, access)
+	labels.RegisterSimulationAnswerRoutes(mux, labels.NewSimulationAnswers(evaluation), cfg.SimulationEnabled, access)
 
 	return manager, closeAll
 }
