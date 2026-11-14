@@ -9,12 +9,12 @@ import (
 func TestResetClientUsesCredentialsAndPropagatesStatuses(t *testing.T) {
 	for _, status := range []int{204, 401, 404, 409, 503} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != "POST" || r.URL.Path != "/simulations/reset" || r.Header.Get("X-API-Key") != "operator" {
+			if r.Method != "POST" || r.URL.Path != "/simulations/reset" || r.Header.Get("Authorization") != "Bearer operator" {
 				t.Error("wrong request")
 			}
 			w.WriteHeader(status)
 		}))
-		err := Reset(t.Context(), Config{BaseURL: server.URL, OperatorKey: "operator"})
+		err := Reset(t.Context(), Config{BaseURL: server.URL, SessionToken: "operator"})
 		server.Close()
 		if (err == nil) != (status == 204) {
 			t.Fatalf("status %d: %v", status, err)

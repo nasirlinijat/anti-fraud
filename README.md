@@ -4,7 +4,7 @@ A real-time fraud scoring and review console for in-game purchases. Each purchas
 
 ## Quick start
 
-You need Docker with the Compose plugin, GNU Make, and Go 1.26.11 or newer. The demo setup also uses OpenSSL to generate local keys. Start Docker before running these commands from the repository root.
+You need Docker with the Compose plugin, GNU Make, and Go 1.26.11 or newer. Start Docker before running these commands from the repository root.
 
 ```bash
 cp .env.example .env
@@ -21,17 +21,17 @@ Open the console at http://127.0.0.1:3000 and sign in. On **Tester**, submit the
 
 ### Populate the demo
 
-To enable seeding, set the following variables in your shell and apply them to the running stack. The generated analyst and operator keys are for this local session.
+Enable simulation in the running local stack, then obtain an admin session from `POST /auth/login`. Export its token as `RESET_SESSION_TOKEN` before seeding; keep the token out of shell history and logs.
 
 ```bash
 export SIMULATION_ENABLED=true
-export SEED_ANALYST_KEY="$(openssl rand -hex 32)"
-export RESET_OPERATOR_KEY="$(openssl rand -hex 32)"
-export REVIEW_ANALYST_KEYS="$(printf '[{"analyst_id":"demo-seed","key":"%s"}]' "$SEED_ANALYST_KEY")"
-export OPERATOR_API_KEYS="$(printf '[{"operator_id":"demo-seed","key":"%s"}]' "$RESET_OPERATOR_KEY")"
 docker compose up -d --wait
+read -rs RESET_SESSION_TOKEN
+export RESET_SESSION_TOKEN
 make seed
 ```
+
+The token lasts 12 hours. Seeding verifies admin and service access before resetting data, then claims every review it decides.
 
 `make seed` clears demonstration data in the running local stack, including purchases, reviews, blocklist entries, and simulation runs. Pause other ingestion and review work before running it. Console accounts and ruleset versions are retained. It then scores seven days of traffic with seed 42 and resolves all but the newest 10 reviews, if that many are available. Use **Dashboard → All time** for totals and **Review queue** for the remaining purchases. Run `make seed` again with the same model and ruleset to reproduce the outcome counts, blocked value, top rules, model effects, and queue size. Scoring latency and decision timestamps are measured on each run.
 

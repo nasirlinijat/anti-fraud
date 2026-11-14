@@ -46,7 +46,7 @@ kubectl get namespace "$ns" > /dev/null 2>&1 || kubectl create namespace "$ns"
 secret_file="$(mktemp)"
 trap 'rm -f "$secret_file"' EXIT
 chmod 600 "$secret_file"
-for name in API_KEY POSTGRES_PASSWORD RUNTIME_DB_PASSWORD LABELS_DB_PASSWORD REVIEW_ANALYST_KEYS OPERATOR_API_KEYS CHARGEBACK_WEBHOOK_SECRET; do
+for name in API_KEY POSTGRES_PASSWORD RUNTIME_DB_PASSWORD LABELS_DB_PASSWORD CHARGEBACK_WEBHOOK_SECRET; do
 	if [ -n "${!name+x}" ]; then
 		printf '%s=%s
 ' "$name" "${!name}"

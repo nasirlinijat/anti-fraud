@@ -24,14 +24,14 @@ func TestSimulationResetResponses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mux, service := simulationMux(t)
 			service.EXPECT().Reset(gomock.Any(), "op-1").Return(tc.err)
-			wantResponse(t, send(mux, "POST", "/simulations/reset", mockOperatorKey, ""), tc.status)
+			wantResponse(t, send(mux, "POST", "/simulations/reset", mockAdminToken, ""), tc.status)
 		})
 	}
 }
 
 func TestSimulationResetAccess(t *testing.T) {
 	mux, _ := simulationMux(t)
-	for _, key := range []string{"", mockServiceKey, "wrong"} {
+	for _, key := range []string{"", "unknown", "wrong"} {
 		wantResponse(t, send(mux, "POST", "/simulations/reset", key, ""), 401)
 	}
 	disabled := http.NewServeMux()

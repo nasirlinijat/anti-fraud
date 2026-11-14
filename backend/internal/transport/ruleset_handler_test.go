@@ -22,7 +22,7 @@ import (
 
 func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.Header.Set(platform.APIKeyHeader, key)
+	setTestCredential(req, key)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	return w
@@ -30,7 +30,7 @@ func rulesetRequest(mux *http.ServeMux, method, path, body, key string) *httptes
 
 func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{Sessions: consoleTestSessions})
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/rulesets"},
 		{"GET", "/rulesets/active"},
@@ -51,7 +51,7 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 		"review_threshold": 50, "block_threshold": 40,
 		"note": "`+strings.Repeat("n", 501)+`",
 		"rules": {"high_amount": {"enabled": true, "weight": -1}, "unknown": {}}
-	}`, operatorTestKey)
+	}`, adminTestToken)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -71,7 +71,7 @@ func TestRulesetRoutesRejectInvalidRequests(t *testing.T) {
 			"high_amount": {"enabled": true, "weight": 2147483647, "limit": 1000},
 			"country_mismatch": {"enabled": true, "weight": 1}
 		}
-	}`, operatorTestKey)
+	}`, adminTestToken)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("overflowing rule score status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -133,7 +133,7 @@ func publishConcurrently(t *testing.T, mux *http.ServeMux, requests int) map[int
 	for i := range requests {
 		go func() {
 			body := fmt.Sprintf(`{"review_threshold":40,"block_threshold":70,"note":"  note %d  ","rules":{"high_amount":{"enabled":true,"weight":%d,"limit":1000}}}`, i, 10+i)
-			responses <- rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
+			responses <- rulesetRequest(mux, "POST", "/rulesets", body, adminTestToken)
 		}()
 	}
 	versions := make(map[int]versionedConfig)
@@ -165,9 +165,9 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 	ctx := context.Background()
 	isolated := isolatedRulesetPool(t)
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolated))), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(storage.NewRulesetStore(isolated))), platform.Access{Sessions: consoleTestSessions})
 	const requests = 4
-	if w := rulesetRequest(mux, "POST", "/rulesets", "", "test-key"); w.Code != http.StatusUnauthorized {
+	if w := rulesetRequest(mux, "POST", "/rulesets", "", "unknown"); w.Code != http.StatusUnauthorized {
 		t.Fatalf("service key publishing status = %d, want 401", w.Code)
 	}
 	versions := publishConcurrently(t, mux, requests)
@@ -223,7 +223,7 @@ func TestConcurrentRulesetPublishing(t *testing.T) {
 
 func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{Sessions: consoleTestSessions})
 	for _, tc := range []struct {
 		name  string
 		rules string
@@ -237,7 +237,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{%s}}`, tc.rules)
-			rec := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, adminTestToken)
 			var got platform.ErrorResponse
 			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Fields[tc.field] == "" {
 				t.Errorf("status = %d, body = %s, want 400 with %s", rec.Code, rec.Body, tc.field)
@@ -248,7 +248,7 @@ func TestPublishRejectsInvalidDeviceCardCount(t *testing.T) {
 
 func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{Sessions: consoleTestSessions})
 	for _, tc := range []struct {
 		name, rule string
 		fields     []string
@@ -262,7 +262,7 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"review_threshold":50,"block_threshold":80,"rules":{"new_device_spike":%s}}`, tc.rule)
-			rec := rulesetRequest(mux, "POST", "/rulesets", body, operatorTestKey)
+			rec := rulesetRequest(mux, "POST", "/rulesets", body, adminTestToken)
 			var got platform.ErrorResponse
 			if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
 				t.Fatalf("status = %d, body = %s, want 400", rec.Code, rec.Body)
@@ -278,7 +278,7 @@ func TestPublishRejectsInvalidNewDeviceSpike(t *testing.T) {
 
 func TestPublishValidatesModelSettings(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{ServiceKey: "test-key", Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(nil)), platform.Access{Sessions: consoleTestSessions})
 	for _, tc := range []struct {
 		model string
 		field string
@@ -296,7 +296,7 @@ func TestPublishValidatesModelSettings(t *testing.T) {
 		t.Run(tc.model, func(t *testing.T) {
 			w := rulesetRequest(mux, "POST", "/rulesets", `{
 				"review_threshold": 50, "block_threshold": 80, "rules": {}, "model": `+tc.model+`
-			}`, operatorTestKey)
+			}`, adminTestToken)
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
 			}

@@ -31,7 +31,7 @@ func newBatchMux(t *testing.T) (*http.ServeMux, *mocks.MockReviewService) {
 	t.Helper()
 	service := mocks.NewMockReviewService(gomock.NewController(t))
 	mux := http.NewServeMux()
-	access := platform.Access{Analysts: testAnalystKeys(t), Sessions: batchTestSessions{}}
+	access := platform.Access{Sessions: batchTestSessions{}}
 	RegisterReviewRoutes(mux, NewReviewHandler(service, true), access)
 	return mux, service
 }
@@ -82,13 +82,13 @@ func TestBatchClaimNeedsASession(t *testing.T) {
 
 	rec := send(mux, http.MethodPost, "/reviews/claims", queueTestKey, `{"purchase_ids":["12"]}`)
 
-	wantBody(t, rec, http.StatusForbidden, `{"error":"claiming a purchase needs a signed-in account"}`)
+	wantBody(t, rec, http.StatusUnauthorized, `{"error":"missing or invalid session"}`)
 }
 
 func TestBatchDecisionWithASessionDecidesClaimedPurchases(t *testing.T) {
 	mux, service := newBatchMux(t)
 	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
-	service.EXPECT().DecideManyClaimed(gomock.Any(), review.BatchDecision{
+	service.EXPECT().DecideMany(gomock.Any(), review.BatchDecision{
 		PurchaseIDs: []int64{12, 15, 3, 4, 5, 6}, Decision: "reject", AnalystID: "alice", Blocks: models.ReviewBlocks{Card: true, Player: true},
 	}).Return([]review.DecisionResult{
 		{PurchaseID: 12, Status: review.BatchSaved, Resolution: models.Resolution{
@@ -112,18 +112,6 @@ func TestBatchDecisionWithASessionDecidesClaimedPurchases(t *testing.T) {
 		`{"purchase_id":"4","status":"not_found",`+unsaved+`,`+
 		`{"purchase_id":"5","status":"not_review",`+unsaved+`,`+
 		`{"purchase_id":"6","status":"error",`+unsaved+`]}`)
-}
-
-func TestBatchDecisionWithAKeyNeedsNoClaim(t *testing.T) {
-	mux, service := newBatchMux(t)
-	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
-	service.EXPECT().DecideMany(gomock.Any(), review.BatchDecision{PurchaseIDs: []int64{12}, Decision: "approve", AnalystID: "first"}).
-		Return([]review.DecisionResult{{PurchaseID: 12, Status: review.BatchSaved, Resolution: models.Resolution{Status: models.ResolutionSaved, ResolvedAt: at}}}, nil)
-
-	rec := send(mux, http.MethodPost, "/reviews/decisions", queueTestKey, `{"decision":"approve","purchase_ids":["12"]}`)
-
-	wantBody(t, rec, http.StatusOK, `{"decision":"approve","analyst_id":"first","results":[`+
-		`{"purchase_id":"12","status":"saved","resolved_at":"2026-11-12T10:00:00Z","device_blocked":false,"card_blocked":false,"player_blocked":false}]}`)
 }
 
 func TestBatchRequestsRejectInvalidBodies(t *testing.T) {
@@ -161,7 +149,7 @@ func TestBatchRequestsMapServiceRefusals(t *testing.T) {
 		t.Run(err.Error(), func(t *testing.T) {
 			mux, service := newBatchMux(t)
 			service.EXPECT().ClaimMany(gomock.Any(), gomock.Any(), "alice").Return(nil, err)
-			service.EXPECT().DecideManyClaimed(gomock.Any(), gomock.Any()).Return(nil, err)
+			service.EXPECT().DecideMany(gomock.Any(), gomock.Any()).Return(nil, err)
 			want := `{"error":"` + err.Error() + `"}`
 
 			wantBody(t, sendAsSession(mux, http.MethodPost, "/reviews/claims", `{"purchase_ids":[]}`), http.StatusBadRequest, want)

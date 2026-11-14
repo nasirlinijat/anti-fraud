@@ -33,7 +33,7 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 	platform.RegisterHealthRoutes(mux, pool)
 	authService := auth.NewService(storage.NewAccountStore(pool), storage.NewSessionStore(pool))
 	transport.RegisterAuthRoutes(mux, transport.NewAuthHandler(authService))
-	access := platform.Access{ServiceKey: cfg.APIKey, Analysts: cfg.AnalystKeys, Operators: cfg.OperatorKeys, Sessions: authService}
+	access := platform.Access{Sessions: authService}
 	transport.RegisterAccountRoutes(mux, transport.NewAccountHandler(account.NewService(storage.NewAccountStore(pool))), access)
 
 	rulesetStore := storage.NewRulesetStore(pool)

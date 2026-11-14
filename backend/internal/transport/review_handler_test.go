@@ -19,7 +19,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/storage"
 )
 
-const queueTestKey = "queue-test-key"
+const queueTestKey = "reviewer-token"
 
 type queueFunc func(context.Context, int, models.QueueOrder, *models.QueueCursor) ([]models.QueueItem, error)
 
@@ -90,17 +90,8 @@ func (fakeReviewReads) ReleaseClaim(context.Context, int64) (models.ReleaseStatu
 	panic("unexpected release request")
 }
 
-const secondAnalystTestKey = "second-queue-test-key"
+const secondReviewerTestKey = "second-reviewer-token"
 const serviceTestKey = "service-test-key"
-
-func testAnalystKeys(t *testing.T) platform.AnalystKeys {
-	t.Helper()
-	keys, err := platform.ParseAnalystKeys(`[{"analyst_id":"first","key":"`+queueTestKey+`"},{"analyst_id":"second","key":"`+secondAnalystTestKey+`"}]`, serviceTestKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return keys
-}
 
 func requestQueue(t *testing.T, store queueReader, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -120,10 +111,10 @@ func requestNetwork(t *testing.T, store networkReader, target, key string) *http
 func requestReviewRead(t *testing.T, store review.Store, target, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(store), true), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(store), true), platform.Access{Sessions: consoleTestSessions})
 	r := httptest.NewRequest(http.MethodGet, target, nil)
 	if key != "" {
-		r.Header.Set(platform.APIKeyHeader, key)
+		setTestCredential(r, key)
 	}
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)

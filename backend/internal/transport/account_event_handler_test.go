@@ -34,7 +34,7 @@ func newAccountEventMuxWithTimeout(t *testing.T, timeout time.Duration) (*http.S
 }
 
 func TestAccountEventsRequireTheServiceKey(t *testing.T) {
-	for name, key := range map[string]string{"missing key": "", "wrong key": "wrong", "operator key": mockOperatorKey} {
+	for name, key := range map[string]string{"missing key": "", "wrong key": "wrong", "operator key": mockAdminToken} {
 		t.Run(name, func(t *testing.T) {
 			mux, service := newAccountEventMux(t)
 			service.EXPECT().Record(gomock.Any(), gomock.Any()).Times(0)

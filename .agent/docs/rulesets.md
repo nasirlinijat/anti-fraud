@@ -2,7 +2,7 @@
 
 ## Ruleset API
 
-Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads use the service key. Publishing requires your individual operator key in the `X-API-Key` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
+Use `GET /rulesets/active` to read the current version, `GET /rulesets` to list published versions newest first with their note and creation time, and `GET /rulesets/{version}` to read a specific version. To change settings, send the full configuration (and an optional `note`) to `POST /rulesets`. Ruleset reads and publishing require an admin session in the `Authorization: Bearer` header. Publishing returns the new version, which is used for subsequent scores. Earlier decisions keep their original version. A rule omitted from the configuration is disabled in the new version.
 
 On the Rulesets page, choose **Off** to skip model scoring, **Shadow** to record model risk without changing the decision, or **Assist** to let the model add or clear reviews. Enter both model thresholds between 0 and 1, with the clear threshold below the flag threshold, or leave both blank to use the loaded model's report. The page shows when no model is loaded. Publishing saves the settings in a new version.
 

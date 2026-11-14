@@ -28,8 +28,6 @@ secrets:
   postgresPassword: ""
   runtimeDbPassword: ""
   labelsDbPassword: ""
-  reviewAnalystKeys: ""
-  operatorApiKeys: ""
   chargebackWebhookSecret: ""
 
 postgres:

@@ -179,11 +179,11 @@ paths:
         reviews, evaluation data, feature totals, blocklist entries, account
         events, and simulation history, including request IDs. Preserves
         rulesets, console accounts, sessions, and configuration audit records.
-        Requires an admin session or operator key. Active console runs conflict.
-      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
+        Requires an admin session . Active console runs conflict.
+      security: [{SessionAuth: []}]
       responses:
         '204': {description: Demo data reset. Repeating an empty reset is safe.}
-        '401': {description: Missing or invalid operator key or session.}
+        '401': {description: Missing or invalid session.}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
         '409': {description: A simulation controller or another reset is active.}
@@ -198,7 +198,7 @@ paths:
         can be starting, running or stopping. Purchases use POST /score.
         A matching request_id for the same operator returns the original run;
         changing its settings returns 409. Runs are interrupted after restart.
-      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       requestBody:
         required: true
         content:
@@ -218,7 +218,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
         '400': {description: Invalid JSON or settings.}
-        '401': {description: "Missing or invalid operator key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
         '409': {description: "Active run conflict (includes active_run_id when available), or request_id settings conflict."}
@@ -227,7 +227,7 @@ paths:
       tags: [Simulations]
       operationId: listSimulations
       summary: Read simulation history
-      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       parameters:
         - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
         - {in: query, name: before, description: Previous next_cursor value., schema: {type: string}}
@@ -244,7 +244,7 @@ paths:
                   next_cursor: {type: string}
                   available_scenarios: {type: array, items: {type: string}}
         '400': {description: Invalid cursor or limit.}
-        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Simulation feature disabled.}
         '503': {description: Database unavailable.}
@@ -253,7 +253,7 @@ paths:
       tags: [Simulations]
       operationId: getSimulation
       summary: Read durable simulation progress
-      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       parameters:
         - {in: path, name: id, required: true, schema: {type: string}}
       responses:
@@ -262,7 +262,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Database unavailable.}
@@ -271,7 +271,7 @@ paths:
       tags: [Simulations]
       operationId: stopSimulation
       summary: Stop a simulation after settling its in-flight purchase
-      security: [{OperatorKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       parameters:
         - {in: path, name: id, required: true, schema: {type: string}}
       responses:
@@ -285,7 +285,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationRun'}
-        '401': {description: "Missing or invalid operator key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Operator access or database unavailable.}
@@ -771,7 +771,7 @@ paths:
         change these results. Sources never mix. No individual answers are returned.
         This whole-run report ignores dashboard periods. Reporting can operate with
         simulation controls disabled when evaluation access is configured.
-      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       parameters:
         - name: source
           in: query
@@ -792,7 +792,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
-        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: No run is known under this source and ID.}
         '503': {description: Evaluation access is absent or temporarily unavailable.}
@@ -807,7 +807,7 @@ paths:
         runs without labels. CLI and imported runs are discoverable without enabling
         simulation controls. IDs are ordered ascending using database text ordering.
         Only aggregate run identities are exposed, never individual answers.
-      security: [{ApiKeyAuth: []}, {SessionAuth: []}]
+      security: [{SessionAuth: []}]
       parameters:
         - name: source
           in: query
@@ -832,7 +832,7 @@ paths:
                   run_ids: {type: array, items: {type: string}}
                   next_cursor: {type: string, description: Absent after the final page.}
         '400': {description: "Invalid, duplicate or unsupported query parameters."}
-        '401': {description: "Missing or invalid service key. With an Authorization header, a missing or invalid session."}
+        '401': {description: "The session is missing or invalid."}
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '503': {description: Evaluation access is absent or temporarily unavailable.}
 
@@ -847,7 +847,6 @@ paths:
         the fraud model changed.
         The review queue size is always the current one, whatever the period.
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       parameters:
         - name: period
@@ -915,7 +914,6 @@ paths:
         missed, so these counts are for live visualisation only. The totals come
         from `GET /stats`.
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       parameters:
         - name: after
@@ -972,7 +970,6 @@ paths:
       summary: List blocklist entries
       description: Returns all entries, the newest first.
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       responses:
         "200":
@@ -1018,7 +1015,6 @@ paths:
         IP addresses are stored in canonical form, so `::ffff:203.0.113.9`
         is saved as `203.0.113.9`.
       security:
-        - OperatorKeyAuth: []
         - SessionAuth: []
       requestBody:
         required: true
@@ -1060,13 +1056,13 @@ paths:
                   reason: is required
         "401":
           description: >-
-            The operator key is missing or invalid. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid operator key
+                error: missing or invalid session
         "403":
           $ref: "#/components/responses/RoleNotAllowed"
         "409":
@@ -1103,7 +1099,6 @@ paths:
       summary: Remove a blocklist entry
       description: The value is no longer blocked from the next scored purchase on.
       security:
-        - OperatorKeyAuth: []
         - SessionAuth: []
       parameters:
         - name: id
@@ -1126,13 +1121,13 @@ paths:
                 error: the entry ID must be a positive integer
         "401":
           description: >-
-            The operator key is missing or invalid. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid operator key
+                error: missing or invalid session
         "403":
           $ref: "#/components/responses/RoleNotAllowed"
         "404":
@@ -1164,7 +1159,6 @@ paths:
         Evaluation metrics describe the named dataset in the loaded model's
         training report. Model risk helps prioritize reviews.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       responses:
         "200":
@@ -1207,7 +1201,7 @@ paths:
                       roc_auc: {type: number, minimum: 0, maximum: 1}
                       pr_auc: {type: number, minimum: 0, maximum: 1}
         "401":
-          description: The analyst key or session is missing or invalid.
+          description: The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1233,7 +1227,6 @@ paths:
         queued purchase, then the lowest purchase ID. Model sorting puts
         missing scores last. Follow next_cursor with the same sort order or request a numbered page.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: query
@@ -1282,15 +1275,14 @@ paths:
         "400":
           description: >-
             The sort order, cursor, page, or claimed filter is invalid, the cursor
-            belongs to a different sort order, or claimed=mine was sent with
-            an analyst key.
+            belongs to a different sort order.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1314,8 +1306,7 @@ paths:
       description: >-
         Gives the purchase to the signed-in reviewer or admin, so that only
         that account can decide it. Claiming a purchase you already hold
-        returns the original claim with 200. Analyst keys cannot claim, and
-        decide without a claim.
+        returns the original claim with 200. Every account must hold its claim before deciding.
       security:
         - SessionAuth: []
       parameters:
@@ -1348,7 +1339,7 @@ paths:
         "401":
           $ref: "#/components/responses/SessionRequired"
         "403":
-          description: The request used an analyst key, which cannot claim.
+          description: The session role cannot use this endpoint.
           content:
             application/json:
               schema:
@@ -1614,11 +1605,10 @@ paths:
       summary: Approve or reject a purchase awaiting review
       description: >-
         A session must first claim the purchase with POST
-        /reviews/{purchase_id}/claim. An analyst key decides without a claim.
+        /reviews/{purchase_id}/claim. Every decision requires the signed-in account to hold the claim.
         A rejection can also blocklist the purchase's device, card and player
         in the same transaction.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -1683,7 +1673,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1731,7 +1721,7 @@ paths:
         /reviews/{purchase_id}/claim. Each purchase gets its own result, so
         the response is 200 even when some could not be claimed. An
         unexpected failure on one purchase gives it the status error, and the
-        rest are still claimed. Analyst keys cannot claim.
+        rest are still claimed.
       security:
         - SessionAuth: []
       requestBody:
@@ -1759,15 +1749,14 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: >-
-            The request used an analyst key, which cannot claim, or the
-            session's role cannot use the review endpoints.
+            The session role cannot use the review endpoints.
           content:
             application/json:
               schema:
@@ -1789,15 +1778,13 @@ paths:
       description: >-
         Applies one decision to each listed purchase, one after another in
         request order, with the rules of POST /reviews/{purchase_id}/decision:
-        a session decides only the purchases it has claimed, and an analyst
-        key decides without a claim. Each purchase is decided in its own
+        the signed-in account decides only the purchases it has claimed. Each purchase is decided in its own
         transaction, so the batch is not atomic: a purchase that someone else
         decided meanwhile is reported as already_decided and does not undo
         the others. Each purchase still gets at most one decision. An
         unexpected failure on one purchase gives it the status error, and the
         rest are still decided.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       requestBody:
         required: true
@@ -1825,7 +1812,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1856,7 +1843,6 @@ paths:
         purchase, and the IP intelligence lookup made when the purchase was
         scored.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -1886,7 +1872,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1917,7 +1903,6 @@ paths:
         Returns the scoring evidence for a resolved review, together with
         the analyst's decision, ID, and resolution time.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -1947,7 +1932,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -1982,7 +1967,6 @@ paths:
         listed per value, worst status first, then by most purchases. Fraud
         labels are never read.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -2012,7 +1996,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -2048,7 +2032,6 @@ paths:
         purchase's own player or card, returns an empty list. Fraud labels are
         never read.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -2100,7 +2083,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -2135,7 +2118,6 @@ paths:
         have the queue's shape and order, highest rule score first, at most
         50. Fraud labels are never read.
       security:
-        - AnalystKeyAuth: []
         - SessionAuth: []
       parameters:
         - in: path
@@ -2165,7 +2147,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            The X-API-Key header is missing or contains an invalid analyst key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
           content:
             application/json:
               schema:
@@ -2194,7 +2176,6 @@ paths:
       summary: List ruleset versions
       description: Returns all published ruleset versions, newest first, with their version number, optional note, and creation time.
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       responses:
         "200":
@@ -2232,7 +2213,6 @@ paths:
         active version. Thresholds that are still missing are taken from the
         report of the loaded model; without a loaded model they stay null.
       security:
-        - OperatorKeyAuth: []
         - SessionAuth: []
       requestBody:
         required: true
@@ -2255,7 +2235,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: >-
-            Missing or invalid operator key. With an Authorization header, a missing or invalid session.
+            The session is missing or invalid.
         "403":
           $ref: "#/components/responses/RoleNotAllowed"
         "413":
@@ -2271,7 +2251,6 @@ paths:
       operationId: getActiveRuleset
       summary: Read the active ruleset
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       responses:
         "200":
@@ -2296,7 +2275,6 @@ paths:
       operationId: getRuleset
       summary: Read a ruleset version
       security:
-        - ApiKeyAuth: []
         - SessionAuth: []
       parameters:
         - name: version
@@ -2344,18 +2322,6 @@ components:
       description: >-
         The key from the `API_KEY` setting of the backend. Use a long random
         value outside local development.
-    AnalystKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: The individual key assigned to the analyst in REVIEW_ANALYST_KEYS.
-
-    OperatorKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: The individual key assigned to the operator in OPERATOR_API_KEYS.
-
     SessionAuth:
       type: http
       scheme: bearer
@@ -2409,7 +2375,7 @@ components:
 
     OperatorAccessUnavailable:
       description: >-
-        No operator keys are configured, or the database is unavailable. When
+        The database is unavailable. When
         the database is unavailable, nothing was changed and Retry-After is set.
       headers:
         Retry-After:
@@ -2423,7 +2389,7 @@ components:
 
     ReviewAccessUnavailable:
       description: >-
-        No analyst keys are configured, or the database is unavailable. When
+        The database is unavailable. When
         the database is unavailable, nothing was changed and Retry-After is set.
       headers:
         Retry-After:
@@ -2506,7 +2472,7 @@ components:
           enum: [approve, reject]
         analyst_id:
           type: string
-          description: Analyst ID resolved from the authenticated key.
+          description: Username of the authenticated account.
         resolved_at:
           type: string
           format: date-time
@@ -2764,7 +2730,7 @@ components:
                   enum: [approve, reject]
                 analyst_id:
                   type: string
-                  description: The username or analyst key identity that made the decision.
+                  description: The username identity that made the decision.
                 resolved_at:
                   type: string
                   format: date-time
@@ -3112,7 +3078,7 @@ components:
           enum: [approve, reject]
         analyst_id:
           type: string
-          description: The username of the session or the analyst ID of the key.
+          description: The username of the signed-in account.
         results:
           type: array
           description: One result per requested purchase, in request order.

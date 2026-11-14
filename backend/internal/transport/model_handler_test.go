@@ -53,9 +53,9 @@ func TestModelStatusWithoutAModel(t *testing.T) {
 
 func TestModelStatusRequiresReviewAccess(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterModelRoutes(mux, nil, nil, platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterModelRoutes(mux, nil, nil, platform.Access{Sessions: consoleTestSessions})
 	req := httptest.NewRequest(http.MethodGet, "/model", nil)
-	req.Header.Set(platform.APIKeyHeader, serviceTestKey)
+	setTestCredential(req, serviceTestKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	wantResponse(t, rec, http.StatusUnauthorized)

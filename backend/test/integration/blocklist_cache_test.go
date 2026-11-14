@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/account"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
@@ -38,7 +40,7 @@ func TestBlocklistCacheAddAndRemoveViaHTTP(t *testing.T) {
 
 	// Add entry via operator endpoint.
 	addBody := `{"type":"card","value":"cached-card-99","reason":"test card fraud"}`
-	saved := expect[blocklistAddResponse](t, a.do(t, http.MethodPost, "/blocklist", operatorKey, addBody), http.StatusCreated)
+	saved := expect[blocklistAddResponse](t, a.do(t, http.MethodPost, "/blocklist", adminToken, addBody), http.StatusCreated)
 	if saved.ID <= 0 || saved.Value != "cached-card-99" {
 		t.Fatalf("saved blocklist entry = %+v", saved)
 	}
@@ -59,7 +61,7 @@ func TestBlocklistCacheAddAndRemoveViaHTTP(t *testing.T) {
 
 	// Remove entry via operator endpoint.
 	deletePath := fmt.Sprintf("/blocklist/%d", saved.ID)
-	rec := a.do(t, http.MethodDelete, deletePath, operatorKey, "")
+	rec := a.do(t, http.MethodDelete, deletePath, adminToken, "")
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
@@ -99,15 +101,6 @@ func TestBlocklistCacheFallbackWhenRedisStopped(t *testing.T) {
 	}
 	defer tx.Rollback(context.Background())
 
-	analysts, err := platform.ParseAnalystKeys(`[{"analyst_id":"`+analystID+`","key":"`+analystKey+`"}]`, serviceKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	operators, err := platform.ParseOperatorKeys(`[{"operator_id":"`+operatorID+`","key":"`+operatorKey+`"}]`, serviceKey, analysts)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	rulesets := storage.NewRulesetStore(tx)
 	rawBlocklist := storage.NewBlocklistStore(tx)
 	cachedBlocklist := storage.NewCachedBlocklistStore(rawBlocklist, client)
@@ -117,16 +110,17 @@ func TestBlocklistCacheFallbackWhenRedisStopped(t *testing.T) {
 
 	reviewStore := storage.NewReviewStore(tx).UseBlocklistCache(cachedBlocklist)
 	mux := http.NewServeMux()
-	access := platform.Access{ServiceKey: serviceKey, Analysts: analysts, Operators: operators}
+	sessions := auth.NewService(storage.NewAccountStore(tx), storage.NewSessionStore(tx))
+	access := platform.Access{Sessions: sessions}
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(score.NewService(rulesets, cachedBlocklist, storage.NewPurchaseStore(tx))), serviceKey)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(cachedBlocklist)), access)
-	a := app{mux: mux, tx: tx}
+	a := app{mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
 
 	// Add entry
 	addBody := `{"type":"card","value":"card-redis-down","reason":"test fallback"}`
-	expect[blocklistAddResponse](t, a.do(t, http.MethodPost, "/blocklist", operatorKey, addBody), http.StatusCreated)
+	expect[blocklistAddResponse](t, a.do(t, http.MethodPost, "/blocklist", adminToken, addBody), http.StatusCreated)
 
 	// Stop container
 	if err := disposableRedis.StopContainer(ctx); err != nil {

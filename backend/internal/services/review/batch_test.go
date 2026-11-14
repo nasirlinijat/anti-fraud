@@ -40,7 +40,7 @@ func TestBatchesCheckTheListBeforeAnyStoreCall(t *testing.T) {
 
 			_, claimErr := svc.ClaimMany(ctx, tc.ids, "rita")
 			_, keyErr := svc.DecideMany(ctx, review.BatchDecision{PurchaseIDs: tc.ids, Decision: "approve", AnalystID: "analyst-1"})
-			_, sessionErr := svc.DecideManyClaimed(ctx, review.BatchDecision{PurchaseIDs: tc.ids, Decision: "approve", AnalystID: "rita"})
+			_, sessionErr := svc.DecideMany(ctx, review.BatchDecision{PurchaseIDs: tc.ids, Decision: "approve", AnalystID: "rita"})
 
 			for _, err := range []error{claimErr, keyErr, sessionErr} {
 				if !errors.Is(err, tc.want) {
@@ -80,7 +80,7 @@ func TestDecideManyChecksTheDecisionBeforeAnyStoreCall(t *testing.T) {
 			d := review.BatchDecision{PurchaseIDs: []int64{1, 2}, Decision: tc.decision, AnalystID: "rita", Blocks: tc.blocks}
 
 			_, keyErr := svc.DecideMany(context.Background(), d)
-			_, sessionErr := svc.DecideManyClaimed(context.Background(), d)
+			_, sessionErr := svc.DecideMany(context.Background(), d)
 
 			if !errors.Is(keyErr, tc.want) || !errors.Is(sessionErr, tc.want) {
 				t.Fatalf("errors = %v and %v, want %v", keyErr, sessionErr, tc.want)
@@ -169,7 +169,7 @@ func TestDecideManyReportsEachPurchase(t *testing.T) {
 	}
 	gomock.InOrder(calls...)
 
-	results, err := svc.DecideManyClaimed(context.Background(), review.BatchDecision{
+	results, err := svc.DecideMany(context.Background(), review.BatchDecision{
 		PurchaseIDs: []int64{1, 2, 3, 4, 5, 6, 7}, Decision: "reject", AnalystID: "rita", Blocks: models.ReviewBlocks{Card: true},
 	})
 
@@ -187,31 +187,6 @@ func TestDecideManyReportsEachPurchase(t *testing.T) {
 	}
 	if !reflect.DeepEqual(results, want) {
 		t.Fatalf("results =\n%+v\nwant\n%+v", results, want)
-	}
-}
-
-func TestDecideManyClaimedNeedsTheClaimAndDecideManyDoesNot(t *testing.T) {
-	saved := models.Resolution{Status: models.ResolutionSaved}
-	for _, tc := range []struct {
-		name      string
-		decide    func(*review.Service, context.Context, review.BatchDecision) ([]review.DecisionResult, error)
-		claimedBy *string
-	}{
-		{"session", (*review.Service).DecideManyClaimed, ptr("rita")},
-		{"analyst key", (*review.Service).DecideMany, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			svc, store := newService(t)
-			store.EXPECT().Resolve(gomock.Any(), models.ReviewDecision{
-				PurchaseID: 3, Decision: "approve", AnalystID: "rita", ClaimedBy: tc.claimedBy,
-			}).Return(saved, nil)
-
-			results, err := tc.decide(svc, context.Background(), review.BatchDecision{PurchaseIDs: []int64{3}, Decision: "approve", AnalystID: "rita"})
-
-			if err != nil || len(results) != 1 || results[0].Status != review.BatchSaved {
-				t.Fatalf("results = %+v, %v; want one saved", results, err)
-			}
-		})
 	}
 }
 

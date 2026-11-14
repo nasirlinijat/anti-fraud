@@ -77,10 +77,6 @@ spec:
               {{- include "antifraud.secretRef" (dict "key" "RUNTIME_DB_PASSWORD" "root" .) | nindent 14 }}
             - name: LABELS_DB_PASSWORD
               {{- include "antifraud.secretRef" (dict "key" "LABELS_DB_PASSWORD" "optional" true "root" .) | nindent 14 }}
-            - name: REVIEW_ANALYST_KEYS
-              {{- include "antifraud.secretRef" (dict "key" "REVIEW_ANALYST_KEYS" "optional" true "root" .) | nindent 14 }}
-            - name: OPERATOR_API_KEYS
-              {{- include "antifraud.secretRef" (dict "key" "OPERATOR_API_KEYS" "optional" true "root" .) | nindent 14 }}
             - name: CHARGEBACK_WEBHOOK_SECRET
               {{- include "antifraud.secretRef" (dict "key" "CHARGEBACK_WEBHOOK_SECRET" "optional" true "root" .) | nindent 14 }}
             - name: DATABASE_URL

@@ -41,6 +41,7 @@ type scorebenchRequest struct {
 type scorebenchClient struct {
 	baseURL string
 	key     string
+	token   string
 	http    *http.Client
 }
 
@@ -58,7 +59,11 @@ func (c scorebenchClient) json(ctx context.Context, method, path string, payload
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", c.key)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	} else {
+		req.Header.Set("X-API-Key", c.key)
+	}
 	started := time.Now()
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -77,11 +82,11 @@ func (c scorebenchClient) json(ctx context.Context, method, path string, payload
 }
 
 // scorebenchStack is the disposable database and API that scripts/scorebench.sh
-// starts, with the operator key for publishing a ruleset.
+// starts, with the admin session for publishing a ruleset.
 type scorebenchStack struct {
-	conn        *pgx.Conn
-	client      scorebenchClient
-	operatorKey string
+	conn         *pgx.Conn
+	client       scorebenchClient
+	sessionToken string
 }
 
 // connectScorebench connects to the benchmark stack. It skips the test when
@@ -118,11 +123,11 @@ func connectScorebench(t *testing.T) scorebenchStack {
 		Transport: transport, Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
-	operatorKey := os.Getenv("SCOREBENCH_OPERATOR_KEY")
-	if operatorKey == "" || operatorKey == key {
-		t.Fatal("a distinct SCOREBENCH_OPERATOR_KEY is required")
+	sessionToken := os.Getenv("SCOREBENCH_SESSION_TOKEN")
+	if sessionToken == "" || sessionToken == key {
+		t.Fatal("SCOREBENCH_SESSION_TOKEN is required")
 	}
-	return scorebenchStack{conn: conn, client: client, operatorKey: operatorKey}
+	return scorebenchStack{conn: conn, client: client, sessionToken: sessionToken}
 }
 
 // checkScorebenchFixture checks that the seeded history is complete. It
@@ -149,10 +154,10 @@ func checkScorebenchFixture(t *testing.T, conn *pgx.Conn) (int, string) {
 func TestScoreBenchmark(t *testing.T) {
 	stack := connectScorebench(t)
 	ctx := t.Context()
-	conn, client, operatorKey := stack.conn, stack.client, stack.operatorKey
+	conn, client, sessionToken := stack.conn, stack.client, stack.sessionToken
 	purchases, pgVersion := checkScorebenchFixture(t, conn)
 
-	version := publishScorebenchRuleset(t, client, operatorKey)
+	version := publishScorebenchRuleset(t, client, sessionToken)
 	profiles := readScorebenchProfiles(t, conn)
 	rng := rand.New(rand.NewPCG(42, 42))
 	warmup := scorebenchWorkload(rng, profiles, "warmup", 0, scorebenchWarmup)
@@ -187,7 +192,7 @@ func TestScoreBenchmark(t *testing.T) {
 	explainScorebenchReads(t, conn, profiles)
 }
 
-func publishScorebenchRuleset(t *testing.T, client scorebenchClient, operatorKey string) int {
+func publishScorebenchRuleset(t *testing.T, client scorebenchClient, sessionToken string) int {
 	t.Helper()
 	var active struct {
 		Version         int                        `json:"version,omitempty"`
@@ -196,6 +201,7 @@ func publishScorebenchRuleset(t *testing.T, client scorebenchClient, operatorKey
 		Rules           map[string]json.RawMessage `json:"rules"`
 		Model           json.RawMessage            `json:"model"`
 	}
+	client.token = sessionToken
 	if _, err := client.json(t.Context(), http.MethodGet, "/rulesets/active", nil, &active, http.StatusOK); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +216,8 @@ func publishScorebenchRuleset(t *testing.T, client scorebenchClient, operatorKey
 	active.Rules["new_device_spike"] = json.RawMessage(`{"enabled":true,"weight":50,"limit":3,"window_days":90,"min_amount_minor":1000,"amount_multiplier":3}`)
 	active.Version = 0
 	operator := client
-	operator.key = operatorKey
+	operator.key = ""
+	operator.token = sessionToken
 	var published struct{ Version int }
 	if _, err := operator.json(t.Context(), http.MethodPost, "/rulesets", active, &published, http.StatusCreated); err != nil {
 		t.Fatal(err)

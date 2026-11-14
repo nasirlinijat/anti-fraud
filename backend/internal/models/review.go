@@ -201,9 +201,6 @@ type ReviewDecision struct {
 	Decision   string
 	AnalystID  string
 	Blocks     ReviewBlocks
-	// ClaimedBy is the username that must hold the claim on the purchase, or
-	// nil for a decision made with an analyst key, which needs no claim.
-	ClaimedBy *string
 }
 
 // ReviewBlocks says which values of the purchase a rejection also blocklists.

@@ -47,7 +47,7 @@ func serveModel(t *testing.T, m score.Model, b score.Blocklist, p score.Purchase
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
-	req.Header.Set("X-API-Key", testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
@@ -181,7 +181,7 @@ func TestModelScoreIsBlendedWithEarlierScores(t *testing.T) {
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
-	req.Header.Set("X-API-Key", testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -209,7 +209,7 @@ func TestBlendNeedsEarlierScores(t *testing.T) {
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
-	req.Header.Set("X-API-Key", testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError || len(purchases.saved) != 0 {
@@ -243,7 +243,7 @@ func TestBlendAppliesToTheMainModelOfACombination(t *testing.T) {
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
-	req.Header.Set("X-API-Key", testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -270,7 +270,7 @@ func serveModelWithRuleset(t *testing.T, m score.Model, rs scoring.Ruleset, p sc
 	mux := http.NewServeMux()
 	registerScore(mux, h, testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
-	req.Header.Set("X-API-Key", testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

@@ -28,7 +28,7 @@ go test -tags=integration ./test/integration/...
 
 To use an existing, migrated database instead, set `TEST_DATABASE_URL`, and `TEST_RUNTIME_DATABASE_URL` for the role checks.
 
-The concurrency tests in `backend/test/concurrency` send requests at the same moment to a real HTTP server and check that the database stays correct: 20 scores of one transaction save one decision, 10 ruleset publishes leave one active version with consecutive numbers, two analysts deciding one review save one decision, and two analysts sending batch decisions over overlapping purchases save one decision per purchase, with one `saved` and one `already_decided` result for each shared purchase. They always start their own PostgreSQL, because they commit data and change the active ruleset. CI runs them with the race detector:
+The concurrency tests in `backend/test/concurrency` send requests at the same moment to a real HTTP server and check that the database stays correct: 20 scores of one transaction save one decision, 10 ruleset publishes leave one active version with consecutive numbers, two reviewers deciding a claimed review save one decision, and two analysts sending batch decisions over overlapping purchases save one decision per purchase, with one `saved` result and one `not_claimed` or `already_decided` result for each shared purchase. They always start their own PostgreSQL, because they commit data and change the active ruleset. CI runs them with the race detector:
 
 ```bash
 cd backend
@@ -45,13 +45,13 @@ For repeatability, run `make seed` twice with the same model and ruleset. Compar
 
 ## Scoring load test
 
-Run this from the repository root with a local Docker engine, Go, and curl:
+Run this from the repository root with a local Docker engine, Go, Python 3, and curl:
 
 ```bash
 ./scripts/scorebench.sh
 ```
 
-The script builds the API image and starts a disposable PostgreSQL 18 instance and API on loopback ports. It applies the migrations, loads 500,000 synthetic purchases and matching decisions spanning 120 days, and initializes all six feature-count groups. The API uses the restricted database role. A separate operator key publishes ruleset version 2 with the seeded settings plus device card count and new device spike enabled, preserving the model settings in assist mode. Scoring uses the service key and the Compose model, `lgbm-ieee-v5-combined`.
+The script builds the API image and starts a disposable PostgreSQL 18 instance and API on loopback ports. It applies the migrations, loads 500,000 synthetic purchases and matching decisions spanning 120 days, and initializes all six feature-count groups. The API uses the restricted database role. An admin session publishes ruleset version 2 with the seeded settings plus device card count and new device spike enabled, preserving the model settings in assist mode. Scoring uses the service key and the Compose model, `lgbm-ieee-v5-combined`.
 
 Seed 42 selects returning players, cards, and devices for 100 warm-up requests and 1,000 timed requests. The timed mix is 800 routine purchases, 100 on shared devices, and 100 large purchases on unseen devices. Across those groups, 100 requests have a missing issuer and 100 use a common issuer. The client sends one request at a time in event order and measures through the end of the HTTP response body. The script checks that the timed decisions were saved, verifies both new rules fired, and requires p95 below 50 ms. It removes the benchmark containers, database volume, and network at exit.
 

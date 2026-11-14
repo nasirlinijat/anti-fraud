@@ -29,81 +29,32 @@ type Sessions interface {
 	Identify(ctx context.Context, token string) (Identity, error)
 }
 
-// Access holds every credential that the console endpoints accept. A request
-// with an Authorization header is checked as a session and must have an
-// allowed role. Any other request is checked by key, as it was before accounts
-// existed, so that clients using the keys keep working.
-type Access struct {
-	ServiceKey string
-	Analysts   AnalystKeys
-	Operators  OperatorKeys
-	Sessions   Sessions
-}
+// Access checks the signed-in account on console endpoints.
+type Access struct{ Sessions Sessions }
 
-// ConfigRead accepts the service key or an admin session.
+// ConfigRead accepts an admin session.
 func (a Access) ConfigRead(next http.Handler) http.Handler {
-	byKey := RequireAPIKey(a.ServiceKey, next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !hasAuthorization(r) {
-			byKey.ServeHTTP(w, r)
-			return
-		}
-		a.requireRole(w, r, []string{RoleAdmin}, func(w http.ResponseWriter, r *http.Request, _ string) {
-			next.ServeHTTP(w, r)
-		})
-	})
+	return a.Admin(func(w http.ResponseWriter, r *http.Request, _ string) { next.ServeHTTP(w, r) })
 }
 
-// ConfigWrite accepts an operator key or an admin session. It passes the
-// operator ID or the username to next, to be saved as the actor.
+// ConfigWrite accepts an admin session and supplies its username for auditing.
 func (a Access) ConfigWrite(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	byKey := RequireOperator(a.Operators, next)
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !hasAuthorization(r) {
-			byKey(w, r)
-			return
-		}
-		a.requireRole(w, r, []string{RoleAdmin}, next)
-	}
+	return func(w http.ResponseWriter, r *http.Request) { a.requireRole(w, r, []string{RoleAdmin}, next) }
 }
 
-// Actor is who made a review request.
-type Actor struct {
-	// ID is the username of a session or the analyst ID of a key. It is saved
-	// with review decisions.
-	ID string
-	// Session is true for a signed-in account, which can claim purchases, and
-	// false for an analyst key.
-	Session bool
-}
+// Actor is the signed-in account making a review request.
+type Actor struct{ ID string }
 
-// Review accepts an analyst key, or a reviewer or admin session, and passes
-// the actor to next.
+// Review accepts reviewer and admin sessions.
 func (a Access) Review(next func(http.ResponseWriter, *http.Request, Actor)) http.HandlerFunc {
-	byKey := RequireAnalyst(a.Analysts, func(w http.ResponseWriter, r *http.Request, analystID string) {
-		next(w, r, Actor{ID: analystID})
-	})
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !hasAuthorization(r) {
-			byKey(w, r)
-			return
-		}
-		a.requireRole(w, r, []string{RoleReviewer, RoleAdmin}, func(w http.ResponseWriter, r *http.Request, username string) {
-			next(w, r, Actor{ID: username, Session: true})
-		})
+		a.requireRole(w, r, []string{RoleReviewer, RoleAdmin}, func(w http.ResponseWriter, r *http.Request, username string) { next(w, r, Actor{ID: username}) })
 	}
 }
 
-// Admin accepts only an admin session, with no key in its place. It passes
-// the username to next.
+// Admin accepts an admin session and supplies its username.
 func (a Access) Admin(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		a.requireRole(w, r, []string{RoleAdmin}, next)
-	}
-}
-
-func hasAuthorization(r *http.Request) bool {
-	return len(r.Header.Values("Authorization")) > 0
+	return func(w http.ResponseWriter, r *http.Request) { a.requireRole(w, r, []string{RoleAdmin}, next) }
 }
 
 // requireRole passes the username of a valid session with one of the roles to
@@ -130,24 +81,6 @@ func (a Access) requireRole(w http.ResponseWriter, r *http.Request, roles []stri
 		return
 	}
 	next(w, r, identity.Username)
-}
-
-// RequireAnalyst authenticates review requests by analyst key and supplies the analyst ID.
-func RequireAnalyst(keys AnalystKeys, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		if !keys.Configured() {
-			WriteError(w, http.StatusServiceUnavailable, "review access is not configured")
-			return
-		}
-		if values := r.Header.Values(APIKeyHeader); len(values) == 1 {
-			if analystID := keys.Analyst(values[0]); analystID != "" {
-				next(w, r, analystID)
-				return
-			}
-		}
-		WriteError(w, http.StatusUnauthorized, "missing or invalid analyst key")
-	}
 }
 
 // BearerToken reads the token from a single "Authorization: Bearer <token>"

@@ -8,6 +8,6 @@ Detailed reference moved out of the root `README.md`. Read the file that matches
 | [simulator.md](simulator.md) | Demo traffic CLI, its options and scenarios, and the console simulation API |
 | [evaluation.md](evaluation.md) | Private evaluation labels, mocked chargebacks and the mock bank, run decision quality |
 | [rulesets.md](rulesets.md) | Ruleset API, payment verification, account takeover, and IP intelligence rules |
-| [access.md](access.md) | Console accounts and roles, claims, analyst and operator keys, database roles |
+| [access.md](access.md) | Console accounts and roles, claims, account sessions, database roles |
 | [operations.md](operations.md) | Tracing, score limits, database pool, blocklist cache, metrics, and logs |
 | [development.md](development.md) | Frontend development, console pages, API documentation, database queries |

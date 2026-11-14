@@ -27,16 +27,7 @@ import (
 )
 
 const testKey = "test-key"
-const operatorTestKey = "operator-key"
-
-func testOperators(t *testing.T) platform.OperatorKeys {
-	t.Helper()
-	keys, err := platform.ParseOperatorKeys(`[{"operator_id":"test-operator","key":"`+operatorTestKey+`"}]`, testKey, platform.AnalystKeys{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return keys
-}
+const adminTestToken = "admin-token"
 
 var testRuleset = scoring.Ruleset{
 	Version:         7,
@@ -150,7 +141,7 @@ func serveWith(t *testing.T, r score.Rulesets, b score.Blocklist, p score.Purcha
 func postScore(ctx context.Context, mux http.Handler, key, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/score", strings.NewReader(body))
 	if key != "" {
-		req.Header.Set(platform.APIKeyHeader, key)
+		setTestCredential(req, key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -647,7 +638,7 @@ func TestScoreBlocklistWithPostgres(t *testing.T) {
 	registerScore(mux, newHandler(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx)), testKey)
 	req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(`{"transaction_id": "bl-1",
 		"event_time": "2026-11-08T10:00:00Z", "amount_minor": 1000, "player_id": "bl-player", "card_token": "bl-card"}`))
-	req.Header.Set(platform.APIKeyHeader, testKey)
+	setTestCredential(req, testKey)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -674,7 +665,7 @@ func TestScoreWithPostgres(t *testing.T) {
 
 	post := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
-		req.Header.Set(platform.APIKeyHeader, testKey)
+		setTestCredential(req, testKey)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec
@@ -740,7 +731,7 @@ func publishDeviceCardRuleset(t *testing.T, tx pgx.Tx, mux *http.ServeMux, previ
 		"review_threshold":20,"block_threshold":80,
 		"rules":{"device_card_count":{"enabled":true,"weight":20,"limit":5}}
 	}`))
-	publish.Header.Set(platform.APIKeyHeader, operatorTestKey)
+	setTestCredential(publish, adminTestToken)
 	published := httptest.NewRecorder()
 	mux.ServeHTTP(published, publish)
 	if published.Code != http.StatusCreated {
@@ -771,7 +762,7 @@ func TestScoreDeviceCardCountWithPostgres(t *testing.T) {
 	rulesetStore := storage.NewRulesetStore(tx)
 	purchaseStore := &deviceHistoryStore{PurchaseStore: storage.NewPurchaseStore(tx)}
 	mux := http.NewServeMux()
-	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(rulesetStore)), platform.Access{ServiceKey: testKey, Operators: testOperators(t)})
+	RegisterRulesetRoutes(mux, NewRulesetHandler(ruleset.NewService(rulesetStore)), platform.Access{Sessions: consoleTestSessions})
 	registerScore(mux, newHandler(rulesetStore, storage.NewBlocklistStore(tx), purchaseStore), testKey)
 
 	originalRuleset, err := rulesetStore.Active(ctx)

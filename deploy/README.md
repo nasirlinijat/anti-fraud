@@ -57,8 +57,6 @@ PORT=8080
 FRONTEND_PORT=3000
 POSTGRES_PORT=5432
 API_KEY=$(openssl rand -hex 32)
-REVIEW_ANALYST_KEYS=[{"analyst_id":"analyst-1","key":"$(openssl rand -hex 32)"},{"analyst_id":"analyst-2","key":"$(openssl rand -hex 32)"}]
-OPERATOR_API_KEYS=[{"operator_id":"operator-1","key":"$(openssl rand -hex 32)"}]
 POSTGRES_USER=antifraud
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RUNTIME_DB_PASSWORD=$(openssl rand -hex 24)
@@ -71,7 +69,7 @@ EOF
 chmod 600 .env
 ```
 
-`API_KEY` and the individual analyst and operator keys are in `.env`; share them through a password manager, never in Git or chat. `deploy/env.production.example` lists every setting.
+`API_KEY` is in `.env`; keep it in a password manager, never in Git or chat. Console users sign in with their own accounts. Session tokens are short-lived and are not deployment secrets. `deploy/env.production.example` lists every setting.
 
 After the first deploy, create the first admin account. The backend image has no tools, so a temporary Go container runs `create-account` on the server's network and asks for the password without showing it:
 
@@ -83,7 +81,6 @@ That admin adds the other accounts in the console. Older servers may still have 
 
 ## 3. Deploy
 
-For an existing server, add a new `RUNTIME_DB_PASSWORD` and individual `OPERATOR_API_KEYS` to `~/anti-fraud/.env` before upgrading. Generate the runtime password with `openssl rand -hex 24` and each operator key with `openssl rand -hex 32`. Keep the existing PostgreSQL administrator credentials and volume. Compose applies migrations with the administrator, then provisions the restricted API role on the same database. Configuration writes return 503 until operator keys are configured.
 
 From the repository root on your computer:
 
@@ -396,3 +393,5 @@ and the backend's private evaluation connection. Keep `SIMULATION_ENABLED=false`
 when evaluation credentials are absent. Host simulator and import commands need
 `LABELS_DATABASE_URL` for the same database; use private connectivity, not a public
 PostgreSQL port. Existing scoring credentials remain unable to read label tables.
+
+Before upgrading console authentication, verify an admin can sign in. Remove obsolete console key entries from environment files and existing deployment Secrets after verification. Preserve the service key, webhook secret, database credentials, and a private configuration backup for rollback.

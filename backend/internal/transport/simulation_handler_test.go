@@ -17,13 +17,13 @@ func simulationMux(t *testing.T) (*http.ServeMux, *mocks.MockSimulationService) 
 	t.Helper()
 	service := mocks.NewMockSimulationService(gomock.NewController(t))
 	mux := http.NewServeMux()
-	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, platform.Access{ServiceKey: mockServiceKey, Operators: mockOperators(t)})
+	RegisterSimulationRoutes(mux, NewSimulationHandler(service), true, platform.Access{Sessions: consoleTestSessions})
 	return mux, service
 }
 
 func TestSimulationRoutesDisabled(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterSimulationRoutes(mux, NewSimulationHandler(nil), false, platform.Access{ServiceKey: "key"})
+	RegisterSimulationRoutes(mux, NewSimulationHandler(nil), false, platform.Access{Sessions: consoleTestSessions})
 	for _, path := range []string{"/simulations", "/simulations/x", "/simulations/x/stop"} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
@@ -36,11 +36,11 @@ func TestSimulationRoutesDisabled(t *testing.T) {
 func TestSimulationRoutesNeedTheRightKey(t *testing.T) {
 	mux, _ := simulationMux(t)
 	body := `{"request_id":"one","mode":"live","rate":50}`
-	for _, key := range []string{"", mockServiceKey, "bad"} {
+	for _, key := range []string{"", "unknown", "bad"} {
 		wantResponse(t, send(mux, "POST", "/simulations", key, body), http.StatusUnauthorized)
 		wantResponse(t, send(mux, "POST", "/simulations/sim-1/stop", key, ""), http.StatusUnauthorized)
 	}
-	for _, key := range []string{mockOperatorKey, "bad", ""} {
+	for _, key := range []string{"unknown", "bad", ""} {
 		wantResponse(t, send(mux, "GET", "/simulations/sim-1", key, ""), http.StatusUnauthorized)
 		wantResponse(t, send(mux, "GET", "/simulations", key, ""), http.StatusUnauthorized)
 	}
@@ -52,7 +52,7 @@ func TestSimulationStartDecodesOverTheDefaults(t *testing.T) {
 	want.RequestID, want.Mode, want.Rate = "one", "live", 50
 	service.EXPECT().Start(gomock.Any(), "op-1", want).Return(models.SimulationRun{ID: "sim-1"}, true, nil)
 
-	rec := send(mux, "POST", "/simulations", mockOperatorKey, `{"request_id":"one","mode":"live","rate":50}`)
+	rec := send(mux, "POST", "/simulations", mockAdminToken, `{"request_id":"one","mode":"live","rate":50}`)
 	wantResponse(t, rec, http.StatusAccepted, `"id":"sim-1"`)
 	if rec.Header().Get("Location") != "/simulations/sim-1" {
 		t.Fatalf("Location = %q", rec.Header().Get("Location"))
@@ -63,7 +63,7 @@ func TestSimulationStartRejectsBadBodies(t *testing.T) {
 	mux, service := simulationMux(t)
 	service.EXPECT().Start(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	for _, body := range []string{`{`, `{"mode":"live","request_id":"bad","unknown":1}`, `{"mode":"live","request_id":"bad"} {}`} {
-		wantResponse(t, send(mux, "POST", "/simulations", mockOperatorKey, body), http.StatusBadRequest)
+		wantResponse(t, send(mux, "POST", "/simulations", mockAdminToken, body), http.StatusBadRequest)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestSimulationStartStatusCodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mux, service := simulationMux(t)
 			service.EXPECT().Start(gomock.Any(), "op-1", gomock.Any()).Return(models.SimulationRun{ID: "sim-1"}, tt.created, tt.err)
-			wantResponse(t, send(mux, "POST", "/simulations", mockOperatorKey, `{"request_id":"one","mode":"live"}`), tt.want, tt.body)
+			wantResponse(t, send(mux, "POST", "/simulations", mockAdminToken, `{"request_id":"one","mode":"live"}`), tt.want, tt.body)
 		})
 	}
 }
@@ -129,7 +129,7 @@ func TestSimulationStop(t *testing.T) {
 		t.Run(http.StatusText(tt.want), func(t *testing.T) {
 			mux, service := simulationMux(t)
 			service.EXPECT().Stop(gomock.Any(), "sim-1", "op-1").Return(models.SimulationRun{ID: "sim-1", Status: tt.status}, tt.err)
-			wantResponse(t, send(mux, "POST", "/simulations/sim-1/stop", mockOperatorKey, ""), tt.want)
+			wantResponse(t, send(mux, "POST", "/simulations/sim-1/stop", mockAdminToken, ""), tt.want)
 		})
 	}
 }

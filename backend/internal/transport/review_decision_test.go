@@ -67,7 +67,7 @@ func (rejectUnexpectedReviewAccess) ReleaseClaim(context.Context, int64) (models
 func reviewRequest(mux *http.ServeMux, method, path, key, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if key != "" {
-		req.Header.Set(platform.APIKeyHeader, key)
+		setTestCredential(req, key)
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -86,7 +86,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 		{http.MethodPost, "/reviews/1/decision"},
 	} {
 		rec := reviewRequest(mux, route.method, route.path, queueTestKey, `{"decision":"approve"}`)
-		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Cache-Control") != "no-store" {
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("%s %s response = %d %s", route.method, route.path, rec.Code, rec.Body)
 		}
 	}
@@ -94,7 +94,7 @@ func TestReviewRoutesRejectUnconfiguredAccess(t *testing.T) {
 
 func TestReviewDecisionRejectsInvalidRequests(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(rejectUnexpectedReviewAccess{}), false), platform.Access{Sessions: consoleTestSessions})
 	const target = "/reviews/1/decision"
 	const body = `{"decision":"approve"}`
 	for _, tc := range []struct {
@@ -214,14 +214,15 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 	second := insertReviewDecision(t, tx, "resolution-second", "review", at, nil, `[]`)
 	allowed := insertReviewDecision(t, tx, "resolution-allowed", "allow", at, nil, `[]`)
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Sessions: consoleTestSessions})
 	until := time.Now().UTC()
 	before := readReviewStats(t, tx, at, until)
 	caseURL := "/reviews/" + strconv.FormatInt(first, 10)
-	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusOK {
+	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondReviewerTestKey, ""); rec.Code != http.StatusOK {
 		t.Fatalf("pending case = %d %s", rec.Code, rec.Body)
 	}
 	submit := func(id int64, key, decision string) *httptest.ResponseRecorder {
+		claimReviewFixture(t, tx, id, consoleTestSessions[key].Username)
 		return postDecision(mux, id, key, `{"decision":"`+decision+`"}`)
 	}
 	for _, tc := range []struct {
@@ -229,15 +230,15 @@ func TestReviewDecisionsAgainstPostgres(t *testing.T) {
 		key, analyst, decision string
 	}{
 		{first, queueTestKey, "first", "approve"},
-		{second, secondAnalystTestKey, "second", "reject"},
+		{second, secondReviewerTestKey, "second", "reject"},
 	} {
 		rec := submit(tc.id, tc.key, tc.decision)
 		checkSavedDecision(t, tx, rec, wantDecision{id: tc.id, analyst: tc.analyst, decision: tc.decision})
 	}
-	if rec := submit(first, secondAnalystTestKey, "reject"); rec.Code != http.StatusConflict {
+	if rec := submit(first, secondReviewerTestKey, "reject"); rec.Code != http.StatusConflict {
 		t.Fatalf("second decision = %d %s", rec.Code, rec.Body)
 	}
-	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondAnalystTestKey, ""); rec.Code != http.StatusNotFound {
+	if rec := reviewRequest(mux, http.MethodGet, caseURL, secondReviewerTestKey, ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("resolved case = %d %s", rec.Code, rec.Body)
 	}
 	if rec := submit(allowed, queueTestKey, "reject"); rec.Code != http.StatusConflict {
@@ -283,8 +284,9 @@ func deviceBlocked(t *testing.T, tx pgx.Tx, device string) bool {
 func TestRejectCanBlockTheDevice(t *testing.T) {
 	tx := testTx(t)
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Sessions: consoleTestSessions})
 	decide := func(id int64, body string) *httptest.ResponseRecorder {
+		claimReviewFixture(t, tx, id, "first")
 		return postDecision(mux, id, queueTestKey, body)
 	}
 	blocked := func(device string) bool { return deviceBlocked(t, tx, device) }
@@ -347,14 +349,14 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	mux := http.NewServeMux()
-	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Analysts: testAnalystKeys(t)})
+	RegisterReviewRoutes(mux, NewReviewHandler(review.NewService(storage.NewReviewStore(tx)), false), platform.Access{Sessions: consoleTestSessions})
 	RegisterScoreRoutes(mux, NewScoreHandler(scoresvc.NewService(storage.NewRulesetStore(tx), storage.NewBlocklistStore(tx), storage.NewPurchaseStore(tx))), serviceTestKey)
 
 	scoreFrom := func(txnID, device string) string {
 		t.Helper()
 		body := `{"transaction_id":"` + txnID + `","event_time":"2026-11-09T10:00:00Z","amount_minor":1999,"player_id":"score-player","card_token":"score-card","device_id":"` + device + `"}`
 		req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(body))
-		req.Header.Set(platform.APIKeyHeader, serviceTestKey)
+		setTestCredential(req, serviceTestKey)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -372,6 +374,7 @@ func TestRejectedDeviceBlocksNextScoredPurchase(t *testing.T) {
 	if _, err := tx.Exec(ctx, `UPDATE purchases SET device_id = $2 WHERE id = $1`, id, device); err != nil {
 		t.Fatalf("set device ID: %v", err)
 	}
+	claimReviewFixture(t, tx, id, "first")
 	rec := reviewRequest(mux, http.MethodPost, "/reviews/"+strconv.FormatInt(id, 10)+"/decision", queueTestKey,
 		`{"decision":"reject","block_device":true}`)
 	if rec.Code != http.StatusCreated {
@@ -409,4 +412,16 @@ func insertReviewDecision(t *testing.T, tx pgx.Tx, txnID, outcome string, decide
 		t.Fatalf("insert decision for %s: %v", txnID, err)
 	}
 	return id
+}
+
+func claimReviewFixture(t *testing.T, tx pgx.Tx, id int64, username string) {
+	t.Helper()
+	_, err := tx.Exec(context.Background(), `INSERT INTO accounts(username,password_hash,role) VALUES($1,'fixture-hash','reviewer') ON CONFLICT(username) DO NOTHING`, username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(context.Background(), `INSERT INTO review_claims(purchase_id,account_id) SELECT d.purchase_id,a.id FROM decisions d JOIN accounts a ON a.username=$2 WHERE d.purchase_id=$1 AND d.outcome='review' ON CONFLICT(purchase_id) DO NOTHING`, id, username)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

@@ -102,7 +102,7 @@ func BenchmarkScoreRequest(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				req := httptest.NewRequest(http.MethodPost, "/score", strings.NewReader(minimalBody))
-				req.Header.Set("X-API-Key", mockServiceKey)
+				setTestCredential(req, mockServiceKey)
 				handler.ServeHTTP(httptest.NewRecorder(), req)
 			}
 		})

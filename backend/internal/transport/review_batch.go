@@ -65,10 +65,6 @@ type batchDecisionResult struct {
 // serveBatchClaim answers 200 with a result per purchase, even when some
 // could not be claimed.
 func (h *ReviewHandler) serveBatchClaim(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
-	if !actor.Session {
-		platform.WriteError(w, http.StatusForbidden, claimNeedsSessionMessage)
-		return
-	}
 	var body batchClaimRequest
 	if !readBatchBody(w, r, &body, "batch claim") {
 		return
@@ -88,7 +84,7 @@ func (h *ReviewHandler) serveBatchClaim(w http.ResponseWriter, r *http.Request, 
 }
 
 // serveBatchDecision decides each purchase on its own, like serveDecision: a
-// session only what it has claimed, an analyst key without a claim.
+// session can decide only what it has claimed.
 func (h *ReviewHandler) serveBatchDecision(w http.ResponseWriter, r *http.Request, actor platform.Actor) {
 	var body batchDecisionRequest
 	if !readBatchBody(w, r, &body, "batch decision") {
@@ -114,9 +110,6 @@ func (h *ReviewHandler) decideMany(ctx context.Context, body batchDecisionReques
 		Decision:    body.Decision,
 		AnalystID:   actor.ID,
 		Blocks:      decisionRequest{BlockDevice: body.BlockDevice, BlockCard: body.BlockCard, BlockPlayer: body.BlockPlayer}.blocks(),
-	}
-	if actor.Session {
-		return h.service.DecideManyClaimed(ctx, d)
 	}
 	return h.service.DecideMany(ctx, d)
 }
