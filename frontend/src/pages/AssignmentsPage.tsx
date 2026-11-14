@@ -3,6 +3,7 @@ import { listAssignments, type OpenClaim, type ReviewerWork } from '../accountAp
 import { releaseClaim } from '../api'
 import { ModelRiskBadge, RuleScoreBadge, TimeDisplayToggle, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
+import { caseAddress } from '../reviews/caseAddress'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { PageHeader } from '../ui/PageHeader'
@@ -133,7 +134,9 @@ function ClaimsTable({ reviewer, time, onRelease }: {
         <tbody role="rowgroup">
           {reviewer.open_claims.map(claim => (
             <tr role="row" key={claim.purchase_id}>
-              <th role="rowheader" scope="row">{claim.purchase_id}</th>
+              <th role="rowheader" scope="row">
+                <a href={caseAddress(claim.purchase_id)} aria-label={`Open purchase ${claim.purchase_id}`}>{claim.purchase_id}</a>
+              </th>
               <td role="cell" data-label="Amount (USD)" className="num">{formatUsdMinor(claim.amount_minor)}</td>
               <td role="cell" data-label="Rule score"><RuleScoreBadge value={claim.rule_score} /></td>
               <td role="cell" data-label="Model risk"><ModelRiskBadge value={claim.model_score} /></td>

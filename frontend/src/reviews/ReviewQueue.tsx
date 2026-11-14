@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { listReviewPage, type ClaimFilter, type NumberedQueuePage, type ReviewSort } from '../api'
 import { TimeDisplayToggle } from '../Display'
 import { useAccount } from '../sessionContext'
@@ -7,6 +7,7 @@ import { SelectMenu } from '../ui/SelectMenu'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { caseAddress, caseInAddress, QUEUE_ADDRESS } from './caseAddress'
 import { BatchDecisionDialog, DecisionDialog } from './DecisionDialog'
 import { ModelPanel } from './ModelPanel'
 import { CaseView } from './ReviewCase'
@@ -26,6 +27,19 @@ function ReviewQueue() {
       <Queue heading={heading} />
     </section>
   )
+}
+
+function useCaseAddress(): [string | null, (purchaseId: string | null) => void] {
+  const [openCase, setOpenCase] = useState(() => caseInAddress(window.location.hash))
+  useEffect(() => {
+    const follow = () => setOpenCase(caseInAddress(window.location.hash))
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [])
+  const open = useCallback((purchaseId: string | null) => {
+    window.location.hash = purchaseId === null ? QUEUE_ADDRESS : caseAddress(purchaseId)
+  }, [])
+  return [openCase, open]
 }
 
 function useQueuePages() {
@@ -50,7 +64,7 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   const [pagination, setPagination] = useState<NumberedQueuePage['pagination'] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
-  const [openCase, setOpenCase] = useState<string | null>(null)
+  const [openCase, setOpenCase] = useCaseAddress()
 
   const loadQueue = useCallback(
     (signal: AbortSignal) => listReviewPage({ sort, page: number, claimed }, signal),
