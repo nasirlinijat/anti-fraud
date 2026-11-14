@@ -50,7 +50,9 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
     received_at: now, recorded_after_decision: true }
   await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...item(), ruleset_version: 3, player_purchases: [], device_activity: null,
     cvv_result: 'mismatch', avs_result: null, three_ds_result: 'authenticated', account_events: [lateLogin],
-    ip_intel: { provider: 'mock', available: true, hosting: false, vpn: true, proxy: false, tor: true } } }))
+    ip_intel: { provider: 'mock', available: true, hosting: false, vpn: true, proxy: false, tor: true },
+    model_reasons: [{ feature: 'card_uses_1h', value: 6, effect: 0.81 }, { feature: 'account_age_days', value: 400, effect: -0.3 },
+      { feature: 'card_country', value: 37, effect: 0.1 }] } }))
   await page.route('**/reviews/demo-purchase/network', route => route.fulfill({ json: { window_days: 30, anchors: [
     { type: 'card', value: 'demo-card', blocklisted: false, linked_total: 0, linked: [] },
     { type: 'player', value: 'demo-player', blocklisted: false, linked_total: 0, linked: [] },
@@ -71,6 +73,13 @@ test('a purchase is claimed, shows its evidence, and is approved only after conf
   await expect(verification).toContainText('Authenticated')
   await expect(page.getByRole('region', { name: 'Recent account events' }).getByText('After the decision')).toBeVisible()
   await expect(page.getByRole('region', { name: 'IP intelligence' })).toContainText('VPN, Tor exit')
+  const reasons = page.getByRole('region', { name: 'Why this model risk' }).getByRole('listitem')
+  await expect(reasons).toHaveCount(3)
+  await expect(reasons.nth(0)).toContainText('Card uses in the last hour: 6')
+  await expect(reasons.nth(0)).toContainText('Raises the risk')
+  await expect(reasons.nth(1)).toContainText('Account age: 400 days')
+  await expect(reasons.nth(1)).toContainText('Lowers the risk')
+  await expect(reasons.nth(2)).toHaveText(/^\W*Card countryRaises the risk$/)
   await page.getByRole('button', { name: 'Back to the queue' }).click()
   await page.getByRole('button', { name: 'Approve demo-transaction' }).click()
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -136,6 +145,7 @@ test('an admin opens a claimed purchase from Assignments and returns with Back',
   await expect(page).toHaveURL(/#\/reviews\/demo-purchase$/)
   await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
   await expect(page.getByText('Claimed by reviewer1').first()).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Why this model risk' })).toContainText('Reasons are not available')
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Assignments' })).toBeVisible()
   await page.goto('/#/reviews/demo-purchase')

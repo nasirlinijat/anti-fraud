@@ -1,5 +1,6 @@
 // Types and calls for the APIs described in openapi.yaml.
 
+import type { ModelReason } from './reviews/modelReasons'
 import { ApiError, request, toErrorResponse, type ErrorResponse } from './request.ts'
 
 export type { ErrorResponse } from './request.ts'
@@ -274,6 +275,7 @@ export interface ReviewCase extends Review {
   three_ds_result: ThreeDsResult | null
   account_events: AccountEvent[]
   ip_intel: IpIntel | null
+  model_reasons?: ModelReason[]
 }
 
 export interface ResolvedReviewCase extends ReviewCase {
