@@ -20,7 +20,7 @@ The frontend is a React and TypeScript app in `frontend/`, built with [Vite](htt
 
 4. Open http://localhost:5173. The top bar shows whether the backend is ready.
 
-The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key only to `POST /score`. Every other request carries the session token of the signed-in account. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
+The development server forwards same-origin API requests to the backend. It reads `PORT` and `API_KEY` from the repository's `.env` file and adds the service key only to `POST /score`, after verifying the caller’s session with `GET /auth/me`. Missing or invalid sessions are rejected without scoring; an unavailable verification returns 503. Every other request carries the session token of the signed-in account. To use another backend, start the server with `BACKEND_URL=http://localhost:<port> npm run dev`.
 
 | Command | What it does |
 |---|---|

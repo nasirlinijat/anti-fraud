@@ -12,6 +12,9 @@ export interface Account {
 export const sessionStorageKey = 'anti-fraud.session'
 
 let token: string | null = null
+let generation = 0
+
+export function sessionGeneration(): number { return generation }
 const rejectionListeners = new Set<() => void>()
 
 function browserStorage(): Storage | null {
@@ -37,10 +40,12 @@ export function restoreSessionToken(): string | null {
     // An unreadable store behaves like a first visit.
     token = null
   }
+  generation++
   return token
 }
 
 export function keepSessionToken(value: string) {
+  generation++
   token = value
   try {
     browserStorage()?.setItem(sessionStorageKey, value)
@@ -50,6 +55,7 @@ export function keepSessionToken(value: string) {
 }
 
 export function forgetSessionToken() {
+  generation++
   token = null
   try {
     browserStorage()?.removeItem(sessionStorageKey)

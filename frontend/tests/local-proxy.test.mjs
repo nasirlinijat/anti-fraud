@@ -18,7 +18,16 @@ function call(port, path, method, headers) {
 
 test('local console proxy checks origin and adds the service key only to score', async t => {
   const forwarded = []
+  let verificationStatus = 200
   const upstream = createServer((req, res) => {
+    if (req.url === '/auth/me' && req.headers.authorization !== 'Bearer session-token') {
+      res.writeHead(401).end()
+      return
+    }
+    if (req.url === '/auth/me' && verificationStatus !== 200) {
+      res.writeHead(verificationStatus).end()
+      return
+    }
     forwarded.push([req.url, req.headers['x-api-key'], req.headers.authorization])
     res.writeHead(204).end()
   })
@@ -43,7 +52,14 @@ test('local console proxy checks origin and adds the service key only to score',
   const origin = `http://127.0.0.1:${port}`
 
   const authorization = 'Bearer session-token'
-  assert.equal(await call(port, '/score', 'POST', { origin, 'x-api-key': 'caller-key' }), 204)
+  assert.equal(await call(port, '/score', 'POST', { origin, authorization, 'x-api-key': 'caller-key' }), 204)
+  const scored = forwarded.filter(([path]) => path === '/score').length
+  assert.equal(await call(port, '/score', 'POST', { origin }), 401)
+  assert.equal(await call(port, '/score', 'POST', { origin, authorization: 'Bearer expired' }), 401)
+  verificationStatus = 503
+  assert.equal(await call(port, '/score', 'POST', { origin, authorization }), 503)
+  verificationStatus = 200
+  assert.equal(forwarded.filter(([path]) => path === '/score').length, scored)
   assert.equal(await call(port, '/auth/login', 'POST', { origin }), 204)
   assert.equal(await call(port, '/auth/me', 'GET', { authorization }), 204)
   assert.equal(await call(port, '/model', 'GET', { authorization }), 204)
@@ -63,7 +79,8 @@ test('local console proxy checks origin and adds the service key only to score',
   assert.equal(await call(port, '/stats/quality?run_id=demo', 'GET', { origin: 'https://example.invalid' }), 403)
   // Only POST /score gets the service key; every other request keeps its own session token.
   assert.deepEqual(forwarded, [
-    ['/score', 'proxy-test-service-key', undefined],
+    ['/auth/me', undefined, authorization],
+    ['/score', 'proxy-test-service-key', authorization],
     ['/auth/login', undefined, undefined],
     ['/auth/me', undefined, authorization],
     ['/model', undefined, authorization],

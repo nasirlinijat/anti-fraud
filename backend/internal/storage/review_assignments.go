@@ -111,9 +111,17 @@ END::text`
 // ReleaseClaim returns a claimed purchase to the shared queue. A decided
 // purchase keeps its claim as the record of who held it.
 func (s *ReviewStore) ReleaseClaim(ctx context.Context, purchaseID int64) (models.ReleaseStatus, error) {
+	tx, err := s.beginReview(ctx, purchaseID)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
 	var status models.ReleaseStatus
-	if err := s.conn.QueryRow(ctx, releaseClaim, purchaseID).Scan(&status); err != nil {
+	if err := tx.QueryRow(ctx, releaseClaim, purchaseID).Scan(&status); err != nil {
 		return "", fmt.Errorf("release claim of review %d: %w", purchaseID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit claim release: %w", err)
 	}
 	return status, nil
 }
