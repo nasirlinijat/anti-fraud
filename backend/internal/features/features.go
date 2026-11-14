@@ -465,3 +465,15 @@ func when(ok bool, value func() float64) float64 {
 	}
 	return value()
 }
+
+func VectorFrom(inputs map[string]float64, names []string) []float64 {
+	x := make([]float64, len(names))
+	for i, name := range names {
+		value, ok := inputs[name]
+		if !ok {
+			value = Missing
+		}
+		x[i] = value
+	}
+	return x
+}

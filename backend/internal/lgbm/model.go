@@ -7,7 +7,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
 
 // node is one entry of a flattened tree. A leaf has feature -1 and stores its
@@ -16,6 +19,7 @@ type node struct {
 	feature     int32
 	left, right int32
 	value       float64
+	internal    float64
 }
 
 // Model is a LightGBM binary classifier loaded from its JSON dump.
@@ -26,13 +30,14 @@ type Model struct {
 }
 
 type rawNode struct {
-	SplitFeature *int32   `json:"split_feature"`
-	Threshold    float64  `json:"threshold"`
-	DecisionType string   `json:"decision_type"`
-	MissingType  string   `json:"missing_type"`
-	LeftChild    *rawNode `json:"left_child"`
-	RightChild   *rawNode `json:"right_child"`
-	LeafValue    float64  `json:"leaf_value"`
+	SplitFeature  *int32   `json:"split_feature"`
+	Threshold     float64  `json:"threshold"`
+	DecisionType  string   `json:"decision_type"`
+	MissingType   string   `json:"missing_type"`
+	InternalValue float64  `json:"internal_value"`
+	LeftChild     *rawNode `json:"left_child"`
+	RightChild    *rawNode `json:"right_child"`
+	LeafValue     float64  `json:"leaf_value"`
 }
 
 type rawModel struct {
@@ -111,7 +116,7 @@ func flatten(root *rawNode, featureCount int) ([]node, error) {
 			return 0, errors.New("split node is missing a child")
 		}
 
-		nodes = append(nodes, node{feature: feature, value: n.Threshold})
+		nodes = append(nodes, node{feature: feature, value: n.Threshold, internal: n.InternalValue})
 		left, err := walk(n.LeftChild)
 		if err != nil {
 			return 0, err
@@ -161,3 +166,51 @@ func (m *Model) Features() []string {
 
 // Trees returns the number of trees in the model.
 func (m *Model) Trees() int { return len(m.trees) }
+
+func (m *Model) Contributions(x []float64) (float64, []float64, error) {
+	if len(x) != len(m.features) {
+		return 0, nil, fmt.Errorf("got %d feature values, want %d", len(x), len(m.features))
+	}
+	base := 0.0
+	contributions := make([]float64, len(m.features))
+	for _, tree := range m.trees {
+		base += tree[0].output()
+		i := int32(0)
+		for tree[i].feature >= 0 {
+			split := tree[i]
+			if x[split.feature] <= split.value {
+				i = split.left
+			} else {
+				i = split.right
+			}
+			contributions[split.feature] += tree[i].output() - split.internal
+		}
+	}
+	return base, contributions, nil
+}
+
+func (n node) output() float64 {
+	if n.feature < 0 {
+		return n.value
+	}
+	return n.internal
+}
+
+func (m *Model) Explain(x []float64, top int) ([]models.ModelReason, error) {
+	_, contributions, err := m.Contributions(x)
+	if err != nil {
+		return nil, err
+	}
+	reasons := make([]models.ModelReason, 0, len(contributions))
+	for i, effect := range contributions {
+		if math.Abs(effect) < 1e-9 {
+			continue
+		}
+		reasons = append(reasons, models.ModelReason{Feature: m.features[i], Value: x[i], Effect: effect})
+	}
+	sort.SliceStable(reasons, func(a, b int) bool { return math.Abs(reasons[a].Effect) > math.Abs(reasons[b].Effect) })
+	if len(reasons) > top {
+		reasons = reasons[:top]
+	}
+	return reasons, nil
+}

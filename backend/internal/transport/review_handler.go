@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/features"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/ipintel"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/platform"
@@ -41,10 +43,16 @@ type ReviewService interface {
 type ReviewHandler struct {
 	service      ReviewService
 	modelEnabled bool
+	explainer    ModelExplainer
 }
 
 func NewReviewHandler(service ReviewService, modelEnabled bool) *ReviewHandler {
 	return &ReviewHandler{service: service, modelEnabled: modelEnabled}
+}
+
+func (h *ReviewHandler) UseExplainer(explainer ModelExplainer) *ReviewHandler {
+	h.explainer = explainer
+	return h
 }
 
 // RegisterReviewRoutes exposes the queue, case evidence, claims, and decisions
@@ -129,6 +137,31 @@ type caseResponse struct {
 	ThreeDSResult   *scoring.ThreeDSResult     `json:"three_ds_result"`
 	AccountEvents   []caseAccountEventResponse `json:"account_events"`
 	IPIntel         *ipIntelResponse           `json:"ip_intel"`
+	ModelReasons    []modelReasonResponse      `json:"model_reasons"`
+}
+
+type modelReasonResponse struct {
+	Feature string  `json:"feature"`
+	Value   float64 `json:"value"`
+	Effect  float64 `json:"effect"`
+}
+
+const modelReasonCount = 5
+
+func (h *ReviewHandler) modelReasons(ctx context.Context, item models.CaseItem) []modelReasonResponse {
+	reasons := []modelReasonResponse{}
+	if h.explainer == nil || item.ModelScore == nil || item.ModelVersion == nil || *item.ModelVersion != h.explainer.Version() || len(item.ModelInputs) == 0 {
+		return reasons
+	}
+	explained, err := h.explainer.Explain(features.VectorFrom(item.ModelInputs, h.explainer.Features()), modelReasonCount)
+	if err != nil {
+		slog.WarnContext(ctx, "explain model score", "purchase_id", item.PurchaseID, "error", err)
+		return reasons
+	}
+	for _, reason := range explained {
+		reasons = append(reasons, modelReasonResponse{Feature: reason.Feature, Value: reason.Value, Effect: reason.Effect})
+	}
+	return reasons
 }
 
 // ipIntelResponse is the IP intelligence lookup saved with the decision.
@@ -307,14 +340,14 @@ func reviewItems(rows []models.QueueItem) []reviewResponse {
 }
 
 func (h *ReviewHandler) serveCase(w http.ResponseWriter, r *http.Request) {
-	readReviewCase(w, r, h.service.Case)
+	readReviewCase(w, r, h.service.Case, h.modelReasons)
 }
 
 func (h *ReviewHandler) serveResolvedCase(w http.ResponseWriter, r *http.Request) {
-	readReviewCase(w, r, h.service.ResolvedCase)
+	readReviewCase(w, r, h.service.ResolvedCase, h.modelReasons)
 }
 
-func readReviewCase(w http.ResponseWriter, r *http.Request, load func(context.Context, int64) (models.CaseItem, error)) {
+func readReviewCase(w http.ResponseWriter, r *http.Request, load func(context.Context, int64) (models.CaseItem, error), explain func(context.Context, models.CaseItem) []modelReasonResponse) {
 	purchaseID, err := strconv.ParseInt(r.PathValue("purchase_id"), 10, 64)
 	if err != nil || purchaseID <= 0 {
 		platform.WriteError(w, http.StatusBadRequest, "invalid purchase ID")
@@ -330,6 +363,7 @@ func readReviewCase(w http.ResponseWriter, r *http.Request, load func(context.Co
 		return
 	}
 	response := newCaseResponse(item)
+	response.ModelReasons = explain(r.Context(), item)
 	if item.Resolution == nil {
 		platform.WriteJSON(w, http.StatusOK, response)
 		return

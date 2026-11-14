@@ -2672,7 +2672,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReviewItem"
         - type: object
-          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events, ip_intel]
+          required: [ruleset_version, player_purchases, device_activity, cvv_result, avs_result, three_ds_result, account_events, ip_intel, model_reasons]
           properties:
             ruleset_version:
               type: integer
@@ -2714,6 +2714,38 @@ components:
                 $ref: "#/components/schemas/CaseAccountEvent"
             ip_intel:
               $ref: "#/components/schemas/CaseIPIntel"
+            model_reasons:
+              type: array
+              maxItems: 5
+              description: >-
+                The model inputs that moved this purchase's own model score the
+                most, strongest first. Each tree splits its output among the
+                features on the path the purchase took, so the effects and the
+                model's base value add up to the score before it becomes a
+                probability and before blending with the player's earlier
+                scores. Empty when the purchase has no model score or was scored
+                by a different model version than the one loaded now.
+              items:
+                $ref: "#/components/schemas/ModelReason"
+
+    ModelReason:
+      type: object
+      required: [feature, value, effect]
+      properties:
+        feature:
+          type: string
+          description: The model feature name.
+          example: card_uses_1h
+        value:
+          type: number
+          format: double
+          description: The feature's value for this purchase; -1 means the value was not known.
+          example: 6
+        effect:
+          type: number
+          format: double
+          description: How much the feature raised (positive) or lowered (negative) the score, in log-odds.
+          example: 0.81
 
     ResolvedReviewCase:
       allOf:

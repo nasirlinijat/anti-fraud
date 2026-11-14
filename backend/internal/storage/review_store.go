@@ -320,7 +320,7 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 	return item, nil
 }
 
-const caseEvidenceColumns = queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel`
+const caseEvidenceColumns = queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel, d.model_inputs`
 
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
@@ -384,8 +384,8 @@ func (s *ReviewStore) ResolvedCase(ctx context.Context, purchaseID int64) (model
 
 func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *models.CaseResolution) (models.CaseItem, error) {
 	c := models.CaseItem{Resolution: resolution}
-	var ipIntel []byte
-	dest := []any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel}
+	var ipIntel, modelInputs []byte
+	dest := []any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel, &modelInputs}
 	if resolution != nil {
 		dest = append(dest, &resolution.Decision, &resolution.AnalystID, &resolution.ResolvedAt)
 	}
@@ -404,6 +404,9 @@ func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *mod
 		if err := json.Unmarshal(ipIntel, &c.IPIntel); err != nil {
 			return models.CaseItem{}, fmt.Errorf("decode IP intelligence of case %d: %w", item.PurchaseID, err)
 		}
+	}
+	if err := json.Unmarshal(modelInputs, &c.ModelInputs); err != nil {
+		return models.CaseItem{}, fmt.Errorf("decode model inputs of case %d: %w", item.PurchaseID, err)
 	}
 	if c.PlayerPurchases, err = s.casePlayerPurchases(ctx, item); err != nil {
 		return models.CaseItem{}, fmt.Errorf("list player purchases for case %d: %w", item.PurchaseID, err)

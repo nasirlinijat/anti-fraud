@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+
+	"github.com/nasirlinijat/anti-fraud/backend/internal/models"
 )
 
 // Scorer gives a fraud score from 0 to 1 for a feature vector. *Model and
 // *Combined implement it.
 type Scorer interface {
 	Predict(x []float64) (float64, error)
+	Explain(x []float64, top int) ([]models.ModelReason, error)
 	Features() []string
 	Version() string
 	Trees() int
@@ -151,4 +154,8 @@ func LoadScorer(path string) (Scorer, error) {
 		return nil, err
 	}
 	return model, nil
+}
+
+func (c *Combined) Explain(x []float64, top int) ([]models.ModelReason, error) {
+	return c.models[0].Explain(x, top)
 }
