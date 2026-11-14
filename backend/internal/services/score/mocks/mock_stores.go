@@ -124,10 +124,10 @@ func (m *MockPurchases) EXPECT() *MockPurchasesMockRecorder {
 }
 
 // CardPurchasesLastHour mocks base method.
-func (m *MockPurchases) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error) {
+func (m *MockPurchases) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (models.CardVelocityHistory, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CardPurchasesLastHour", ctx, cardToken, at)
-	ret0, _ := ret[0].(int)
+	ret0, _ := ret[0].(models.CardVelocityHistory)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

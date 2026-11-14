@@ -32,7 +32,7 @@ type Blocklist interface {
 // Purchases saves decisions and looks up saved decisions and purchase history.
 type Purchases interface {
 	FindSavedDecision(ctx context.Context, p models.Purchase) (*models.Decision, error)
-	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error)
+	CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (models.CardVelocityHistory, error)
 	DeviceCardsLastHour(ctx context.Context, deviceID, cardToken string, at time.Time) (int64, error)
 	TrustedHistory(ctx context.Context, p models.Purchase, windowDays int32) (*scoring.TrustedPurchaseHistory, error)
 	FeatureHistory(ctx context.Context, in features.Input) (features.History, error)
@@ -195,11 +195,12 @@ func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipinte
 	}
 
 	var result scoring.Result
+	var cardVelocity *models.CardVelocitySnapshot
 	if blocked {
 		result = scoring.Result{Outcome: scoring.OutcomeBlock, FiredRules: []scoring.FiredRule{scoring.BlocklistMatch(string(entry.Type))}}
 	} else {
 		rulesCtx, rulesSpan := tracer().Start(ctx, "score.rules")
-		result, err = s.evaluateRules(rulesCtx, p, rs, ruleSignals{modelScore: model.score, ip: ipReputation(ipIntel)})
+		result, cardVelocity, err = s.evaluateRules(rulesCtx, p, rs, ruleSignals{modelScore: model.score, ip: ipReputation(ipIntel)})
 		rulesSpan.SetAttributes(attribute.String("score.outcome", string(result.Outcome)), attribute.Int("score.points", result.Score))
 		endSpan(rulesSpan, err)
 		if err != nil {
@@ -215,6 +216,7 @@ func (s *Service) decide(ctx context.Context, p models.Purchase, ipIntel *ipinte
 		ModelVersion:        model.version,
 		FeatureHistory:      history,
 		IPIntel:             ipIntel,
+		CardVelocity:        cardVelocity,
 	}, nil
 }
 
@@ -251,27 +253,39 @@ type ruleSignals struct {
 
 // evaluateRules runs the rules on a purchase that is not blocklisted. In
 // assist mode the model score then adjusts the outcome.
-func (s *Service) evaluateRules(ctx context.Context, p models.Purchase, rs scoring.Ruleset, signals ruleSignals) (scoring.Result, error) {
-	in, err := s.ruleInput(ctx, p, rs)
+func (s *Service) evaluateRules(ctx context.Context, p models.Purchase, rs scoring.Ruleset, signals ruleSignals) (scoring.Result, *models.CardVelocitySnapshot, error) {
+	history, err := s.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
 	if err != nil {
-		return scoring.Result{}, err
+		return scoring.Result{}, nil, err
+	}
+	in, err := s.ruleInput(ctx, p, rs, history.Count)
+	if err != nil {
+		return scoring.Result{}, nil, err
 	}
 	in.IPReputation = signals.ip
 	result := scoring.Evaluate(in, rs)
 	if signals.modelScore != nil && rs.Model.Mode == scoring.ModelAssist {
 		result.Outcome = scoring.ApplyModel(result.Outcome, *signals.modelScore, rs.Model.Policy(s.policy))
 	}
-	return result, nil
+	return result, cardVelocitySnapshot(result, rs, history, p.EventTime), nil
+}
+
+func cardVelocitySnapshot(result scoring.Result, rs scoring.Ruleset, history models.CardVelocityHistory, at time.Time) *models.CardVelocitySnapshot {
+	for _, rule := range result.FiredRules {
+		if rule.Name == scoring.RuleCardVelocity {
+			return &models.CardVelocitySnapshot{
+				Count: history.Count, Limit: rs.Rules[rule.Name].Limit, PurchaseIDs: history.PurchaseIDs,
+				WindowStart: at.Add(-scoring.CardVelocityWindowMinutes * time.Minute).UTC(), WindowEnd: at.UTC(),
+			}
+		}
+	}
+	return nil
 }
 
 // ruleInput builds the rule input. It reads only the purchase history that
 // the enabled rules need.
-func (s *Service) ruleInput(ctx context.Context, p models.Purchase, rs scoring.Ruleset) (scoring.Input, error) {
-	cardUses, err := s.purchases.CardPurchasesLastHour(ctx, p.CardToken, p.EventTime)
-	if err != nil {
-		return scoring.Input{}, err
-	}
-
+func (s *Service) ruleInput(ctx context.Context, p models.Purchase, rs scoring.Ruleset, cardUses int) (scoring.Input, error) {
+	var err error
 	in := scoring.Input{
 		AmountMinor:           p.AmountMinor,
 		IPCountry:             p.IPCountry,

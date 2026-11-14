@@ -70,7 +70,7 @@ func (d scoreDeps) expectScoredAndSaved(p models.Purchase) *models.Decision {
 	d.rulesets.EXPECT().Active(gomock.Any()).Return(ipRuleset(), nil)
 	d.blocklist.EXPECT().Match(gomock.Any(), gomock.Any()).Return(models.BlocklistEntry{}, false, nil)
 	d.purchases.EXPECT().FeatureHistory(gomock.Any(), gomock.Any()).Return(features.History{}, nil)
-	d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), p.CardToken, p.EventTime).Return(0, nil)
+	d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), p.CardToken, p.EventTime).Return(models.CardVelocityHistory{}, nil)
 	d.purchases.EXPECT().Save(gomock.Any(), p, gomock.Any()).DoAndReturn(
 		func(_ context.Context, _ models.Purchase, decision models.Decision) (int64, error) {
 			*saved = decision

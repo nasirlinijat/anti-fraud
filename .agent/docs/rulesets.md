@@ -10,6 +10,10 @@ Device card count starts off. To enable it, publish a new ruleset with `device_c
 
 New device spike also starts off. The Rulesets page suggests at least 3 trusted purchases in 90 days, a minimum amount of 1,000 minor units, a minimum of 3 times the trusted average, and a weight of 50 points. Trusted history includes allowed purchases and approvals recorded by the time of scoring. Before rolling back to a service version that predates this rule, publish a new ruleset that omits `new_device_spike` and keep the migration that stores its settings for historical versions.
 
+## Card velocity evidence
+
+Card velocity counts existing purchases on the same card after the start of the one-hour window and through the scored purchase's event time. When the rule fires, the decision saves the observed count, limit, window, and up to 50 purchase references from the same database snapshot as the count. If the count exceeds 50, it saves the observation without individual references. The review case displays verified contributors only when the complete set can be retrieved. It returns up to 20 other purchases in the window as investigation context. Neither rule evaluation nor model inputs use that later context.
+
 ## Payment verification rules
 
 A payment gateway checks the card during authorization and reports the results, which the caller passes in the score request as `cvv_result`, `avs_result`, and `three_ds_result`. Three rules read them, and like `country_mismatch` they take no limit:

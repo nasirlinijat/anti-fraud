@@ -298,8 +298,25 @@ func TestCardPurchasesLastHour(t *testing.T) {
 		t.Fatalf("CardPurchasesLastHour: %v", err)
 	}
 	// 59m, 1m, and same second. Exactly one hour earlier, later, and other cards are not counted.
-	if got != 3 {
+	if got.Count != 3 || len(got.PurchaseIDs) != 3 {
 		t.Errorf("CardPurchasesLastHour = %d, want 3", got)
+	}
+}
+
+func TestCardHistoryKeepsTheCountWhenReferencesExceedTheLimit(t *testing.T) {
+	tx := testTx(t)
+	store := NewPurchaseStore(tx)
+	at := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	_, err := tx.Exec(t.Context(), `
+		INSERT INTO purchases (transaction_id, event_time, amount_minor, player_id, card_token)
+		SELECT 'velocity-limit-' || n, $1, 499, 'velocity-player', 'velocity-limit-card'
+		FROM generate_series(1, 51) AS n`, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.CardPurchasesLastHour(t.Context(), "velocity-limit-card", at)
+	if err != nil || got.Count != 51 || len(got.PurchaseIDs) != 0 {
+		t.Fatalf("history = %+v, %v; want a count of 51 with no references", got, err)
 	}
 }
 

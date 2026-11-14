@@ -49,6 +49,8 @@ The console opens on a sign-in screen. Reviewers see only the review queue; admi
 
 After approving or rejecting from a review case, select **View decision** to reopen it. The original case link (`#/reviews/{purchase_id}`) shows the saved decision, analyst, resolution time, and read-only evidence whenever the case has been resolved. **Back to the queue** restores your claim filter, sort order, and page in the same tab. If the queue has shrunk, it opens the last available page. The case groups saved rules, model output, and payment verification under **Evidence at scoring**. Purchase history, account events, and available links appear under **Investigation context**. If the saved score has no model reasons, the case reports that they are unavailable.
 
+Select **Card velocity** in **Fired rules** to open Evidence X-Ray. The panel shows the saved count, rule limit, and one-hour window. **At scoring** lists only verified contributors. **What we know now** also shows recent same-card purchases in that window as investigation context, with a separate label for records saved after scoring. Older decisions without references show their saved rule message. To run the deterministic browser demo and capture its screenshot, use `cd frontend && npm run build && npm run test:browser -- --project=chromium card-velocity.spec.ts`.
+
 ## API documentation
 
 The scoring, account event, dashboard, blocklist, model status, review queue, and ruleset APIs are described in `openapi.yaml`. It documents their requests, responses, and credentials.

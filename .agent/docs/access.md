@@ -35,6 +35,8 @@ A case lists the other purchases awaiting review that share its device, card or 
 
 `GET /reviews/{purchase_id}/resolved` returns the scoring evidence and saved analyst decision for a resolved review. It accepts the same reviewer and admin sessions as the review queue.
 
+Open and resolved case reads can include the saved Card velocity observation, verified contributor details, and related investigation context. They use the existing case authorization. The `/score` response keeps the original fired-rule summary.
+
 A reviewer who rejects a purchase can also blocklist that purchase's own device, card and player, in the same transaction as the rejection (`block_device`, `block_card` and `block_player` on `POST /reviews/{purchase_id}/decision`). That is the only blocklist change a reviewer can make: it covers only the values of the purchase being rejected, a session needs the claim on it, and each entry's reason names who rejected it. Every other blocklist change needs an admin session.
 
 Admins see what each reviewer is working on with `GET /admin/assignments`: every active reviewer, and any other account still holding a claim, with its open claims and the number of purchases it decided. An admin returns a stuck purchase to the shared queue with `DELETE /reviews/{purchase_id}/claim`, for example when a reviewer is away. Both endpoints need an admin session; no key works for them.

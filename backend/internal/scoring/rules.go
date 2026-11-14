@@ -109,8 +109,11 @@ func highAmountMessage(in Input, cfg RuleConfig) string {
 	return fmt.Sprintf("Amount %d minor units is at or above the limit of %d", in.AmountMinor, cfg.Limit)
 }
 
+// CardVelocityWindowMinutes is the length of the card velocity rule window.
+const CardVelocityWindowMinutes = 60
+
 func cardVelocityMessage(in Input, cfg RuleConfig) string {
-	return fmt.Sprintf("Card used %d %s in 60 minutes (limit %d)", in.CardPurchasesLastHour, plural(int64(in.CardPurchasesLastHour), "time", "times"), cfg.Limit)
+	return fmt.Sprintf("Card used %d %s in %d minutes (limit %d)", in.CardPurchasesLastHour, plural(int64(in.CardPurchasesLastHour), "time", "times"), CardVelocityWindowMinutes, cfg.Limit)
 }
 
 func deviceCardCountMessage(in Input, cfg RuleConfig) string {
