@@ -69,7 +69,7 @@ function Console({ account }: { account: Account }) {
   const path = useHashPath()
   const allowed = pages.filter(page => page.roles.includes(account.role))
   const home = allowed[0]
-  const requested = pages.find(page => page.path === path)
+  const requested = pages.find(page => path === page.path || path.startsWith(`${page.path}/`))
   const page = requested ?? home
   const permitted = allowed.includes(page)
   const title = permitted ? page.title : 'Not available'

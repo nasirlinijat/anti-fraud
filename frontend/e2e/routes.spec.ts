@@ -122,6 +122,29 @@ test('a purchase claimed by another account offers no decision', async ({ page }
   await expect(page.getByRole('button', { name: /^(Claim|Approve|Reject) demo-transaction$/ })).toHaveCount(0)
 })
 
+test('an admin opens a claimed purchase from Assignments and returns with Back', async ({ page }) => {
+  const claim = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction', player_id: 'demo-player', device_id: null,
+    amount_minor: '72609', event_time: now, queued_at: now, rule_score: 50, model_score: 0.3536, model_version: 'demo-model', fired_rules: [],
+    claimed_by: 'reviewer1', claimed_at: now }
+  await page.route('**/admin/assignments', route => route.fulfill({ json: { reviewers: [{ username: 'reviewer1', role: 'reviewer', disabled: false,
+    decided: 3, open_claims: [{ purchase_id: 'demo-purchase', amount_minor: '72609', rule_score: 50, model_score: 0.3536, claimed_at: now }] }] } }))
+  await page.route('**/reviews/demo-purchase', route => route.fulfill({ json: { ...claim, ruleset_version: 3, player_purchases: [],
+    device_activity: null, cvv_result: null, avs_result: null, three_ds_result: null, account_events: [], ip_intel: null } }))
+  await page.route('**/reviews/demo-purchase/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+  await page.goto('/#/assignments')
+  await page.getByRole('link', { name: 'Open purchase demo-purchase' }).click()
+  await expect(page).toHaveURL(/#\/reviews\/demo-purchase$/)
+  await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
+  await expect(page.getByText('Claimed by reviewer1').first()).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Assignments' })).toBeVisible()
+  await page.goto('/#/reviews/demo-purchase')
+  await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
+  await page.getByRole('button', { name: 'Back to the queue' }).click()
+  await expect(page).toHaveURL(/#\/reviews$/)
+  await expect(page.getByRole('heading', { name: 'Review queue' })).toBeVisible()
+})
+
 const wideRow = { purchase_id: 'demo-purchase', transaction_id: 'demo-transaction-with-a-long-identifier', player_id: 'demo-player',
   device_id: null, amount_minor: '1999', event_time: now, queued_at: now, rule_score: 40, model_score: 0.7, model_version: 'demo-model',
   fired_rules: [{ name: 'high_amount', points: 40, message: 'Amount is above the limit for a new account' }],
