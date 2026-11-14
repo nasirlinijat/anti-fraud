@@ -19,6 +19,7 @@ const (
 
 type Store interface {
 	List(ctx context.Context) ([]models.StoredBlocklistEntry, error)
+	ListPage(ctx context.Context, query models.BlocklistQuery) (models.BlocklistPage, error)
 	Add(ctx context.Context, e models.BlocklistEntry, operatorID string) (models.StoredBlocklistEntry, error)
 	Remove(ctx context.Context, id int64, operatorID string) error
 }

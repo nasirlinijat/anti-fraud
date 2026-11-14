@@ -236,6 +236,11 @@ func (s *CachedBlocklistStore) List(ctx context.Context) ([]models.StoredBlockli
 	return s.db.List(ctx)
 }
 
+// ListPage reads the current PostgreSQL page without changing the Redis mirror.
+func (s *CachedBlocklistStore) ListPage(ctx context.Context, query models.BlocklistQuery) (models.BlocklistPage, error) {
+	return s.db.ListPage(ctx, query)
+}
+
 type matchCandidate struct {
 	entry models.BlocklistEntry
 	id    int64

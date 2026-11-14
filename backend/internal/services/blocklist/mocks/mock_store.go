@@ -71,6 +71,21 @@ func (mr *MockStoreMockRecorder) List(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockStore)(nil).List), ctx)
 }
 
+// ListPage mocks base method.
+func (m *MockStore) ListPage(ctx context.Context, query models.BlocklistQuery) (models.BlocklistPage, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPage", ctx, query)
+	ret0, _ := ret[0].(models.BlocklistPage)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPage indicates an expected call of ListPage.
+func (mr *MockStoreMockRecorder) ListPage(ctx, query any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPage", reflect.TypeOf((*MockStore)(nil).ListPage), ctx, query)
+}
+
 // Remove mocks base method.
 func (m *MockStore) Remove(ctx context.Context, id int64, operatorID string) error {
 	m.ctrl.T.Helper()

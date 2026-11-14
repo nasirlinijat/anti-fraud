@@ -1258,31 +1258,92 @@ paths:
       tags: [Blocklist]
       operationId: listBlocklist
       summary: List blocklist entries
-      description: Returns all entries, the newest first.
+      description: |
+        Requires an admin session. With any type, q, page or page_size parameter,
+        returns a bounded page and matching counts from one database snapshot.
+        Without parameters, retains the complete legacy entries-only response.
+        Order is created_at DESC, id DESC. A valid page beyond the last page is
+        clamped before calculating its offset; zero matches returns page 1 of 1.
+        Counts cover the full filtered dataset, before pagination. Separate
+        requests observe the current saved state, not a frozen browsing session.
+
+        Type and text filters combine with AND. Text matches a literal substring
+        in value OR reason after PostgreSQL locale-aware lowercasing, without
+        accent folding or Unicode normalization. Percent, underscore, backslash,
+        quotes and regex punctuation have no special meaning. Surrounding spaces
+        are trimmed. The supplied q is limited to 200 Unicode characters and
+        800 decoded UTF-8 bytes, with no control characters or malformed UTF-8.
+        Empty type or q means no corresponding filter.
+
+        Repeated or unsupported parameters, invalid URL encoding and an encoded
+        query string over 4096 bytes return 400. Service keys do not authorize
+        this endpoint. Reads never change or replace the complete Redis mirror.
       security:
         - SessionAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: ["", card, device, player, ip]
+          description: Optional entry type. Omitted or empty selects all types.
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+          description: Literal substring in stored values or reasons, at most 800 decoded UTF-8 bytes. Empty selects all text.
+        - name: page
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+            maximum: 9223372036854775807
+            default: 1
+          description: Positive decimal digits only. Values beyond the last page are clamped.
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Positive decimal digits only. Values outside the supported range are rejected.
       responses:
         "200":
-          description: All entries.
+          description: A bounded page when parameters are supplied; otherwise the complete legacy list.
           content:
             application/json:
               schema:
-                type: object
-                required: [entries]
-                properties:
-                  entries:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/BlocklistEntry"
-        "401":
-          description: >-
-            The API key is missing or wrong. With an Authorization header, a missing or invalid session.
+                anyOf:
+                  - $ref: "#/components/schemas/BlocklistPage"
+                  - type: object
+                    required: [entries]
+                    properties:
+                      entries:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/BlocklistEntry"
+        "400":
+          description: Invalid query parameters. Fields name the problems without echoing the search text.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: missing or invalid API key
+                error: invalid request
+                fields:
+                  page_size: must be an integer from 1 to 100
+        "401":
+          description: >-
+            The session is missing or invalid. A service key does not grant access.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: missing or invalid session
         "403":
           $ref: "#/components/responses/RoleNotAllowed"
         "500":
@@ -4397,6 +4458,24 @@ components:
                   allow: { type: integer, minimum: 0 }
                   review: { type: integer, minimum: 0 }
                   block: { type: integer, minimum: 0 }
+
+    BlocklistPage:
+      type: object
+      required: [entries, pagination]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BlocklistEntry"
+        pagination:
+          type: object
+          required: [page, page_size, total_pages, total_items]
+          properties:
+            page: { type: integer, format: int64, minimum: 1 }
+            page_size: { type: integer, minimum: 1, maximum: 100 }
+            total_pages: { type: integer, format: int64, minimum: 1 }
+            total_items: { type: integer, format: int64, minimum: 0 }
 
     BlocklistEntry:
       type: object

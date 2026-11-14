@@ -25,6 +25,7 @@ This review covers the Docker Compose stack, its AWS gateway, and the Vite devel
 - PostgreSQL integration tests verify that the API role can change configuration through the application and cannot read or alter audit records or create application tables.
 - The backend tests cover duplicate credential headers, protected response headers, invalid and oversized blocklist bodies, distinct reviewer sessions, and review resolution.
 - The Vite proxy integration test checks same-origin service access, reviewer session forwarding, and rejection of requests with a foreign origin or host before they reach the backend.
+- Blocklist search remains admin-only and bounded, while the internal complete read still rebuilds the Redis mirror. The edge strips query strings from access logs without changing forwarded requests; a real Caddy integration test covers repeated, encoded and malformed queries containing a synthetic private marker. Backend request logs omit the search text too.
 
 ## Operational follow-ups
 

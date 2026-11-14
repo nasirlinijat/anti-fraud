@@ -69,7 +69,9 @@ export async function mockConsole(page: Page, role: Role | null = 'admin') {
     if (url.pathname === '/stats') return route.fulfill({ json: statistics((url.searchParams.get('period') ?? '24h') as Period) })
     if (url.pathname === '/stats/quality/runs') return route.fulfill({ json: { source, run_ids: [runId], next_cursor: url.searchParams.has('after') ? undefined : runId } })
     if (url.pathname === '/stats/quality') return route.fulfill({ json: quality(source, url.searchParams.get('run_id') ?? runId) })
-    if (url.pathname === '/blocklist') return route.fulfill({ json: { entries: [] } })
+    if (url.pathname === '/blocklist') return route.fulfill({ json: {
+      entries: [], pagination: { page: 1, page_size: 25, total_pages: 1, total_items: 0 },
+    } })
     if (url.pathname.startsWith('/simulations')) return route.fulfill({ status: 503, json: { error: 'Simulations are disabled.' } })
     if (url.pathname === '/model') return route.fulfill({ json: {
       loaded: true, version: 'lgbm-game-v9', mode: 'assist', clear_below: 0.011527, flag_at: 0.544632,

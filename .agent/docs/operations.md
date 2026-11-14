@@ -57,6 +57,10 @@ Stage 1 of scoring matches cards, player IDs, devices, and IP addresses against 
 - **Cache flush and reload.** If the Redis cache is flushed (`redis-cli flushdb`), the missing `ready` key triggers an asynchronous reload from PostgreSQL on the next score request.
 - **Configuration.** Set `REDIS_URL` to enable the cache (e.g. `redis://localhost:6379/0`). When unset or empty, the cache is disabled and scoring queries PostgreSQL directly.
 
+Administrative paging uses a separate PostgreSQL `ListPage` operation. The complete `List` operation remains unfiltered and unbounded for Redis reloads and startup reporting, regardless of console filters. Neither administrative read writes to Redis. Operator writes and review-generated blocks retain their committed-write-then-refresh behavior.
+
+The console requests 25 rows per page; the API permits 1–100. Type and literal text filters apply before the matching count and page are read from one snapshot. Migration 000034 adds newest-first and type/newest-first ordering indexes. The existing unique type/value index still serves scoring lookups. Literal `strpos(lower(...),lower(...))` searches and exact matching counts can scan candidates; the ordering indexes do not index arbitrary substrings. Empty matches skip the subsequent row query. Check actual plans and candidate cardinality before considering a text-search extension. No extension is required for this implementation. The full query contract is in [development.md](development.md#blocklist-search-and-pages).
+
 ## Scoring metrics
 
 When `DOGSTATSD_ADDR` is set (`host:port`, for example `datadog:8125`), the backend sends DogStatsD metrics to the Datadog agent for every decision it saves. Retries that return an already saved decision are not counted again. `deploy/compose.datadog.yml` sets the address and lets the agent accept metrics from other containers, so production sends them whenever Datadog is deployed. Empty turns them off.
@@ -86,6 +90,8 @@ The backend writes one JSON object per line to standard output with `log/slog`, 
 - Responses with status 500 or more are logged at `ERROR`. Successful `/health` and `/ready` checks are not logged.
 - A panic in a handler is recovered: the client gets a 500 JSON error and the log gets the stack.
 - API keys, card tokens and IP addresses are never logged; a test checks this.
+
+The HTTPS edge omits the query-string portion of `request.uri` from access logs, including malformed or repeated query parameters. This protects blocklist search text, which may contain card tokens, player/device IDs or IP addresses. Path, method, status and timing remain available, and the forwarded request URI is unchanged. Backend request logs keep route patterns rather than raw URLs; query values are not added to database tracing attributes. Integration checks run the Caddy 2.11 configuration and verify both redaction and unchanged requests.
 
 The same middleware sets the security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` and `Referrer-Policy: no-referrer`. HTTPS and HSTS are added by the Caddy edge in production.
 

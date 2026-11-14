@@ -17,6 +17,7 @@ const maxBlocklistBodyBytes = 4 << 10
 
 type BlocklistService interface {
 	List(ctx context.Context) ([]models.StoredBlocklistEntry, error)
+	ListPage(ctx context.Context, query models.BlocklistQuery) (models.BlocklistPage, error)
 	Add(ctx context.Context, e models.BlocklistEntry, operatorID string) (models.StoredBlocklistEntry, error)
 	Remove(ctx context.Context, id int64, operatorID string) error
 }
@@ -31,7 +32,7 @@ func NewBlocklistHandler(service BlocklistService) *BlocklistHandler {
 }
 
 // RegisterBlocklistRoutes registers GET and POST /blocklist and DELETE /blocklist/{id}
-// behind API key authentication.
+// behind admin session authentication.
 func RegisterBlocklistRoutes(mux *http.ServeMux, h *BlocklistHandler, access platform.Access) {
 	mux.Handle("GET /blocklist", access.ConfigRead(http.HandlerFunc(h.list)))
 	mux.Handle("POST /blocklist", access.ConfigWrite(h.add))
@@ -49,6 +50,15 @@ type blocklistAddRequest struct {
 }
 
 func (h *BlocklistHandler) list(w http.ResponseWriter, r *http.Request) {
+	query, invalid := parseBlocklistQuery(r.URL.RawQuery)
+	if invalid != nil {
+		writeBlocklistQueryError(w, invalid)
+		return
+	}
+	if query != nil {
+		h.listPage(w, r, *query)
+		return
+	}
 	entries, err := h.service.List(r.Context())
 	if err != nil {
 		blocklistError(w, r, err)
