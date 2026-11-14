@@ -1,2 +1,12 @@
+FROM mikefarah/yq:4.44.3 AS spec
+WORKDIR /tmp/spec
+COPY openapi.yaml deploy/docs/integration.md ./
+RUN yq '.info.description = load_str("integration.md") | .servers = [{"url": "/", "description": "This server"}] | .paths = (.paths | with_entries(select(.key == "/score" or .key == "/health" or .key == "/ready"))) | .tags = [.tags[] | select(.name == "Score" or .name == "Health")]' openapi.yaml > public.yaml
+
+FROM swaggerapi/swagger-ui:v5.31.0 AS swagger
+
 FROM caddy:2.11-alpine
-COPY Caddyfile /etc/caddy/Caddyfile
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=swagger /usr/share/nginx/html/swagger-ui.css /usr/share/nginx/html/swagger-ui-bundle.js /usr/share/nginx/html/favicon-32x32.png /srv/docs/
+COPY deploy/docs/index.html deploy/docs/swagger-initializer.js /srv/docs/
+COPY --from=spec /tmp/spec/public.yaml /srv/docs/openapi.yaml

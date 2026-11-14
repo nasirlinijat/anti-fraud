@@ -7,6 +7,9 @@ on:
       - frontend/**
       - deploy/Caddyfile
       - deploy/Dockerfile.edge
+      - deploy/Dockerfile.edge.dockerignore
+      - deploy/docs/**
+      - openapi.yaml
       - deploy/helm/**
       - deploy/datadog/**
       - deploy/k8s-deploy.sh
@@ -18,6 +21,9 @@ on:
       - frontend/**
       - deploy/Caddyfile
       - deploy/Dockerfile.edge
+      - deploy/Dockerfile.edge.dockerignore
+      - deploy/docs/**
+      - openapi.yaml
       - deploy/helm/**
       - deploy/datadog/**
       - deploy/k8s-deploy.sh
@@ -93,7 +99,7 @@ jobs:
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-backend:$TAG" backend
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-dbsetup:$TAG" -f backend/Dockerfile.dbsetup backend
           docker build -t "ghcr.io/nasirlinijat/anti-fraud-frontend:$TAG" frontend
-          docker build -t "ghcr.io/nasirlinijat/anti-fraud-edge:$TAG" -f deploy/Dockerfile.edge deploy
+          docker build -t "ghcr.io/nasirlinijat/anti-fraud-edge:$TAG" -f deploy/Dockerfile.edge .
 
       - uses: helm/kind-action@v1
         with:
@@ -135,6 +141,10 @@ jobs:
             | tee score.json
           grep -q '"outcome"' score.json
           console http://127.0.0.1:8088/ | grep -qi '<html'
+          api http://127.0.0.1:8088/docs/ | grep -q 'swagger-ui'
+          api http://127.0.0.1:8088/docs/openapi.yaml > public-openapi.yaml
+          grep -q '^  /score:' public-openapi.yaml
+          if grep -qE '^  /(admin|reviews|auth|rulesets)' public-openapi.yaml; then echo "internal endpoints in the public docs"; exit 1; fi
           status=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: api.localhost" http://127.0.0.1:8088/admin/accounts)
           test "$status" = 404
           password=$(openssl rand -hex 16)
