@@ -1,0 +1,2 @@
+DROP INDEX blocklist_entries_type_newest_idx;
+DROP INDEX blocklist_entries_newest_idx;

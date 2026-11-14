@@ -11,6 +11,8 @@
 			request>headers>X-Api-Key delete
 			request>headers>Authorization delete
 			request>headers>Cookie delete
+			# Search values can contain blocked identifiers, even in malformed queries.
+			request>uri regexp "[?].*" ""
 		}
 	}
 }

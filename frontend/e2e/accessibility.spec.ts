@@ -17,8 +17,9 @@ async function mockPopulatedLists(page: Page) {
     next_cursor: null, model_enabled: true, pagination: { page: 1, total_pages: 1, total_items: 0 },
   } }))
   await page.route('**/simulations?*', route => route.fulfill({ json: { items: [], available_scenarios: ['normal'] } }))
-  await page.route('**/blocklist', route => route.fulfill({ json: {
+  await page.route(/\/blocklist(?:\?.*)?$/, route => route.fulfill({ json: {
     entries: [{ id: 1, type: 'player', value: 'demo-player', reason: 'Synthetic example', created_at: now }],
+    pagination: { page: 1, page_size: 25, total_pages: 1, total_items: 1 },
   } }))
   await page.route('**/admin/accounts', route => route.fulfill({ json: { accounts: [
     { username: 'demo-user', role: 'admin', disabled: false, created_at: now },

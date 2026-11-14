@@ -206,19 +206,20 @@ test('Blocklist entries are added with the session and removed after confirmatio
   let saved = false
   const writes: (string | undefined)[] = []
   const entry = { id: 1, type: 'player', value: 'demo-player', reason: 'Synthetic example', created_at: now }
-  await page.route('**/blocklist', async route => {
+  await page.route(/\/blocklist(?:\?.*)?$/, async route => {
     if (route.request().method() === 'POST') {
       saved = true
       writes.push(route.request().headers().authorization)
       return route.fulfill({ status: 201, json: entry })
     }
-    return route.fulfill({ json: { entries: saved ? [entry] : [] } })
+    return route.fulfill({ json: { entries: saved ? [entry] : [],
+      pagination: { page: 1, page_size: 25, total_pages: 1, total_items: saved ? 1 : 0 } } })
   })
   await page.route('**/blocklist/1', async route => { saved = false; await route.fulfill({ status: 204 }) })
   await page.goto('/#/blocklist')
   await page.getByLabel('Type', { exact: true }).selectOption('player')
-  await page.getByLabel('Value', { exact: false }).fill('demo-player')
-  await page.getByLabel('Reason', { exact: false }).fill('Synthetic example')
+  await page.getByRole('form', { name: 'Add an entry' }).getByLabel('Value', { exact: false }).fill('demo-player')
+  await page.getByRole('form', { name: 'Add an entry' }).getByLabel('Reason', { exact: false }).fill('Synthetic example')
   await page.getByRole('button', { name: 'Add to blocklist' }).click()
   await expect(page.getByRole('rowheader', { name: 'demo-player', exact: true })).toBeVisible()
   expect(writes).toEqual([`Bearer ${sessionToken}`])

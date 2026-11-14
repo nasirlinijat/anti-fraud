@@ -108,6 +108,21 @@ export interface BlocklistEntry {
   created_at: string
 }
 
+export interface BlocklistFilters {
+  type: EntryType | ''
+  q: string
+}
+
+export interface BlocklistQuery extends BlocklistFilters {
+  page: number
+  page_size: number
+}
+
+export interface BlocklistPage {
+  entries: BlocklistEntry[]
+  pagination: { page: number; page_size: number; total_pages: number; total_items: number }
+}
+
 export type Saved<T> = { ok: true; value: T } | { ok: false; error: ErrorResponse }
 
 export async function save<T>(operation: () => Promise<T>): Promise<Saved<T>> {
@@ -228,9 +243,11 @@ export function previewRuleset(config: RulesetConfig): Promise<Saved<RulesetPrev
   }))
 }
 
-export async function listBlocklist(signal?: AbortSignal): Promise<BlocklistEntry[]> {
-  const result = await request<{ entries: BlocklistEntry[] }>('/blocklist', { signal })
-  return result.entries
+export function listBlocklist(query: BlocklistQuery, signal?: AbortSignal): Promise<BlocklistPage> {
+  const params = new URLSearchParams({ page: String(query.page), page_size: String(query.page_size) })
+  if (query.type) params.set('type', query.type)
+  if (query.q) params.set('q', query.q)
+  return request(`/blocklist?${params}`, { signal })
 }
 
 export function addBlocklistEntry(entry: { type: string; value: string; reason: string }): Promise<Saved<BlocklistEntry>> {

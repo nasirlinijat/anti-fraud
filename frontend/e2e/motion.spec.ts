@@ -22,8 +22,9 @@ test('the mobile menu slides in and out and stays usable while it moves', async 
 })
 
 test('buttons, pages and confirmations animate briefly', async ({ page }) => {
-  await page.route('**/blocklist', route => route.fulfill({ json: {
+  await page.route(/\/blocklist(?:\?.*)?$/, route => route.fulfill({ json: {
     entries: [{ id: 1, type: 'player', value: 'demo-player', reason: 'Synthetic example', created_at: '2026-11-12T12:00:00Z' }],
+    pagination: { page: 1, page_size: 25, total_pages: 1, total_items: 1 },
   } }))
   await page.goto('/#/blocklist')
   await expect(page.locator('.blocklist')).toHaveCSS('animation-name', 'rise-in')

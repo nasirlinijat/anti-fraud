@@ -2,26 +2,21 @@ import { type FormEvent, useState } from 'react'
 import {
   addBlocklistEntry,
   entryTypes,
-  listBlocklist,
   removeBlocklistEntry,
   type BlocklistEntry,
   type EntryType,
   type ErrorResponse,
 } from '../api'
 import { TimeDisplayToggle, Timestamp } from '../Display'
+import { BlocklistFilters } from '../blocklist/BlocklistFilters'
+import { BlocklistPages } from '../blocklist/BlocklistPages'
+import { typeNames } from '../blocklist/entryTypes'
+import { useBlocklistPage } from '../blocklist/useBlocklistPage'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { PageHeader } from '../ui/PageHeader'
-import { usePolling } from '../usePolling'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
-
-const typeNames: Record<EntryType, string> = {
-  card: 'Card token',
-  device: 'Device ID',
-  player: 'Player ID',
-  ip: 'IP address',
-}
 
 const placeholders: Record<EntryType, string> = {
   card: 'card-7f3a',
@@ -31,21 +26,15 @@ const placeholders: Record<EntryType, string> = {
 }
 
 function BlocklistPage() {
-  const [entries, setEntries] = useState<BlocklistEntry[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const page = useBlocklistPage()
+  const { result, error: loadError, pending, retry, reconcile } = page
+  const entries = result?.entries
   const [toRemove, setToRemove] = useState<BlocklistEntry | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
   const time = useTimeDisplay()
 
-  const { refresh, retry, pending } = usePolling(listBlocklist, {
-    onSuccess: (list) => {
-      setEntries(list)
-      setLoadError(null)
-    },
-    onError: (error) => setLoadError(error instanceof Error ? error.message : 'The blocklist cannot be loaded.'),
-  })
   // While the list itself cannot be loaded, its own error offers the retry.
   const refreshEntries = loadError ? undefined : retry
 
@@ -59,7 +48,8 @@ function BlocklistPage() {
     setRemoving(null)
     if (res.ok) setNotice(`${typeNames[entry.type]} ${entry.value} is no longer blocked.`)
     else setRemoveError(res.error.error)
-    refresh()
+    if (document.activeElement?.closest('.blocklist table')) document.getElementById('blocklist-entries')?.focus()
+    reconcile()
   }
 
   return (
@@ -69,23 +59,29 @@ function BlocklistPage() {
       <div className="split-layout">
         <section className="panel" aria-labelledby="blocklist-entries">
           <div className="panel-head">
-            <h2 id="blocklist-entries">Entries{entries ? ` (${entries.length})` : ''}</h2>
+            <h2 id="blocklist-entries" tabIndex={-1}>Entries{result ? ` (${result.pagination.total_items})` : ''}</h2>
             {entries && entries.length > 0 && <TimeDisplayToggle display={time} />}
           </div>
+          <BlocklistFilters error={loadError} onApply={page.apply} />
           <p className={notice ? 'notice' : 'visually-hidden'} role="status">{notice}</p>
-          {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError}</ErrorState>}
+          {loadError && <ErrorState onRetry={retry} pending={pending}>{loadError.error}</ErrorState>}
           {removeError && (
             <ErrorState onRetry={refreshEntries} retryLabel="Refresh entries" pending={pending}>
               {removeError}
             </ErrorState>
           )}
           {!entries && (!loadError || pending) && <LoadingSkeleton shape="table" label="Loading blocklist…" />}
-          {entries && entries.length === 0 && <EmptyState>The blocklist is empty. Use Add an entry to block a value.</EmptyState>}
+          {result && <BlocklistPages pagination={result.pagination} busy={pending || removing !== null} onPage={page.goTo} />}
+          {entries && entries.length === 0 && (
+            <EmptyState>{page.query.type || page.query.q
+              ? 'No entries match these filters. Clear filters to see all entries.'
+              : 'The blocklist is empty. Use Add an entry to block a value.'}</EmptyState>
+          )}
           {entries && entries.length > 0 && (
             <EntriesTable entries={entries} time={time} disabled={removing !== null} onRemove={setToRemove} />
           )}
         </section>
-        <AddEntryForm pending={pending} onRefresh={refreshEntries} onNotice={setNotice} onAdded={refresh} />
+        <AddEntryForm pending={pending} onRefresh={refreshEntries} onNotice={setNotice} onAdded={page.afterAdd} onReconcile={reconcile} />
       </div>
       <ConfirmDialog open={toRemove !== null} title="Remove this entry?" confirmLabel="Remove entry" danger
         onCancel={() => setToRemove(null)} onConfirm={() => { if (toRemove) void remove(toRemove) }}>
@@ -98,11 +94,12 @@ function BlocklistPage() {
   )
 }
 
-function AddEntryForm({ pending, onRefresh, onNotice, onAdded }: {
+function AddEntryForm({ pending, onRefresh, onNotice, onAdded, onReconcile }: {
   pending: boolean
   onRefresh?: () => void
   onNotice: (notice: string | null) => void
   onAdded: () => void
+  onReconcile: () => void
 }) {
   const [type, setType] = useState<EntryType>('card')
   const [value, setValue] = useState('')
@@ -120,6 +117,7 @@ function AddEntryForm({ pending, onRefresh, onNotice, onAdded }: {
     setSaving(false)
     if (!res.ok) {
       setFormError(res.error)
+      if (!res.error.fields) onReconcile()
       return
     }
     setFormError(null)

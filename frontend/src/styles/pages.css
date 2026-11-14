@@ -749,3 +749,21 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   align-items: center;
   gap: var(--space-xs);
 }
+
+.blocklist-filters {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(12rem, 2fr);
+  gap: 1rem;
+  margin-block-end: 1rem;
+}
+
+.blocklist-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 40rem) {
+  .blocklist-filters { grid-template-columns: minmax(0, 1fr); }
+}

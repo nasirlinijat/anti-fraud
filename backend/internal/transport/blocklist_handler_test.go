@@ -22,6 +22,7 @@ type fakeEntries struct {
 	entries []models.StoredBlocklistEntry
 	added   []models.BlocklistEntry
 	removed []int64
+	queries []models.BlocklistQuery
 	err     error
 	addErr  error
 	rmErr   error
@@ -29,6 +30,13 @@ type fakeEntries struct {
 
 func (f *fakeEntries) List(context.Context) ([]models.StoredBlocklistEntry, error) {
 	return f.entries, f.err
+}
+
+func (f *fakeEntries) ListPage(_ context.Context, query models.BlocklistQuery) (models.BlocklistPage, error) {
+	f.queries = append(f.queries, query)
+	return models.BlocklistPage{Entries: f.entries, Pagination: models.BlocklistPagination{
+		Page: query.Page, PageSize: query.PageSize, TotalItems: int64(len(f.entries)), TotalPages: 1,
+	}}, f.err
 }
 
 func (f *fakeEntries) Add(_ context.Context, e models.BlocklistEntry, _ string) (models.StoredBlocklistEntry, error) {
@@ -186,7 +194,7 @@ func TestRemoveEntry(t *testing.T) {
 	}
 }
 
-func TestBlocklistRequiresAPIKey(t *testing.T) {
+func TestBlocklistRequiresSession(t *testing.T) {
 	for _, r := range []struct{ method, path string }{
 		{http.MethodGet, "/blocklist"},
 		{http.MethodPost, "/blocklist"},
