@@ -258,6 +258,21 @@ func (mr *MockReviewServiceMockRecorder) NetworkPurchases(ctx, purchaseID, ancho
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NetworkPurchases", reflect.TypeOf((*MockReviewService)(nil).NetworkPurchases), ctx, purchaseID, anchor, value)
 }
 
+// PurchaseCase mocks base method.
+func (m *MockReviewService) PurchaseCase(ctx context.Context, purchaseID int64) (models.PurchaseCase, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PurchaseCase", ctx, purchaseID)
+	ret0, _ := ret[0].(models.PurchaseCase)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PurchaseCase indicates an expected call of PurchaseCase.
+func (mr *MockReviewServiceMockRecorder) PurchaseCase(ctx, purchaseID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PurchaseCase", reflect.TypeOf((*MockReviewService)(nil).PurchaseCase), ctx, purchaseID)
+}
+
 // Queue mocks base method.
 func (m *MockReviewService) Queue(ctx context.Context, order models.QueueOrder, after *models.QueueCursor, claimedBy *string) (review.Page, error) {
 	m.ctrl.T.Helper()
@@ -315,6 +330,21 @@ func (m *MockReviewService) ResolvedCase(ctx context.Context, purchaseID int64) 
 func (mr *MockReviewServiceMockRecorder) ResolvedCase(ctx, purchaseID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvedCase", reflect.TypeOf((*MockReviewService)(nil).ResolvedCase), ctx, purchaseID)
+}
+
+// SearchPurchases mocks base method.
+func (m *MockReviewService) SearchPurchases(ctx context.Context, query string) ([]models.PurchaseMatch, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SearchPurchases", ctx, query)
+	ret0, _ := ret[0].([]models.PurchaseMatch)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SearchPurchases indicates an expected call of SearchPurchases.
+func (mr *MockReviewServiceMockRecorder) SearchPurchases(ctx, query any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchPurchases", reflect.TypeOf((*MockReviewService)(nil).SearchPurchases), ctx, query)
 }
 
 // MockRulesetService is a mock of RulesetService interface.

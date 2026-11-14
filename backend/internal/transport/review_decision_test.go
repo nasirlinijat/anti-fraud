@@ -32,6 +32,14 @@ func (rejectUnexpectedReviewAccess) QueuePage(context.Context, int, models.Queue
 	panic("unexpected numbered queue read")
 }
 
+func (rejectUnexpectedReviewAccess) PurchaseCase(context.Context, int64) (models.PurchaseCase, error) {
+	panic("unexpected purchase read")
+}
+
+func (rejectUnexpectedReviewAccess) SearchPurchases(context.Context, string, int) ([]models.PurchaseMatch, error) {
+	panic("unexpected purchase search")
+}
+
 func (rejectUnexpectedReviewAccess) ResolvedCase(context.Context, int64) (models.CaseItem, error) {
 	panic("unexpected resolved case read")
 }

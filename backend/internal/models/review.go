@@ -269,3 +269,19 @@ type Resolution struct {
 	// blocklist. A value that was already blocked is not reported.
 	Blocked ReviewBlocks
 }
+
+type PurchaseCase struct {
+	CaseItem
+	Outcome string
+}
+
+type PurchaseMatch struct {
+	PurchaseID    int64
+	TransactionID string
+	PlayerID      string
+	AmountMinor   int64
+	EventTime     time.Time
+	Outcome       string
+	Review        string
+	MatchedBy     string
+}

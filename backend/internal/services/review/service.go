@@ -20,6 +20,8 @@ type Store interface {
 	QueuePage(ctx context.Context, limit int, order models.QueueOrder, number int64, claimedBy *string) (models.NumberedReviewPage, error)
 	Case(ctx context.Context, purchaseID int64) (models.CaseItem, error)
 	ResolvedCase(ctx context.Context, purchaseID int64) (models.CaseItem, error)
+	PurchaseCase(ctx context.Context, purchaseID int64) (models.PurchaseCase, error)
+	SearchPurchases(ctx context.Context, query string, limit int) ([]models.PurchaseMatch, error)
 	Network(ctx context.Context, purchaseID int64) (models.CaseNetwork, error)
 	NetworkPurchases(ctx context.Context, purchaseID int64, anchor models.BlocklistType, value string) (models.LinkedPurchases, error)
 	LinkedReviews(ctx context.Context, purchaseID int64) (models.LinkedReviews, error)
@@ -204,4 +206,14 @@ func (s *Service) ReleaseClaim(ctx context.Context, purchaseID int64) error {
 	default:
 		return fmt.Errorf("unexpected claim release status %q", status)
 	}
+}
+
+const purchaseSearchLimit = 20
+
+func (s *Service) PurchaseCase(ctx context.Context, purchaseID int64) (models.PurchaseCase, error) {
+	return s.store.PurchaseCase(ctx, purchaseID)
+}
+
+func (s *Service) SearchPurchases(ctx context.Context, query string) ([]models.PurchaseMatch, error) {
+	return s.store.SearchPurchases(ctx, query, purchaseSearchLimit)
 }
