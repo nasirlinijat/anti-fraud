@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockConsole, now, quality, runId, statistics } from './fixtures'
+import { mockConsole, now, quality, runId, sessionToken, statistics } from './fixtures'
 
 test.beforeEach(async ({ page }) => { await mockConsole(page) })
 
@@ -334,4 +334,42 @@ test('a resolved linked case shows evidence and returns to the selected connecti
   await expect(node).toHaveAttribute('aria-pressed', 'true')
   await expect(open).toBeFocused()
   await expect(page.getByRole('heading', { name: 'demo-transaction', exact: true })).toBeVisible()
+})
+
+test('the dashboard exports the decisions of the chosen period as CSV', async ({ page }) => {
+  const asked: string[] = []
+  await page.route('**/stats/export?*', async route => {
+    asked.push(`${new URL(route.request().url()).search} ${route.request().headers().authorization ?? ''}`)
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="decisions-7d-20261114T1305Z.csv"',
+        'X-Export-Rows': '2',
+        'X-Export-Truncated': 'false',
+      },
+      body: '\ufeffdecided_at,transaction_id\n2026-11-14T13:04:00Z,txn-1\n2026-11-14T12:05:00Z,txn-2\n',
+    })
+  })
+  await page.goto('/#/dashboard')
+  await page.getByRole('button', { name: '7 days' }).click()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export the decisions of the last 7 days as CSV' }).click()
+  expect((await download).suggestedFilename()).toBe('decisions-7d-20261114T1305Z.csv')
+  await expect(page.getByRole('status').filter({ hasText: 'Downloaded 2 decisions as decisions-7d-20261114T1305Z.csv.' })).toBeVisible()
+  expect(asked).toEqual([`?period=7d Bearer ${sessionToken}`])
+})
+
+test('the dashboard says when an export was cut off', async ({ page }) => {
+  await page.route('**/stats/export?*', route => route.fulfill({
+    status: 200,
+    headers: { 'Content-Disposition': 'attachment; filename="decisions-all.csv"', 'X-Export-Rows': '50000', 'X-Export-Truncated': 'true' },
+    body: 'decided_at\n',
+  }))
+  await page.goto('/#/dashboard')
+  await page.getByRole('button', { name: 'All time' }).click()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export the decisions of all time as CSV' }).click()
+  await download
+  await expect(page.getByRole('status').filter({ hasText: 'Downloaded the newest 50,000 decisions. The period has more' })).toBeVisible()
 })

@@ -6,6 +6,7 @@ import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
 import { useTimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
+import { ExportDecisions } from './ExportDecisions'
 import { PipelinePanel } from './PipelinePanel'
 import { QualityPanel } from './QualityPanel'
 
@@ -89,7 +90,10 @@ function DashboardPage() {
             {' Updated '}<Timestamp value={shown.generated_at} display={time} />,
             refreshes every {REFRESH_MS / 1000} seconds.
           </p>
-          <TimeDisplayToggle display={time} />
+          <div className="dashboard-update-actions">
+            <ExportDecisions period={period} periodName={period === 'all' ? 'all time' : `the last ${periodNames[period]}`} />
+            <TimeDisplayToggle display={time} />
+          </div>
         </div>
       )}
 
