@@ -88,7 +88,7 @@ const getPurchaseBlockValues = `SELECT device_id, card_token, player_id FROM pur
 // the same transaction. Any other outcome adds no blocklist entry, and a value
 // that is already blocked is left as it is.
 func (s *ReviewStore) Resolve(ctx context.Context, d models.ReviewDecision) (models.Resolution, error) {
-	tx, err := s.conn.Begin(ctx)
+	tx, err := s.beginReview(ctx, d.PurchaseID)
 	if err != nil {
 		return models.Resolution{}, fmt.Errorf("begin review decision: %w", err)
 	}
@@ -501,9 +501,25 @@ WHERE c.purchase_id = $1`
 // account already holds it. Claiming a purchase the username already holds
 // reports ClaimAlreadyYours with the original claim time.
 func (s *ReviewStore) Claim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
+	tx, err := s.beginReview(ctx, purchaseID)
+	if err != nil {
+		return models.Claim{}, err
+	}
+	defer tx.Rollback(ctx)
+	claim, err := claimPurchase(ctx, tx, purchaseID, username)
+	if err != nil {
+		return models.Claim{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Claim{}, fmt.Errorf("commit review claim: %w", err)
+	}
+	return claim, nil
+}
+
+func claimPurchase(ctx context.Context, tx pgx.Tx, purchaseID int64, username string) (models.Claim, error) {
 	var status string
 	var claimedAt *time.Time
-	if err := s.conn.QueryRow(ctx, claimReview, purchaseID, username).Scan(&status, &claimedAt); err != nil {
+	if err := tx.QueryRow(ctx, claimReview, purchaseID, username).Scan(&status, &claimedAt); err != nil {
 		return models.Claim{}, fmt.Errorf("claim review %d: %w", purchaseID, err)
 	}
 	if claimedAt != nil {
@@ -512,13 +528,13 @@ func (s *ReviewStore) Claim(ctx context.Context, purchaseID int64, username stri
 	if status != "held" {
 		return models.Claim{Status: models.ClaimStatus(status)}, nil
 	}
-	return s.heldClaim(ctx, purchaseID, username)
+	return heldClaim(ctx, tx, purchaseID, username)
 }
 
 // heldClaim reads the claim that stopped a new one.
-func (s *ReviewStore) heldClaim(ctx context.Context, purchaseID int64, username string) (models.Claim, error) {
+func heldClaim(ctx context.Context, tx pgx.Tx, purchaseID int64, username string) (models.Claim, error) {
 	claim := models.Claim{Status: models.ClaimHeldByOther}
-	err := s.conn.QueryRow(ctx, getReviewClaim, purchaseID).Scan(&claim.ClaimedBy, &claim.ClaimedAt)
+	err := tx.QueryRow(ctx, getReviewClaim, purchaseID).Scan(&claim.ClaimedBy, &claim.ClaimedAt)
 	if err != nil {
 		return models.Claim{}, fmt.Errorf("get claim of review %d: %w", purchaseID, err)
 	}

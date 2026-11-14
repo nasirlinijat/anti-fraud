@@ -146,3 +146,53 @@ test('an admin releases a reviewer claim after confirmation', async ({ page }) =
   await expect(page.getByRole('status').filter({ hasText: 'Purchase 103 is back in the shared queue' })).toBeVisible()
   await expect(page.getByText('No open claims.')).toBeVisible()
 })
+
+test('an idle Accounts page detects an expired session', async ({ page }) => {
+  await mockConsole(page)
+  await page.goto('/#/accounts')
+  await expect(page.locator('main h1')).toHaveText('Accounts')
+  await page.route('**/auth/me', route => route.fulfill({ status: 401, json: { error: 'missing or invalid session' } }))
+  await page.clock.fastForward(61_000)
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('anti-fraud.session'))).toBeNull()
+})
+
+test('session rechecks preserve access during an outage and check again on focus', async ({ page }) => {
+  await mockConsole(page)
+  await page.goto('/#/accounts')
+  await expect(page.locator('main h1')).toHaveText('Accounts')
+  await page.route('**/auth/me', route => route.fulfill({ status: 503, json: { error: 'unavailable' } }))
+  await page.clock.fastForward(61_000)
+  await expect(page.locator('main h1')).toHaveText('Accounts')
+  expect(await page.evaluate(() => localStorage.getItem('anti-fraud.session'))).toBe(sessionToken)
+  await page.route('**/auth/me', route => route.fulfill({ status: 401, json: { error: 'missing or invalid session' } }))
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
+})
+
+test('a delayed logout cannot clear a session received from another tab', async ({ page }) => {
+  await mockConsole(page)
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  let started!: () => void
+  const requested = new Promise<void>(resolve => { started = resolve })
+  await page.route('**/auth/logout', async route => {
+    started()
+    await waiting
+    await route.fulfill({ status: 204 })
+  })
+  await page.goto('/#/accounts')
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await requested
+  await page.route('**/auth/me', route => route.fulfill({ json: { username: 'replacement-admin', role: 'admin' } }))
+  await page.evaluate(() => {
+    localStorage.setItem('anti-fraud.session', 'replacement-token')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'anti-fraud.session', newValue: 'replacement-token' }))
+  })
+  await expect(page.getByText('Signed in as replacement-admin')).toBeAttached()
+  const completed = page.waitForResponse('**/auth/logout')
+  release()
+  await completed
+  await expect(page.locator('main h1')).toHaveText('Accounts')
+  expect(await page.evaluate(() => localStorage.getItem('anti-fraud.session'))).toBe('replacement-token')
+})

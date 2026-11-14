@@ -35,6 +35,8 @@ cd backend
 go test -race -tags=integration ./test/concurrency/...
 ```
 
+The concurrency suite also holds review changes uncommitted while competing requests arrive. It verifies both decision/release orderings, competing claims, and release followed by a new claim, using the restricted API role for the waiting requests.
+
 `make test-integration` runs both folders one after the other (`go test -p 1 -tags=integration ./test/...`).
 
 ## Clean demo start
@@ -72,3 +74,7 @@ Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run
 [LOAD_TEST.md](../../LOAD_TEST.md) has the k6 test of the AWS server: steady, ramp and spike scenarios with simulated purchases (`scripts/k6/score.js`), the capacity found, the bottleneck, and how to run it.
 
 [CHAOS_TEST.md](../../CHAOS_TEST.md) has the chaos test: the backend restarted and killed, PostgreSQL restarted and the gateway stopped while purchases kept arriving (`scripts/k6/chaos.js`), with SQL checks that every purchase was saved exactly once.
+
+## Console sessions
+
+`cd frontend && npm run test:browser -- e2e/auth.spec.ts` checks login, roles, accounts, assignments, idle session expiry, focus revalidation, temporary verification outages, and a delayed logout after another tab replaces the session across Chromium, Firefox and WebKit. Request tests cover obsolete and cancelled responses; the local proxy test verifies scoring is never forwarded when session verification fails.

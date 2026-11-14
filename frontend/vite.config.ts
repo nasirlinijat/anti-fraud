@@ -1,5 +1,6 @@
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
+import { verifyScoreSession } from './scoreSession.ts'
 import { defineConfig, loadEnv } from 'vite'
 
 const scoreRoute = '^/score(?:/|\\?|$)'
@@ -29,7 +30,9 @@ export default defineConfig(({ mode }) => {
           const { host, origin, 'sec-fetch-site': site } = req.headers
           if (host && loopbackHost.test(host) && (origin === undefined || origin === `http://${host}`) &&
               site !== 'cross-site' && site !== 'same-site') {
-            next()
+            if (new RegExp(scoreRoute).test(req.url ?? '')) {
+              void verifyScoreSession(req, res, backendUrl).then(accepted => { if (accepted && !res.destroyed) next() })
+            } else next()
             return
           }
           res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })

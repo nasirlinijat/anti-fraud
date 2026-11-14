@@ -241,3 +241,42 @@ test('a rejected batch decision keeps its status', async ({ mock }) => {
     kind: 'http', status: 400, message: 'purchase_ids must list 1 to 50 IDs',
   })
 })
+
+
+test('a delayed rejection cannot clear a replacement session', async t => {
+  let deliver
+  t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { deliver = resolve }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  t.after(forgetSessionToken)
+  keepSessionToken('old-session')
+  const pending = request('/auth/me').catch(error => error.status)
+  keepSessionToken('new-session')
+  deliver(Response.json({ error: 'ended' }, { status: 401 }))
+  assert.equal(await pending, 401)
+  assert.equal(rejections, 0)
+})
+
+test('cancelled requests cannot reject the session', async t => {
+  let deliver
+  t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { deliver = resolve }))
+  let rejections = 0
+  t.after(onSessionRejected(() => { rejections++ }))
+  const controller = new AbortController()
+  const pending = request('/auth/me', { signal: controller.signal }).catch(error => error.name)
+  controller.abort()
+  deliver(Response.json({ error: 'ended' }, { status: 401 }))
+  assert.equal(await pending, 'AbortError')
+  assert.equal(rejections, 0)
+})
+
+test('a successful response from an old session is discarded', async t => {
+  let deliver
+  t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { deliver = resolve }))
+  t.after(forgetSessionToken)
+  keepSessionToken('old-session')
+  const pending = request('/auth/me').catch(error => error.name)
+  keepSessionToken('new-session')
+  deliver(Response.json({ username: 'old-user', role: 'admin' }))
+  assert.equal(await pending, 'AbortError')
+})

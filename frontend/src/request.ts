@@ -1,4 +1,4 @@
-import { reportSessionRejected, sessionToken } from './session.ts'
+import { reportSessionRejected, sessionGeneration, sessionToken } from './session.ts'
 
 export interface ErrorResponse {
   error: string
@@ -89,21 +89,24 @@ export async function request<T>(path: string, options: RequestOptions<T> = {}):
   signal?.addEventListener('abort', cancel, { once: true })
   const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let response: Response | undefined
+  const generation = sessionGeneration()
 
   try {
     response = await fetch(path, { ...init, headers: withCredentials(headers, auth), signal: controller.signal })
     if (!response.ok || (expectedStatus !== undefined && response.status !== expectedStatus)) {
       // The backend no longer accepts the token, so the console returns to sign-in.
-      if (response.status === 401 && auth === 'session') reportSessionRejected()
+      if (response.status === 401 && auth === 'session' && !controller.signal.aborted && generation === sessionGeneration()) reportSessionRejected()
       throw await httpError(response, auth)
     }
     const result = read ? await read(response) : await response.json() as T
     controller.signal.throwIfAborted()
+    if (auth === 'session' && generation !== sessionGeneration()) throw new DOMException('Session changed.', 'AbortError')
     return result
   } catch (error) {
     signal?.throwIfAborted()
     if (error instanceof ApiError) throw error
     if (controller.signal.aborted) throw new ApiError('timeout', 'The request timed out.', response?.status)
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
     if (!response) throw new ApiError('network', 'The backend cannot be reached. Is it running?')
     throw new ApiError('response', 'The backend returned an unreadable response.', response.status)
   } finally {
