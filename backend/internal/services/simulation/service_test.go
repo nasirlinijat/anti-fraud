@@ -258,10 +258,14 @@ func TestDurableLifecycle(t *testing.T) {
 }
 
 func TestBackfillAndConcurrentStarts(t *testing.T) {
+	var mu sync.Mutex
+	var latest time.Time
 	s, _, _ := setup(t, scoreFunc(func(_ context.Context, r simulator.Request) (simulator.Result, error) {
-		if r.EventTime.After(time.Now()) {
-			return simulator.Result{}, fmt.Errorf("future backfill")
+		mu.Lock()
+		if r.EventTime.After(latest) {
+			latest = r.EventTime
 		}
+		mu.Unlock()
 		return simulator.Result{Outcome: "allow"}, nil
 	}))
 	type started struct {
@@ -297,6 +301,11 @@ func TestBackfillAndConcurrentStarts(t *testing.T) {
 	r := wait(t, s, id)
 	if r.Status != "completed" || r.Sent != 20 || r.Allowed != 20 {
 		t.Fatalf("%+v", r)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !latest.Equal(r.CreatedAt) {
+		t.Fatalf("backfill ends at %v, want the run's creation time %v", latest, r.CreatedAt)
 	}
 }
 
