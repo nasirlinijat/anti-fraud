@@ -16,25 +16,9 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 		return 0, errors.New("run and source (ieee-cis or simulator) are required")
 	}
 	reader := csv.NewReader(input)
-	header, err := reader.Read()
+	cols, err := readColumns(reader)
 	if err != nil {
 		return 0, err
-	}
-	indexes := map[string]int{}
-	for i, name := range header {
-		if _, ok := indexes[name]; ok {
-			return 0, errors.New("duplicate CSV column")
-		}
-		if name != "transaction_id" && name != "is_fraud" && name != "scenario" {
-			return 0, fmt.Errorf("unknown CSV column %s", name)
-		}
-		indexes[name] = i
-	}
-	if _, ok := indexes["transaction_id"]; !ok {
-		return 0, errors.New("missing transaction_id column")
-	}
-	if _, ok := indexes["is_fraud"]; !ok {
-		return 0, errors.New("missing is_fraud column")
 	}
 	n := int64(0)
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
@@ -51,16 +35,16 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
 			}
-			flag := record[indexes["is_fraud"]]
+			flag := record[cols.isFraud]
 			if flag != "0" && flag != "1" {
 				return nil, fmt.Errorf("line %d: is_fraud must be 0 or 1", line)
 			}
 			var scenario *string
-			if i, ok := indexes["scenario"]; ok && record[i] != "" {
-				v := record[i]
+			if cols.scenario >= 0 && record[cols.scenario] != "" {
+				v := record[cols.scenario]
 				scenario = &v
 			}
-			l := Label{TransactionID: record[indexes["transaction_id"]], RunID: run, Source: source, Scenario: scenario, Fraud: flag == "1"}
+			l := Label{TransactionID: record[cols.transactionID], RunID: run, Source: source, Scenario: scenario, Fraud: flag == "1"}
 			if err := l.Validate(); err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
 			}
@@ -94,4 +78,37 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 		return 0, err
 	}
 	return n, nil
+}
+
+type columns struct {
+	transactionID, isFraud, scenario int
+}
+
+func readColumns(reader *csv.Reader) (columns, error) {
+	header, err := reader.Read()
+	if err != nil {
+		return columns{}, err
+	}
+	indexes := map[string]int{}
+	for i, name := range header {
+		if _, ok := indexes[name]; ok {
+			return columns{}, errors.New("duplicate CSV column")
+		}
+		if name != "transaction_id" && name != "is_fraud" && name != "scenario" {
+			return columns{}, fmt.Errorf("unknown CSV column %s", name)
+		}
+		indexes[name] = i
+	}
+	cols := columns{scenario: -1}
+	var ok bool
+	if cols.transactionID, ok = indexes["transaction_id"]; !ok {
+		return columns{}, errors.New("missing transaction_id column")
+	}
+	if cols.isFraud, ok = indexes["is_fraud"]; !ok {
+		return columns{}, errors.New("missing is_fraud column")
+	}
+	if i, ok := indexes["scenario"]; ok {
+		cols.scenario = i
+	}
+	return cols, nil
 }
