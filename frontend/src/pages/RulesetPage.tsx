@@ -1,9 +1,10 @@
 import { type FormEvent, useCallback, useState } from 'react'
-import { getActiveRuleset, getRuleset, listRulesets, publishRuleset, type ErrorResponse, type RuleSettings, type Ruleset, type RulesetConfig, type RulesetSummary } from '../api'
+import { getActiveRuleset, getRuleset, listRulesets, previewRuleset, publishRuleset, type ErrorResponse, type RulesetPreview, type RuleSettings, type Ruleset, type RulesetConfig, type RulesetSummary } from '../api'
 import { TimeDisplayToggle, Timestamp } from '../Display'
 import { Button } from '../ui/Button'
 import { PageHeader } from '../ui/PageHeader'
 import { usePolling } from '../usePolling'
+import { RulesetPreviewPanel } from './RulesetPreviewPanel'
 import { useTimeDisplay, type TimeDisplay } from '../useTimeDisplay'
 import { ErrorState, LoadingSkeleton } from '../ViewState'
 import { ModelSettingsFields } from './ModelSettingsFields'
@@ -229,6 +230,8 @@ function RulesetForm({ initial, history, time, onPublished }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ErrorResponse | null>(null)
   const [notice, setNotice] = useState('')
+  const [preview, setPreview] = useState<RulesetPreview | null>(null)
+  const [previewing, setPreviewing] = useState(false)
   const selected = useSelectedVersion(initial, version)
   const activeCheck = useActiveVersionCheck((active) => {
     setVersion(active.version)
@@ -241,11 +244,33 @@ function RulesetForm({ initial, history, time, onPublished }: {
   const displayDraft = readOnly && selected.ruleset ? toDraft(selected.ruleset) : draft
 
   const updateDraft = (change: Partial<RulesetDraft>) => {
+    setPreview(null)
     setDraft((current) => ({ ...current, ...change }))
   }
 
   const updateRule = (name: string, rule: RuleDraft) => {
+    setPreview(null)
     setDraft((current) => ({ ...current, rules: { ...current.rules, [name]: rule } }))
+  }
+
+  const runPreview = async () => {
+    if (previewing || saving || readOnly) return
+    setNotice('')
+    const errors: FieldErrors = {}
+    const config = toConfig(draft, errors)
+    if (Object.keys(errors).length) {
+      setError({ error: 'Check the highlighted fields.', fields: errors })
+      return
+    }
+    setError(null)
+    setPreviewing(true)
+    const result = await previewRuleset(config)
+    setPreviewing(false)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    setPreview(result.value)
   }
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
@@ -267,6 +292,7 @@ function RulesetForm({ initial, history, time, onPublished }: {
       setError(result.error)
       return
     }
+    setPreview(null)
     setDraft(toDraft(result.value))
     setVersion(result.value.version)
     selected.show(result.value)
@@ -311,7 +337,8 @@ function RulesetForm({ initial, history, time, onPublished }: {
               <>
                 <VersionNoteField note={draft.note} error={shownErrors.note} disabled={saving} onChange={(note) => updateDraft({ note })} />
                 <PublishControls error={error} checkError={activeCheck.error} checkingActive={activeCheck.checking} saving={saving}
-                  onCheckActive={activeCheck.start} />
+                  onCheckActive={activeCheck.start} previewing={previewing} onPreview={() => void runPreview()} />
+                {preview && <RulesetPreviewPanel preview={preview} time={time} />}
               </>
             )}
           </form>
@@ -525,12 +552,14 @@ function VersionNoteField({ note, error, disabled, onChange }: {
   )
 }
 
-function PublishControls({ error, checkError, checkingActive, saving, onCheckActive }: {
+function PublishControls({ error, checkError, checkingActive, saving, onCheckActive, previewing, onPreview }: {
   error: ErrorResponse | null
   checkError: string | null
   checkingActive: boolean
   saving: boolean
   onCheckActive: () => void
+  previewing: boolean
+  onPreview: () => void
 }) {
   const fields = error?.fields ?? {}
   return (
@@ -543,8 +572,13 @@ function PublishControls({ error, checkError, checkingActive, saving, onCheckAct
           {checkError && <p>Could not check the active version. {checkError}</p>}
         </ErrorState>
       )}
-      <p className="muted small">Publishing adds a new version and makes it the only active one. Stored versions never change.</p>
-      <Button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</Button>
+      <p className="muted small">Publishing adds a new version and makes it the only active one. Stored versions never change. Preview impact replays recent decisions with this draft first, without saving anything.</p>
+      <div className="publish-actions">
+        <Button type="button" variant="secondary" disabled={previewing || saving} onClick={onPreview}>
+          {previewing ? 'Previewing…' : 'Preview impact'}
+        </Button>
+        <Button type="submit" disabled={saving || checkingActive}>{saving ? 'Publishing…' : 'Publish new version'}</Button>
+      </div>
     </div>
   )
 }

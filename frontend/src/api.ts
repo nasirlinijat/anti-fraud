@@ -181,18 +181,50 @@ export async function listRulesets(signal?: AbortSignal): Promise<RulesetSummary
   return result.versions
 }
 
+function rulesetBody(config: RulesetConfig): string {
+  return JSON.stringify(config, (_key, value: unknown) => {
+    if (typeof value !== 'bigint') return value
+    const number = Number(value)
+    if (Number.isSafeInteger(number)) return number
+    if (rulesetJSON.rawJSON) return rulesetJSON.rawJSON(value.toString())
+    throw new Error('This browser cannot save the rule limit exactly.')
+  })
+}
+
 export function publishRuleset(config: RulesetConfig): Promise<Saved<Ruleset>> {
   return save(() => request('/rulesets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config, (_key, value: unknown) => {
-      if (typeof value !== 'bigint') return value
-      const number = Number(value)
-      if (Number.isSafeInteger(number)) return number
-      if (rulesetJSON.rawJSON) return rulesetJSON.rawJSON(value.toString())
-      throw new Error('This browser cannot save the rule limit exactly.')
-    }),
+    body: rulesetBody(config),
     read: readRuleset,
+  }))
+}
+
+export interface RulesetPreview {
+  decisions: number
+  before: Record<Outcome, number>
+  after: Record<Outcome, number>
+  changed: number
+  uncertain: number
+  uncertain_rules: string[]
+  missing_model_scores: number
+  changes: {
+    purchase_id: string
+    transaction_id: string
+    decided_at: string
+    before: Outcome
+    after: Outcome
+    rule_score_before: number
+    rule_score_after: number
+    uncertain: boolean
+  }[]
+}
+
+export function previewRuleset(config: RulesetConfig): Promise<Saved<RulesetPreview>> {
+  return save(() => request<RulesetPreview>('/rulesets/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: rulesetBody(config),
   }))
 }
 
