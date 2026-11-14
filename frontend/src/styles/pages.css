@@ -767,3 +767,7 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
 @media (max-width: 40rem) {
   .blocklist-filters { grid-template-columns: minmax(0, 1fr); }
 }
+
+.simulation-blocked { margin-block-start: var(--space-md); }
+.block-reason summary { cursor: pointer; }
+.block-reason ul { margin: var(--space-xs) 0 0; padding-inline-start: 1.25rem; }

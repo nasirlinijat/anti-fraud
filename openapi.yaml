@@ -349,6 +349,31 @@ paths:
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Database unavailable.}
+  /simulations/{id}/blocked:
+    get:
+      tags: [Simulations]
+      operationId: listSimulationBlockedPurchases
+      summary: List the purchases of a run that scoring blocked
+      description: |
+        Returns the run's blocked purchases, newest first, with their details and the reason for each block:
+        `blocklist` when a blocklist entry matched, `rules` when the rule score reached the block threshold of
+        the ruleset that scored it. The model never blocks. Pass `next_cursor` as `before` for older purchases.
+      security: [{SessionAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - {in: query, name: limit, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {in: query, name: before, required: false, description: Purchase ID cursor from next_cursor., schema: {type: string, pattern: '^[1-9][0-9]*$'}}
+      responses:
+        '200':
+          description: One page of blocked purchases.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationBlockedPurchasePage'}
+        '400': {description: Invalid limit or cursor.}
+        '401': {description: "The session is missing or invalid."}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
+        '404': {description: Unknown run or disabled feature.}
+        '503': {description: Database unavailable.}
   /simulations/{id}/answers:
     get:
       tags: [Simulations]
@@ -2907,6 +2932,35 @@ components:
           items:
             type: string
             enum: [normal, card_testing, account_takeover, new_account_spend, traveler, new_phone, internet_cafe, burst_buyer, new_casual_player, returning_player, stolen_card, low_and_slow, expat, new_big_spender, family_card, session_shopper, slow_card_testing, quiet_takeover, device_farm]
+    SimulationBlockedPurchasePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/SimulationBlockedPurchase'}
+        next_cursor: {type: string, description: Present when older blocked purchases exist.}
+    SimulationBlockedPurchase:
+      type: object
+      required: [purchase_id, transaction_id, player_id, amount_minor, event_time, card_country, ip_country, device_id,
+        reason, rule_score, block_threshold, ruleset_version, fired_rules, decided_at]
+      properties:
+        purchase_id: {type: string}
+        transaction_id: {type: string}
+        player_id: {type: string}
+        amount_minor: {type: string, description: Amount in minor units.}
+        event_time: {type: string, format: date-time}
+        card_country: {type: string, nullable: true}
+        ip_country: {type: string, nullable: true}
+        device_id: {type: string, nullable: true}
+        reason: {type: string, enum: [blocklist, rules]}
+        rule_score: {type: integer}
+        block_threshold: {type: integer, description: Block threshold of the ruleset that scored the purchase.}
+        ruleset_version: {type: integer}
+        fired_rules:
+          type: array
+          items: {$ref: '#/components/schemas/FiredRule'}
+        decided_at: {type: string, format: date-time}
     SimulationRun:
       type: object
       required: [id, settings, status, created_at, finished_at, sent, failed, allowed, reviewed, blocked, pending]
