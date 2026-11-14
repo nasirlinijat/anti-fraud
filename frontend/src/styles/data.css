@@ -416,3 +416,37 @@ caption {
   .tile,
   .panel { border: 1px solid CanvasText; }
 }
+
+.model-reasons {
+  display: grid;
+  gap: var(--space-sm);
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model-reasons li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(4rem, 8rem);
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.model-reason-up { --reason-color: var(--chart-block); }
+.model-reason-down { --reason-color: var(--chart-allow); }
+.model-reason-arrow { color: var(--reason-color); font-size: 0.8em; }
+.model-reason-text { display: grid; gap: 2px; overflow-wrap: anywhere; }
+
+.model-reason-bar {
+  block-size: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  overflow: hidden;
+}
+
+.model-reason-bar > span {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--reason-color);
+}

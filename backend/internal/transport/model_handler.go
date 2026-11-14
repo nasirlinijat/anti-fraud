@@ -14,6 +14,13 @@ type LoadedModel struct {
 	Version    string
 	Policy     scoring.ModelPolicy
 	Evaluation *models.ModelEvaluation
+	Explainer  ModelExplainer
+}
+
+type ModelExplainer interface {
+	Version() string
+	Features() []string
+	Explain(x []float64, top int) ([]models.ModelReason, error)
 }
 
 type modelStatus struct {

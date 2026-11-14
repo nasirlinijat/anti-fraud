@@ -32,5 +32,5 @@ func useModel(modelPath string, service *scoresvc.Service, rulesets *ruleset.Ser
 	slog.Info("fraud model loaded",
 		"model_version", model.Version(), "trees", model.Trees(), "features", len(model.Features()),
 		"flag_at", policy.FlagAt, "clear_below", policy.ClearBelow)
-	return &transport.LoadedModel{Version: model.Version(), Policy: policy, Evaluation: evaluation}
+	return &transport.LoadedModel{Version: model.Version(), Policy: policy, Evaluation: evaluation, Explainer: model}
 }

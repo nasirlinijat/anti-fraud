@@ -5,6 +5,7 @@ import { formatUsdMinor } from '../displayFormat'
 import type { TimeDisplay } from '../useTimeDisplay'
 import { EmptyState } from '../ViewState'
 import { AccountEvents } from './AccountEvents'
+import { reasonLabel, reasonStrength, reasonValue, type ModelReason } from './modelReasons'
 
 export function CaseEvidence({ review, time }: { review: ReviewCase; time: TimeDisplay }) {
   const id = useId()
@@ -32,6 +33,12 @@ export function CaseEvidence({ review, time }: { review: ReviewCase; time: TimeD
         <h3 id={`${id}-rules`}>Fired rules</h3>
         <FiredRules review={review} />
       </section>
+      {review.model_score !== null && (
+        <section className="panel" aria-labelledby={`${id}-reasons`}>
+          <h3 id={`${id}-reasons`}>Why this model risk</h3>
+          <ModelReasons reasons={review.model_reasons ?? []} />
+        </section>
+      )}
       <section className="panel" aria-labelledby={`${id}-history`}>
         <h3 id={`${id}-history`}>Recent player purchases</h3>
         <PlayerPurchases review={review} time={time} />
@@ -198,5 +205,34 @@ function DeviceActivity({ review, time }: { review: ReviewCase; time: TimeDispla
       <dt>Last seen</dt>
       <dd><Timestamp value={activity.last_seen_at} display={time} /></dd>
     </dl>
+  )
+}
+
+function ModelReasons({ reasons }: { reasons: ModelReason[] }) {
+  if (reasons.length === 0) {
+    return <EmptyState>Reasons are not available for this score: it was given by a different model version than the one running now.</EmptyState>
+  }
+  return (
+    <>
+      <p className="muted small">What moved this purchase's own model score the most, strongest first.</p>
+      <ol className="model-reasons">
+        {reasons.map(reason => {
+          const raises = reason.effect > 0
+          const value = reasonValue(reason.feature, reason.value)
+          return (
+            <li key={reason.feature} className={raises ? 'model-reason-up' : 'model-reason-down'}>
+              <span className="model-reason-arrow" aria-hidden>{raises ? '▲' : '▼'}</span>
+              <span className="model-reason-text">
+                <span>{reasonLabel(reason.feature)}{value !== null && <>: <strong>{value}</strong></>}</span>
+                <span className="muted small">{raises ? 'Raises the risk' : 'Lowers the risk'}</span>
+              </span>
+              <span className="model-reason-bar" aria-hidden>
+                <span style={{ inlineSize: `${Math.max(4, Math.round(reasonStrength(reason, reasons) * 100))}%` }} />
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </>
   )
 }

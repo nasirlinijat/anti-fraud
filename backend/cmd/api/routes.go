@@ -61,7 +61,11 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 	transport.RegisterAccountEventRoutes(mux,
 		transport.NewAccountEventHandler(accountevent.NewService(accountEventStore)).UseTimeout(cfg.ScoreLimits.Timeout), cfg.APIKey)
 
-	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), model != nil), access)
+	reviews := transport.NewReviewHandler(review.NewService(reviewStore), model != nil)
+	if model != nil {
+		reviews.UseExplainer(model.Explainer)
+	}
+	transport.RegisterReviewRoutes(mux, reviews, access)
 	transport.RegisterStatsRoutes(mux, transport.NewStatsHandler(stats.NewService(storage.NewStatsStore(pool))), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStorage)), access)
 	chargebacks := chargeback.NewService(storage.NewChargebackStore(pool))
