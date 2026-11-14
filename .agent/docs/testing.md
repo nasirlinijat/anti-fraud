@@ -78,3 +78,5 @@ Both final runs saved all 1,000 decisions. Each new rule fired 100 times per run
 ## Console sessions
 
 `cd frontend && npm run test:browser -- e2e/auth.spec.ts` checks login, roles, accounts, assignments, idle session expiry, focus revalidation, temporary verification outages, and a delayed logout after another tab replaces the session across Chromium, Firefox and WebKit. Request tests cover obsolete and cancelled responses; the local proxy test verifies scoring is never forwarded when session verification fails.
+
+The linked-review accessibility checks in `e2e/console.spec.ts` initialize light and dark mode in separate browser contexts before opening the case. Each checks selected and unselected purchases at desktop and mobile widths, after verifying the rendered color scheme. This keeps the contrast audit from sampling colors during a live theme change; live system-preference changes are covered in `e2e/theme.spec.ts`.

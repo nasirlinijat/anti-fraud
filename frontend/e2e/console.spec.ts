@@ -286,17 +286,19 @@ test('linked purchases awaiting review are claimed and rejected together', async
   await expect(panel.getByText('No other purchases awaiting review share this purchase')).toBeVisible()
 })
 
-test('the linked purchases awaiting review panel has no detectable accessibility violations', async ({ page }) => {
-  await page.route('**/reviews/41/network/reviews', route => route.fulfill({ json: { window_days: 30, total: 120, items: [
-    linkedReview('51', null, 70), linkedReview('52', 'demo-user', 60), linkedReview('53', 'other-reviewer', 50),
-  ] } }))
-  await page.route('**/reviews/41/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
-  await openNetworkCase(page)
-  const panel = page.getByRole('region', { name: 'Linked purchases awaiting review' })
-  await panel.getByRole('checkbox', { name: 'Select linked-52' }).check()
-  await expect(page.getByText('Showing the 3 highest rule scores of 120.')).toBeVisible()
-  for (const scheme of ['light', 'dark'] as const) {
+for (const scheme of ['light', 'dark'] as const) {
+  test(`the linked purchases awaiting review panel has no detectable accessibility violations in ${scheme}`, async ({ page }) => {
+    // Initialize each theme on a fresh page so axe never samples a theme change in progress.
     await page.emulateMedia({ colorScheme: scheme })
+    await page.route('**/reviews/41/network/reviews', route => route.fulfill({ json: { window_days: 30, total: 120, items: [
+      linkedReview('51', null, 70), linkedReview('52', 'demo-user', 60), linkedReview('53', 'other-reviewer', 50),
+    ] } }))
+    await page.route('**/reviews/41/network', route => route.fulfill({ json: { window_days: 30, anchors: [] } }))
+    await openNetworkCase(page)
+    const panel = page.getByRole('region', { name: 'Linked purchases awaiting review' })
+    await panel.getByRole('checkbox', { name: 'Select linked-52' }).check()
+    await expect(page.getByText('Showing the 3 highest rule scores of 120.')).toBeVisible()
+    await expect(page.locator('html')).toHaveCSS('color-scheme', scheme)
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 })
       await expect(panel.getByRole('checkbox', { name: 'Select linked-52' })).toBeChecked()
@@ -304,8 +306,8 @@ test('the linked purchases awaiting review panel has no detectable accessibility
       const audit = await new AxeBuilder({ page }).include('.linked-reviews').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
       expect(audit.violations, `${scheme} at ${width}`).toEqual([])
     }
-  }
-})
+  })
+}
 
 test('a resolved linked case shows evidence and returns to the selected connection', async ({ page }) => {
   const resolved = { purchase_id: '78', transaction_id: 'resolved-transaction', event_time: now, amount_minor: '499',
