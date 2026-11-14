@@ -1,0 +1,105 @@
+images:
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  backend:
+    repository: ghcr.io/nasirlinijat/anti-fraud-backend
+    tag: ""
+  frontend:
+    repository: ghcr.io/nasirlinijat/anti-fraud-frontend
+    tag: ""
+  dbsetup:
+    repository: ghcr.io/nasirlinijat/anti-fraud-dbsetup
+    tag: ""
+  edge:
+    repository: ghcr.io/nasirlinijat/anti-fraud-edge
+    tag: ""
+  postgres:
+    repository: postgres
+    tag: 18-alpine
+  redis:
+    repository: redis
+    tag: 8-alpine
+
+existingSecret: ""
+secrets:
+  apiKey: ""
+  postgresPassword: ""
+  runtimeDbPassword: ""
+  labelsDbPassword: ""
+  reviewAnalystKeys: ""
+  operatorApiKeys: ""
+  chargebackWebhookSecret: ""
+
+postgres:
+  user: antifraud
+  database: antifraud
+  storage: 5Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+
+redis:
+  maxMemory: 64mb
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+backend:
+  replicas: 1
+  port: 8080
+  modelFile: lgbm-game-v9.json
+  simulationEnabled: false
+  ipIntelProvider: "off"
+  scoreRateLimit: ""
+  scoreRateBurst: ""
+  scoreTimeout: ""
+  dbMaxConns: ""
+  tracingEndpoint: ""
+  tracingSampleRatio: ""
+  dogstatsdAddr: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+frontend:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+dbsetup:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+edge:
+  consoleHost: ""
+  apiHost: ""
+  service:
+    type: LoadBalancer
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

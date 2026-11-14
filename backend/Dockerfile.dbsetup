@@ -1,0 +1,7 @@
+FROM migrate/migrate:v4.20.1 AS migrate
+
+FROM postgres:18-alpine
+COPY --from=migrate /usr/local/bin/migrate /usr/local/bin/migrate
+COPY migrations /migrations
+COPY runtime-role.sql /runtime-role.sql
+USER 70:70

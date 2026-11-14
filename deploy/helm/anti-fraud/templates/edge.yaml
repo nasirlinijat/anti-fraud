@@ -1,0 +1,112 @@
+{{- $e := .Values.edge -}}
+{{- $consoleHost := required "edge.consoleHost is required, for example https://console.example.com" $e.consoleHost -}}
+{{- $apiHost := required "edge.apiHost is required, for example https://api.example.com" $e.apiHost -}}
+{{- if $e.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: edge-data
+  labels:
+    {{- include "antifraud.labels" (dict "component" "edge" "root" .) | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $e.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $e.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge
+  labels:
+    {{- include "antifraud.labels" (dict "component" "edge" "root" .) | nindent 4 }}
+spec:
+  type: {{ $e.service.type }}
+  selector:
+    {{- include "antifraud.selector" (dict "component" "edge" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: https
+      port: 443
+      targetPort: https
+    - name: http3
+      port: 443
+      targetPort: http3
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge
+  labels:
+    {{- include "antifraud.labels" (dict "component" "edge" "root" .) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "antifraud.selector" (dict "component" "edge" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "antifraud.labels" (dict "component" "edge" "root" .) | nindent 8 }}
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge
+          image: {{ include "antifraud.image" (dict "component" "edge" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: CONSOLE_HOST
+              value: {{ $consoleHost | quote }}
+            - name: API_HOST
+              value: {{ $apiHost | quote }}
+            - name: BACKEND_PORT
+              value: {{ .Values.backend.port | quote }}
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+            - name: http3
+              containerPort: 443
+              protocol: UDP
+            - name: metrics
+              containerPort: 2019
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml $e.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: data
+          {{- if $e.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: edge-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: config
+          emptyDir: {}

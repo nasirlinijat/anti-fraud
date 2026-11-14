@@ -24,7 +24,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [backend, frontend]
+        include:
+          - component: backend
+            context: backend
+            dockerfile: backend/Dockerfile
+          - component: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+          - component: dbsetup
+            context: backend
+            dockerfile: backend/Dockerfile.dbsetup
+          - component: edge
+            context: deploy
+            dockerfile: deploy/Dockerfile.edge
     steps:
       - uses: actions/checkout@v7
 
@@ -51,7 +63,8 @@ jobs:
       - name: Build, and push on main
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.component }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

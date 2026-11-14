@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    {{- include "antifraud.labels" (dict "component" "redis" "root" .) | nindent 4 }}
+spec:
+  selector:
+    {{- include "antifraud.selector" (dict "component" "redis" "root" .) | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    {{- include "antifraud.labels" (dict "component" "redis" "root" .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "antifraud.selector" (dict "component" "redis" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "antifraud.labels" (dict "component" "redis" "root" .) | nindent 8 }}
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: {{ include "antifraud.image" (dict "component" "redis" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", {{ .Values.redis.maxMemory | quote }}, "--maxmemory-policy", "noeviction"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}

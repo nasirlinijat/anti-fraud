@@ -109,12 +109,14 @@ go run ./cmd/simulator -url https://api.<dashed-ip>.sslip.io -api-key <API_KEY> 
 
 ## Container images
 
-The `Images` workflow (`.github/workflows/images.yml`) builds the backend and frontend images from their Dockerfiles. On a pull request it only builds them, so a broken Dockerfile fails the check. On every push to `main` it also publishes them to GitHub Container Registry:
+The `Images` workflow (`.github/workflows/images.yml`) builds four images from their Dockerfiles. On a pull request it only builds them, so a broken Dockerfile fails the check. On every push to `main` it also publishes them to GitHub Container Registry:
 
 | Image | Tags |
 |---|---|
 | `ghcr.io/nasirlinijat/anti-fraud-backend` | `sha-<short commit>` for every main commit, and `latest` for the newest |
 | `ghcr.io/nasirlinijat/anti-fraud-frontend` | the same |
+| `ghcr.io/nasirlinijat/anti-fraud-dbsetup` | the same. The migrate tool, the migrations and `runtime-role.sql`, used by the Helm chart to set up the database |
+| `ghcr.io/nasirlinijat/anti-fraud-edge` | the same. Caddy with `deploy/Caddyfile`, the HTTPS gateway in the Helm chart |
 
 Use the `sha-` tag to run an exact commit; `latest` moves with every merge. The images carry the repository as their source label, so they appear under the repository's **Packages**. The first publish creates each package; if a package is private, the repository owner makes it public in its **Package settings**, or a cluster pulls it with an image pull secret.
 
@@ -122,7 +124,7 @@ Use the `sha-` tag to run an exact commit; `latest` moves with every merge. The 
 docker pull ghcr.io/nasirlinijat/anti-fraud-backend:latest
 ```
 
-`deploy/deploy.sh` still builds the images on the server; these registry images are for Kubernetes and other machines that should run exactly what CI built.
+`deploy/deploy.sh` still builds the images on the server; these registry images are for Kubernetes and other machines that should run exactly what CI built. The Helm chart that runs them is described in [`helm/README.md`](helm/README.md).
 
 ## Choosing the model
 
