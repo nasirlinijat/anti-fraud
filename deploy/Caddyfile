@@ -26,6 +26,11 @@
 	handle @api {
 		reverse_proxy backend:{$BACKEND_PORT}
 	}
+	redir /docs /docs/ 308
+	handle /docs/* {
+		root * /srv
+		file_server
+	}
 	handle {
 		respond 404
 	}

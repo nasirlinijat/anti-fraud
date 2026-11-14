@@ -30,6 +30,8 @@ tags:
     description: Control simulation runs when explicitly enabled.
   - name: Score
     description: Score a purchase.
+  - name: Health
+    description: Check that the service runs and can score purchases.
   - name: Account events
     description: Record the logins and password resets that the game's account system reports.
   - name: Chargebacks
@@ -487,6 +489,23 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: request body must not exceed 65536 bytes
+        "429":
+          description: >-
+            This API key sent more score requests than its rate limit allows.
+            Nothing was saved. Wait for the number of seconds in `Retry-After`
+            and send the same request again.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: too many score requests, retry later
         "500":
           description: >-
             The purchase could not be scored, for example because the database
@@ -499,6 +518,52 @@ paths:
                 error: internal error
         "503":
           $ref: "#/components/responses/DatabaseUnavailable"
+
+  /health:
+    get:
+      tags: [Health]
+      operationId: health
+      summary: Check that the service is running
+      description: >-
+        Answers as long as the API process runs. It does not check the
+        database; use `/ready` for that. Needs no API key.
+      security: []
+      responses:
+        "200":
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              example:
+                status: ok
+
+  /ready:
+    get:
+      tags: [Health]
+      operationId: ready
+      summary: Check that the service can score purchases
+      description: >-
+        Answers `ready` when the API can reach its database, so purchases can
+        be scored. Needs no API key.
+      security: []
+      responses:
+        "200":
+          description: The service can score purchases.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              example:
+                status: ready
+        "503":
+          description: The database cannot be reached; score requests would fail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              example:
+                status: unavailable
 
   /account-events:
     post:
@@ -3884,6 +3949,15 @@ components:
           format: date-time
           description: When the service first recorded the chargeback, in UTC.
           example: "2026-12-03T09:15:02Z"
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok, ready, unavailable]
 
     ErrorResponse:
       type: object

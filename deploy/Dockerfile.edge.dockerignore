@@ -1,0 +1,4 @@
+*
+!deploy/Caddyfile
+!deploy/docs
+!openapi.yaml

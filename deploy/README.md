@@ -113,7 +113,7 @@ The `Images` workflow (`.github/workflows/images.yml`) builds four images from t
 | `ghcr.io/nasirlinijat/anti-fraud-backend` | `sha-<short commit>` for every main commit, and `latest` for the newest |
 | `ghcr.io/nasirlinijat/anti-fraud-frontend` | the same |
 | `ghcr.io/nasirlinijat/anti-fraud-dbsetup` | the same. The migrate tool, the migrations and `runtime-role.sql`, used by the Helm chart to set up the database |
-| `ghcr.io/nasirlinijat/anti-fraud-edge` | the same. Caddy with `deploy/Caddyfile`, the HTTPS gateway in the Helm chart |
+| `ghcr.io/nasirlinijat/anti-fraud-edge` | the same. Caddy with `deploy/Caddyfile`, the HTTPS gateway in the Helm chart. It also serves the developer docs at `https://<API_HOST>/docs`: Swagger UI with a public copy of `openapi.yaml` that keeps only `/score`, `/health` and `/ready` and starts with `deploy/docs/integration.md`. Built from the repository root (`docker build -f deploy/Dockerfile.edge .`) |
 
 Use the `sha-` tag to run an exact commit; `latest` moves with every merge. The images carry the repository as their source label, so they appear under the repository's **Packages**. The first publish creates each package; if a package is private, the repository owner makes it public in its **Package settings**, or a cluster pulls it with an image pull secret.
 

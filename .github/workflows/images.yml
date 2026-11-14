@@ -35,7 +35,7 @@ jobs:
             context: backend
             dockerfile: backend/Dockerfile.dbsetup
           - component: edge
-            context: deploy
+            context: .
             dockerfile: deploy/Dockerfile.edge
     steps:
       - uses: actions/checkout@v7

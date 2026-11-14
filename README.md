@@ -64,6 +64,7 @@ To run the frontend with hot reload, start the backend first. Then run `npm ci` 
 | Topic | Where |
 |---|---|
 | API reference | [openapi.yaml](openapi.yaml) (`make docs`) |
+| Developer docs for game shops | https://api.3-73-9-202.sslip.io/docs: the score API with an integration guide ([deploy/docs/integration.md](deploy/docs/integration.md)), served by the edge |
 | Production deployment | [deploy/README.md](deploy/README.md) |
 | Model training | [ml/README.md](ml/README.md) |
 | Load and chaos tests | [LOAD_TEST.md](LOAD_TEST.md), [CHAOS_TEST.md](CHAOS_TEST.md) |
