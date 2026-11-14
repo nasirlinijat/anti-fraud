@@ -18,6 +18,7 @@ import {
   type SimulationDraft,
 } from '../simulation'
 import { TimeDisplayToggle, Timestamp } from '../Display'
+import { BlockedPurchases } from './BlockedPurchases'
 import { Button } from '../ui/Button'
 import { PageHeader } from '../ui/PageHeader'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
@@ -77,6 +78,7 @@ export default function SimulatorPage() {
         {outcome.notice}
         {run ? ` Run status: ${statusNames[run.status].toLowerCase()}.` : ''}
       </p>
+      {run && <BlockedPurchases key={run.id} run={run} time={time} />}
       {history && history.items.length > 0 && (
         <RecentRuns items={history.items} currentId={run?.id} onFollow={runs.follow} />
       )}

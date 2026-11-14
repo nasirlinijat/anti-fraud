@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/nasirlinijat/anti-fraud/backend/internal/scoring"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/simulator"
 )
 
@@ -54,4 +55,31 @@ type SimulationController interface {
 	Checkpoint(ctx context.Context, runID, transactionID, outcome string) error
 	Finish(ctx context.Context, runID, status, message string) error
 	Close()
+}
+
+// Reasons a simulation run's purchase was blocked.
+const (
+	BlockReasonBlocklist = "blocklist"
+	BlockReasonRules     = "rules"
+)
+
+// BlockedPurchase is a purchase of a simulation run that scoring blocked,
+// with the decision that blocked it. Reason is BlockReasonBlocklist when a
+// blocklist entry matched and BlockReasonRules when the rule score reached
+// the ruleset's block threshold.
+type BlockedPurchase struct {
+	PurchaseID     int64
+	TransactionID  string
+	PlayerID       string
+	AmountMinor    int64
+	EventTime      time.Time
+	CardCountry    *string
+	IPCountry      *string
+	DeviceID       *string
+	Reason         string
+	RuleScore      int
+	BlockThreshold int
+	RulesetVersion int
+	FiredRules     []scoring.FiredRule
+	DecidedAt      time.Time
 }

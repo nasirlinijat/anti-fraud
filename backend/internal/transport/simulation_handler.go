@@ -28,6 +28,7 @@ type SimulationService interface {
 	Get(ctx context.Context, id string) (models.SimulationRun, error)
 	List(ctx context.Context, before string, limit int) ([]models.SimulationRun, string, error)
 	Stop(ctx context.Context, id, operatorID string) (models.SimulationRun, error)
+	BlockedPurchases(ctx context.Context, id string, before int64, limit int) ([]models.BlockedPurchase, int64, error)
 }
 
 type SimulationHandler struct {
@@ -38,8 +39,9 @@ func NewSimulationHandler(service SimulationService) *SimulationHandler {
 	return &SimulationHandler{service: service}
 }
 
-// RegisterSimulationRoutes registers the simulation routes: starting and
-// stopping and reading a run require an admin session. It
+// RegisterSimulationRoutes registers the simulation routes: starting,
+// stopping, and reading a run and its blocked purchases require an admin
+// session. It
 // registers nothing when simulations are disabled.
 func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled bool, access platform.Access) {
 	if !enabled {
@@ -48,6 +50,7 @@ func RegisterSimulationRoutes(mux *http.ServeMux, h *SimulationHandler, enabled 
 	mux.Handle("POST /simulations/reset", bounded(access.ConfigWrite(h.reset)))
 	mux.Handle("POST /simulations", bounded(access.ConfigWrite(h.start)))
 	mux.Handle("POST /simulations/{id}/stop", bounded(access.ConfigWrite(h.stop)))
+	mux.Handle("GET /simulations/{id}/blocked", bounded(access.ConfigRead(http.HandlerFunc(h.blocked))))
 	mux.Handle("GET /simulations/{id}", bounded(access.ConfigRead(http.HandlerFunc(h.read))))
 	mux.Handle("GET /simulations", bounded(access.ConfigRead(http.HandlerFunc(h.list))))
 }
@@ -130,14 +133,9 @@ func (h *SimulationHandler) read(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SimulationHandler) list(w http.ResponseWriter, r *http.Request) {
-	limit := defaultSimulationHistory
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > maxSimulationHistory {
-			platform.WriteError(w, http.StatusBadRequest, "limit must be between 1 and 100")
-			return
-		}
-		limit = n
+	limit, ok := readPageLimit(w, r)
+	if !ok {
+		return
 	}
 	items, next, err := h.service.List(r.Context(), r.URL.Query().Get("before"), limit)
 	if errors.Is(err, models.ErrInvalidSimulationCursor) {
@@ -153,6 +151,21 @@ func (h *SimulationHandler) list(w http.ResponseWriter, r *http.Request) {
 		Next      string                 `json:"next_cursor,omitempty"`
 		Scenarios []simulator.Pattern    `json:"available_scenarios"`
 	}{items, next, simulator.Patterns})
+}
+
+// readPageLimit reads the optional page size, from 1 to 100 with a default
+// of 20. On failure it writes the error response and returns false.
+func readPageLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return defaultSimulationHistory, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > maxSimulationHistory {
+		platform.WriteError(w, http.StatusBadRequest, "limit must be between 1 and 100")
+		return 0, false
+	}
+	return n, true
 }
 
 func (h *SimulationHandler) stop(w http.ResponseWriter, r *http.Request, operatorID string) {

@@ -127,7 +127,7 @@ func runtimePool(t *testing.T, pool *pgxpool.Pool, ownerDSN, schema string) (*pg
 		return pool, withSearchPath(t, ownerDSN, schema)
 	}
 	ident := pgx.Identifier{schema}.Sanitize()
-	if _, e := pool.Exec(t.Context(), "GRANT USAGE ON SCHEMA "+ident+" TO antifraud_api; GRANT SELECT ON purchases,decisions TO antifraud_api; GRANT SELECT,INSERT,UPDATE ON simulation_runs TO antifraud_api"); e != nil {
+	if _, e := pool.Exec(t.Context(), "GRANT USAGE ON SCHEMA "+ident+" TO antifraud_api; GRANT SELECT ON purchases,decisions,rulesets TO antifraud_api; GRANT SELECT,INSERT,UPDATE ON simulation_runs TO antifraud_api"); e != nil {
 		t.Fatal(e)
 	}
 	rc, e := pgxpool.ParseConfig(runtimeDSN)
