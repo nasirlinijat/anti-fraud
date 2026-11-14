@@ -25,6 +25,66 @@ func TestReadColumnsFindsEachColumnInAnyOrder(t *testing.T) {
 	}
 }
 
+func TestParseRecordAcceptsValidRows(t *testing.T) {
+	withScenario := columns{transactionID: 0, isFraud: 1, scenario: 2}
+	cases := []struct {
+		name         string
+		record       []string
+		cols         columns
+		source       string
+		wantFraud    bool
+		wantScenario string
+	}{
+		{"ieee-cis fraud", []string{"txn-1", "1"}, columns{transactionID: 0, isFraud: 1, scenario: -1}, "ieee-cis", true, ""},
+		{"ieee-cis not fraud", []string{"txn-2", "0"}, columns{transactionID: 0, isFraud: 1, scenario: -1}, "ieee-cis", false, ""},
+		{"ieee-cis with an empty scenario", []string{"txn-3", "0", ""}, withScenario, "ieee-cis", false, ""},
+		{"simulator with a scenario", []string{"txn-4", "1", "card_testing"}, withScenario, "simulator", true, "card_testing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l, err := parseRecord(c.record, c.cols, "run-1", c.source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scenario := ""
+			if l.Scenario != nil {
+				scenario = *l.Scenario
+			}
+			if l.TransactionID != c.record[0] || l.RunID != "run-1" || l.Source != c.source || l.Fraud != c.wantFraud || scenario != c.wantScenario {
+				t.Fatalf("got %+v with scenario %q", l, scenario)
+			}
+		})
+	}
+}
+
+func TestParseRecordRejectsEachBrokenRule(t *testing.T) {
+	plain := columns{transactionID: 0, isFraud: 1, scenario: -1}
+	withScenario := columns{transactionID: 0, isFraud: 1, scenario: 2}
+	cases := []struct {
+		name   string
+		record []string
+		cols   columns
+		source string
+		want   string
+	}{
+		{"is_fraud is a word", []string{"txn-1", "yes"}, plain, "ieee-cis", "is_fraud must be 0 or 1"},
+		{"is_fraud is empty", []string{"txn-1", ""}, plain, "ieee-cis", "is_fraud must be 0 or 1"},
+		{"is_fraud is 2", []string{"txn-1", "2"}, plain, "ieee-cis", "is_fraud must be 0 or 1"},
+		{"empty transaction_id", []string{"", "1"}, plain, "ieee-cis", "transaction and run IDs are required"},
+		{"ieee-cis with a scenario", []string{"txn-1", "1", "card_testing"}, withScenario, "ieee-cis", "invalid label source or scenario"},
+		{"simulator without a scenario column", []string{"txn-1", "1"}, plain, "simulator", "invalid label source or scenario"},
+		{"simulator with an empty scenario", []string{"txn-1", "1", ""}, withScenario, "simulator", "invalid label source or scenario"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l, err := parseRecord(c.record, c.cols, "run-1", c.source)
+			if err == nil || err.Error() != c.want || l.TransactionID != "" || l.Scenario != nil {
+				t.Fatalf("got %+v, %v; want error %q", l, err, c.want)
+			}
+		})
+	}
+}
+
 func TestReadColumnsLeavesTheRecordsUnread(t *testing.T) {
 	reader := csv.NewReader(strings.NewReader("transaction_id,is_fraud\ntxn-1,1\n"))
 	if _, err := readColumns(reader); err != nil {

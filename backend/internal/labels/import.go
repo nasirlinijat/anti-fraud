@@ -35,17 +35,8 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
 			}
-			flag := record[cols.isFraud]
-			if flag != "0" && flag != "1" {
-				return nil, fmt.Errorf("line %d: is_fraud must be 0 or 1", line)
-			}
-			var scenario *string
-			if cols.scenario >= 0 && record[cols.scenario] != "" {
-				v := record[cols.scenario]
-				scenario = &v
-			}
-			l := Label{TransactionID: record[cols.transactionID], RunID: run, Source: source, Scenario: scenario, Fraud: flag == "1"}
-			if err := l.Validate(); err != nil {
+			l, err := parseRecord(record, cols, run, source)
+			if err != nil {
 				return nil, fmt.Errorf("line %d: %w", line, err)
 			}
 			return []any{l.TransactionID, l.RunID, l.Source, l.Scenario, l.Fraud}, nil
@@ -111,4 +102,21 @@ func readColumns(reader *csv.Reader) (columns, error) {
 		cols.scenario = i
 	}
 	return cols, nil
+}
+
+func parseRecord(record []string, cols columns, run, source string) (Label, error) {
+	flag := record[cols.isFraud]
+	if flag != "0" && flag != "1" {
+		return Label{}, errors.New("is_fraud must be 0 or 1")
+	}
+	var scenario *string
+	if cols.scenario >= 0 && record[cols.scenario] != "" {
+		v := record[cols.scenario]
+		scenario = &v
+	}
+	l := Label{TransactionID: record[cols.transactionID], RunID: run, Source: source, Scenario: scenario, Fraud: flag == "1"}
+	if err := l.Validate(); err != nil {
+		return Label{}, err
+	}
+	return l, nil
 }
