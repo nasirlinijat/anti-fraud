@@ -39,6 +39,21 @@ The concurrency suite also holds review changes uncommitted while competing requ
 
 `make test-integration` runs both folders one after the other (`go test -p 1 -tags=integration ./test/...`).
 
+## Authentication fixtures
+
+Transport session fixtures seed separate accounts in each test transaction using
+one immutable cost-12 hash of the fixture password. Each account still signs in
+through the real authentication service; account-creation requests and dedicated
+password, session, expiry, disabled-account and role tests retain their real paths.
+Only the hash is shared across tests, never accounts or session tokens.
+
+The tagged integration app creates and signs in its admin/reviewer lazily, then
+reuses that session within the app transaction. Cached sessions are never refreshed
+automatically after logout or account disable. Explicit reviewer sign-ins remain
+explicit. Single-review decisions still prepare their claim on every request.
+Fixture regressions cover one session per role, authorization, revocation and
+isolation after rollback. All database state is discarded with the transaction.
+
 ## Clean demo start
 
 Ask a teammate who did not write the change to start from a fresh checkout. With Docker already running and the README prerequisites installed, use a fresh Compose project with an empty volume. Start a timer before copying `.env.example`, follow the [quick start and demo seed instructions](../../README.md#quick-start), and stop the timer when an admin can sign in and see the populated dashboard and review queue. Record the elapsed time, whether it was under 10 minutes, and any corrections needed in the README.

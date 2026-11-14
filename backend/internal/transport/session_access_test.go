@@ -23,9 +23,10 @@ import (
 // sessionTestServer serves the review, blocklist, and account routes against
 // the test transaction, to sessions and to the test reviewer sessions.
 type sessionTestServer struct {
-	mux      *http.ServeMux
-	accounts *account.Service
-	sessions *auth.Service
+	fixtureAccounts *storage.AccountStore
+	mux             *http.ServeMux
+	accounts        *account.Service
+	sessions        *auth.Service
 }
 
 func newSessionTestServer(t *testing.T, tx pgx.Tx) *sessionTestServer {
@@ -37,14 +38,16 @@ func newSessionTestServer(t *testing.T, tx pgx.Tx) *sessionTestServer {
 	RegisterBlocklistRoutes(mux, NewBlocklistHandler(blocklist.NewService(storage.NewBlocklistStore(tx))), access)
 	accounts := account.NewService(storage.NewAccountStore(tx))
 	RegisterAccountRoutes(mux, NewAccountHandler(accounts), access)
-	return &sessionTestServer{mux: mux, accounts: accounts, sessions: sessions}
+	return &sessionTestServer{mux: mux, accounts: accounts, sessions: sessions, fixtureAccounts: storage.NewAccountStore(tx)}
 }
 
 // signIn creates an account and returns a session token for it.
 func (s *sessionTestServer) signIn(t *testing.T, username string, role models.Role) string {
 	t.Helper()
 	const password = "session test password"
-	if _, err := s.accounts.Create(context.Background(), account.NewAccount{Username: username, Password: password, Role: role}); err != nil {
+	// Fixture accounts share only an immutable cost-12 hash; login still verifies it.
+	const passwordHash = "$2a$12$T3JvfxMIYt5AqX9YVUajQufC1TS66dUgEDAlUy4k/os/Wv9FNMfzu"
+	if _, err := s.fixtureAccounts.Create(context.Background(), models.NewAccount{Username: username, PasswordHash: passwordHash, Role: role}); err != nil {
 		t.Fatalf("create %s: %v", username, err)
 	}
 	session, err := s.sessions.Login(context.Background(), username, password)

@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -123,10 +124,11 @@ func run(m *testing.M) int {
 }
 
 type app struct {
-	mux      *http.ServeMux
-	tx       pgx.Tx
-	accounts *account.Service
-	sessions *auth.Service
+	fixtureSessions map[string]models.Session
+	mux             *http.ServeMux
+	tx              pgx.Tx
+	accounts        *account.Service
+	sessions        *auth.Service
 }
 
 func newApp(t *testing.T) app {
@@ -168,7 +170,7 @@ func newApp(t *testing.T) app {
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)
 	transport.RegisterBlocklistRoutes(mux, transport.NewBlocklistHandler(blocklist.NewService(blocklistStore)), access)
-	return app{mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
+	return app{fixtureSessions: make(map[string]models.Session), mux: mux, tx: tx, accounts: account.NewService(storage.NewAccountStore(tx)), sessions: sessions}
 }
 
 func (a app) do(t *testing.T, method, path, key, body string) *httptest.ResponseRecorder {
@@ -179,34 +181,48 @@ func (a app) do(t *testing.T, method, path, key, body string) *httptest.Response
 	}
 	rec := httptest.NewRecorder()
 	if !strings.HasPrefix(path, "/score") && !strings.HasPrefix(path, "/account-events") && (key == adminToken || key == reviewerToken) {
-		role := models.RoleReviewer
-		username := analystID
-		if key == adminToken {
-			role = models.RoleAdmin
-			username = "integration-admin"
-		}
-		var id int64
-		err := a.tx.QueryRow(context.Background(), "SELECT id FROM accounts WHERE username=$1", username).Scan(&id)
-		if err != nil {
-			if _, err = a.accounts.Create(context.Background(), account.NewAccount{Username: username, Password: "integration password", Role: role}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		session, err := a.sessions.Login(context.Background(), username, "integration password")
-		if err != nil {
-			t.Fatal(err)
-		}
+		session := a.fixtureSession(t, key)
 		if method == http.MethodPost && strings.HasSuffix(path, "/decision") {
-			id := strings.TrimSuffix(strings.TrimPrefix(path, "/reviews/"), "/decision")
-			if _, err := a.tx.Exec(context.Background(), `INSERT INTO review_claims(purchase_id,account_id) SELECT d.purchase_id,a.id FROM decisions d JOIN accounts a ON a.username=$2 WHERE d.purchase_id=$1::bigint AND d.outcome='review' ON CONFLICT(purchase_id) DO NOTHING`, id, username); err != nil {
-				t.Fatal(err)
-			}
+			a.claimDecisionReview(t, path, session.Account.Username)
 		}
 		req.Header.Del("X-API-Key")
 		req.Header.Set("Authorization", "Bearer "+session.Token)
 	}
 	a.mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func (a app) fixtureSession(t *testing.T, credential string) models.Session {
+	t.Helper()
+	if session, ok := a.fixtureSessions[credential]; ok {
+		return session
+	}
+	role, username := models.RoleReviewer, analystID
+	if credential == adminToken {
+		role, username = models.RoleAdmin, "integration-admin"
+	}
+	var id int64
+	err := a.tx.QueryRow(t.Context(), "SELECT id FROM accounts WHERE username=$1", username).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, err = a.accounts.Create(t.Context(), account.NewAccount{Username: username, Password: "integration password", Role: role})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := a.sessions.Login(t.Context(), username, "integration password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.fixtureSessions[credential] = session
+	return session
+}
+
+func (a app) claimDecisionReview(t *testing.T, path, username string) {
+	t.Helper()
+	id := strings.TrimSuffix(strings.TrimPrefix(path, "/reviews/"), "/decision")
+	if _, err := a.tx.Exec(t.Context(), `INSERT INTO review_claims(purchase_id,account_id) SELECT d.purchase_id,a.id FROM decisions d JOIN accounts a ON a.username=$2 WHERE d.purchase_id=$1::bigint AND d.outcome='review' ON CONFLICT(purchase_id) DO NOTHING`, id, username); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // signIn creates a reviewer account and returns a session token for it.
