@@ -54,12 +54,16 @@ func (l *rateLimiter) allow(key string) (bool, time.Duration) {
 }
 
 func RateLimit(l *rateLimiter, next http.Handler) http.Handler {
+	return rateLimitMessage(l, next, "too many score requests, retry later")
+}
+
+func rateLimitMessage(l *rateLimiter, next http.Handler, message string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		allowed, wait := l.allow(r.Header.Get(platform.APIKeyHeader))
 		if !allowed {
 			seconds := int(math.Ceil(wait.Seconds()))
 			w.Header().Set("Retry-After", strconv.Itoa(max(seconds, 1)))
-			platform.WriteError(w, http.StatusTooManyRequests, "too many score requests, retry later")
+			platform.WriteError(w, http.StatusTooManyRequests, message)
 			return
 		}
 		next.ServeHTTP(w, r)

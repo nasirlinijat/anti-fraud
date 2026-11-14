@@ -29,7 +29,7 @@ tags:
   - name: Simulations
     description: Control simulation runs when explicitly enabled.
   - name: Score
-    description: Score a purchase.
+    description: Score a purchase and read saved decision status.
   - name: Health
     description: Check that the service runs and can score purchases.
   - name: Account events
@@ -49,6 +49,87 @@ tags:
     description: Read and publish scoring configuration.
 
 paths:
+  /decision-status:
+    get:
+      tags: [Score]
+      summary: Read the original scoring outcome and final review status
+      description: >-
+        Read saved data for one exact transaction ID. The outcome is the immutable
+        original scoring outcome. This deployment uses one service key, without
+        per-merchant ownership isolation. No payment or item delivery is performed.
+        Poll pending reviews every 5 seconds and honor Retry-After on 429/503.
+        A missing purchase or temporary error never grants permission to fulfill.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: transaction_id
+          required: true
+          description: >-
+            Exactly one URL-encoded transaction ID, trimmed like POST /score.
+            Case-sensitive; do not apply the console search length limit.
+            Malformed encoding, invalid text and repeated values return 400.
+            The server request-header/URI size limit still applies.
+          schema: {type: string, minLength: 1}
+      responses:
+        "200":
+          description: Saved scoring outcome and committed review state
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [transaction_id, outcome, review_status, resolved_at]
+                properties:
+                  transaction_id: {type: string}
+                  outcome: {type: string, enum: [allow, review, block]}
+                  review_status:
+                    type: string
+                    enum: [not_required, pending, approved, rejected]
+                    description: not_required for allow/block; otherwise the saved review state.
+                  resolved_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Saved UTC resolution time; null for pending or not_required.
+        "400":
+          description: Invalid or repeated transaction_id or malformed query encoding
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401":
+          description: Missing, wrong or duplicate service key; console sessions do not authorize this operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: No saved scored purchase has this transaction ID
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429":
+          description: Status polling rate exceeded; its bucket is separate from scoring
+          headers:
+            Retry-After: {schema: {type: integer}, description: Seconds before retrying}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "503":
+          description: Database unavailable or the lookup deadline passed
+          headers:
+            Retry-After: {schema: {type: integer}, description: Seconds before retrying}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500":
+          description: Unexpected internal error
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
   /auth/login:
     post:
       tags: [Auth]

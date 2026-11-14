@@ -22,6 +22,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/accountevent"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/decisionstatus"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
@@ -162,6 +163,7 @@ func newApp(t *testing.T) app {
 	accountEvents := storage.NewAccountEventStore(tx)
 	scoreService := score.NewService(rulesets, blocklistSvc, storage.NewPurchaseStore(tx)).UseAccountEvents(accountEvents)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService), serviceKey)
+	transport.RegisterDecisionStatusRoutes(mux, transport.NewDecisionStatusHandler(decisionstatus.NewService(storage.NewDecisionStatusStore(tx))), serviceKey)
 	transport.RegisterAccountEventRoutes(mux, transport.NewAccountEventHandler(accountevent.NewService(accountEvents)), serviceKey)
 	transport.RegisterRulesetRoutes(mux, transport.NewRulesetHandler(ruleset.NewService(rulesets)), access)
 	transport.RegisterReviewRoutes(mux, transport.NewReviewHandler(review.NewService(reviewStore), false), access)

@@ -30,7 +30,7 @@ var consoleTestSessions = consoleSessions{
 }
 
 func setTestCredential(r *http.Request, token string) {
-	if r.URL.Path == "/score" || r.URL.Path == "/account-events" {
+	if r.URL.Path == "/score" || r.URL.Path == "/account-events" || r.URL.Path == "/decision-status" {
 		r.Header.Set("X-API-Key", token)
 		return
 	}

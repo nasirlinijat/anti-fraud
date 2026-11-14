@@ -12,6 +12,7 @@ import (
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/auth"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/blocklist"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/chargeback"
+	"github.com/nasirlinijat/anti-fraud/backend/internal/services/decisionstatus"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/review"
 	"github.com/nasirlinijat/anti-fraud/backend/internal/services/ruleset"
 	scoresvc "github.com/nasirlinijat/anti-fraud/backend/internal/services/score"
@@ -57,6 +58,7 @@ func registerRoutes(mux *http.ServeMux, cfg platform.Config, pool *pgxpool.Pool)
 	if closeMetrics := useMetrics(cfg.MetricsAddr, scoreService); closeMetrics != nil {
 		closers = append(closers, closeMetrics)
 	}
+	transport.RegisterDecisionStatusRoutes(mux, transport.NewDecisionStatusHandler(decisionstatus.NewService(storage.NewDecisionStatusStore(pool))).UseLimits(cfg.ScoreLimits), cfg.APIKey)
 	transport.RegisterScoreRoutes(mux, transport.NewScoreHandler(scoreService).UseLimits(cfg.ScoreLimits), cfg.APIKey)
 	transport.RegisterAccountEventRoutes(mux,
 		transport.NewAccountEventHandler(accountevent.NewService(accountEventStore)).UseTimeout(cfg.ScoreLimits.Timeout), cfg.APIKey)

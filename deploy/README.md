@@ -4,7 +4,7 @@ The whole stack runs on one EC2 server with Docker Compose: PostgreSQL, the back
 
 ```
 Internet ──► Caddy gateway (80, 443)
-               ├── api.<ip>.sslip.io      ──► backend   POST /score, GET /health, GET /ready only
+               ├── api.<ip>.sslip.io      ──► backend   POST /score, GET /decision-status, GET /health, GET /ready only
                └── console.<ip>.sslip.io  ──► console   sign-in with a console account
                                                └── backend (the console adds the API key for signed-in users)
              PostgreSQL is reachable only inside the server
@@ -12,7 +12,7 @@ Internet ──► Caddy gateway (80, 443)
 
 | Host | Who uses it | Protection |
 |---|---|---|
-| `api.<ip>.sslip.io` | Game shops, the simulator, `replay.py` | `X-API-Key` header with `API_KEY`. Only `/score`, `/health` and `/ready` are open |
+| `api.<ip>.sslip.io` | Game shops, the simulator, `replay.py` | `X-API-Key` header with `API_KEY`. Only `/score`, `/decision-status`, `/health` and `/ready` are open |
 | `console.<ip>.sslip.io` | The team and analysts | Each person signs in with their own console account (admin or reviewer). Every API call carries the session, and the Tester page's `/score` is forwarded only for a signed-in account |
 
 [sslip.io](https://sslip.io) is a free DNS service: `api.3-120-10-20.sslip.io` resolves to `3.120.10.20`, so no domain is needed. With a real domain, point two DNS records at the server and put those names in `CONSOLE_HOST` and `API_HOST`.
@@ -113,7 +113,7 @@ The `Images` workflow (`.github/workflows/images.yml`) builds four images from t
 | `ghcr.io/nasirlinijat/anti-fraud-backend` | `sha-<short commit>` for every main commit, and `latest` for the newest |
 | `ghcr.io/nasirlinijat/anti-fraud-frontend` | the same |
 | `ghcr.io/nasirlinijat/anti-fraud-dbsetup` | the same. The migrate tool, the migrations and `runtime-role.sql`, used by the Helm chart to set up the database |
-| `ghcr.io/nasirlinijat/anti-fraud-edge` | the same. Caddy with `deploy/Caddyfile`, the HTTPS gateway in the Helm chart. It also serves the developer docs at `https://<API_HOST>/docs`: Swagger UI with a public copy of `openapi.yaml` that keeps only `/score`, `/health` and `/ready` and starts with `deploy/docs/integration.md`. Built from the repository root (`docker build -f deploy/Dockerfile.edge .`) |
+| `ghcr.io/nasirlinijat/anti-fraud-edge` | the same. Caddy with `deploy/Caddyfile`, the HTTPS gateway in the Helm chart. It also serves the developer docs at `https://<API_HOST>/docs`: Swagger UI with a public copy of `openapi.yaml` that keeps only `/score`, `/decision-status`, `/health` and `/ready` and starts with `deploy/docs/integration.md`. Built from the repository root (`docker build -f deploy/Dockerfile.edge .`) |
 
 Use the `sha-` tag to run an exact commit; `latest` moves with every merge. The images carry the repository as their source label, so they appear under the repository's **Packages**. The first publish creates each package; if a package is private, the repository owner makes it public in its **Package settings**, or a cluster pulls it with an image pull secret.
 

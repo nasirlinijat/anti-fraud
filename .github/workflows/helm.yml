@@ -140,10 +140,17 @@ jobs:
             -d '{"transaction_id":"txn-ci-1","event_time":"2026-11-08T10:00:00Z","amount_minor":1999,"player_id":"player-ci","card_token":"card-ci"}' \
             | tee score.json
           grep -q '"outcome"' score.json
+          api --get http://127.0.0.1:8088/decision-status \
+            -H "X-API-Key: $(yq '.secrets.apiKey' "$CI_VALUES")" \
+            --data-urlencode transaction_id=txn-ci-1 | jq -e '.transaction_id == "txn-ci-1" and (.review_status == "not_required" or .review_status == "pending")'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Host: api.localhost" 'http://127.0.0.1:8088/decision-status?transaction_id=txn-ci-1')" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "Host: api.localhost" http://127.0.0.1:8088/purchases/search?q=txn-ci-1)" = 404
+
           console http://127.0.0.1:8088/ | grep -qi '<html'
           api http://127.0.0.1:8088/docs/ | grep -q 'swagger-ui'
           api http://127.0.0.1:8088/docs/openapi.yaml > public-openapi.yaml
           grep -q '^  /score:' public-openapi.yaml
+          grep -q '^  /decision-status:' public-openapi.yaml
           if grep -qE '^  /(admin|reviews|auth|rulesets)' public-openapi.yaml; then echo "internal endpoints in the public docs"; exit 1; fi
           status=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: api.localhost" http://127.0.0.1:8088/admin/accounts)
           test "$status" = 404
