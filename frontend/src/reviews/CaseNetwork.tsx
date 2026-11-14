@@ -40,7 +40,7 @@ export function CaseNetwork({ purchaseId, time, onOpen }: CaseNetworkProps) {
 
   return (
     <section className="panel case-network" aria-labelledby="case-network">
-      <h3 id="case-network">Linked players, cards and devices</h3>
+      <h4 id="case-network">Linked players, cards and devices</h4>
       {state.status === 'loading' && <LoadingSkeleton shape="chart" label="Loading linked players, cards and devices…" />}
       {state.status === 'not-found' && (
         <EmptyState announce>This purchase is no longer awaiting review, so its links are not shown.</EmptyState>

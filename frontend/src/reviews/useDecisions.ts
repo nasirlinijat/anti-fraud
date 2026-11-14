@@ -25,7 +25,7 @@ export function useDecisions({ refresh, onFeedback, onDecided }: DecisionOptions
     setConfirmation({ item, decision })
   }
 
-  async function save({ item, decision }: ReviewAction) {
+  async function save({ item, decision }: ReviewAction, caseId?: string) {
     const id = item.purchase_id
     if (requests.has(id)) return
 
@@ -37,7 +37,7 @@ export function useDecisions({ refresh, onFeedback, onDecided }: DecisionOptions
       const blocked = await submitReviewDecision(id, decision, blocks, controller.signal)
       if (!isCurrent()) return
       onDecided(id)
-      onFeedback({ text: decisionFeedback(item.transaction_id, decision, blocked) })
+      onFeedback({ text: decisionFeedback(item.transaction_id, decision, blocked), caseId })
     } catch (error) {
       if (!isCurrent()) return
       const failure = describeDecisionFailure(error, item.transaction_id)

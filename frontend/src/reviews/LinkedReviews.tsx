@@ -29,7 +29,7 @@ export function LinkedReviews({ purchaseId, handlers, actions, onOpen }: LinkedR
   const { state, selection, setSelection, retry, pending } = useLinkedReviews(purchaseId, handlers.username, actions)
   return (
     <section className="panel linked-reviews" aria-labelledby="case-linked-reviews">
-      <h3 id="case-linked-reviews">Linked purchases awaiting review</h3>
+      <h4 id="case-linked-reviews">Linked purchases awaiting review</h4>
       {state.status === 'loading' && <LoadingSkeleton shape="table" label="Loading linked purchases awaiting review…" />}
       {state.status === 'not-found' && (
         <EmptyState announce>This purchase is no longer awaiting review, so its linked purchases are not shown.</EmptyState>

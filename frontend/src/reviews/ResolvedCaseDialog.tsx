@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { getResolvedReviewCase, type ResolvedReviewCase } from '../api'
-import { Timestamp } from '../Display'
 import { ApiError } from '../request'
 import { Button } from '../ui/Button'
 import { usePolling } from '../usePolling'
 import type { TimeDisplay } from '../useTimeDisplay'
 import { EmptyState, ErrorState, LoadingSkeleton } from '../ViewState'
 import { CaseEvidence } from './CaseEvidence'
+import { ReviewResolution } from './ReviewResolution'
 
 type ResolvedCaseState =
   | { status: 'loading' }
@@ -49,23 +49,12 @@ export function ResolvedCaseDialog({ purchaseId, time, onClose }: {
       {state.status === 'loading' && <LoadingSkeleton shape="case" label="Loading resolved case…" />}
       {state.status === 'unavailable' && <EmptyState announce>This resolved case is unavailable.</EmptyState>}
       {state.status === 'failed' && <ErrorState onRetry={retry} pending={pending}>{state.message}</ErrorState>}
-      {state.status === 'loaded' && <ResolvedEvidence review={state.review} time={time} />}
+      {state.status === 'loaded' && (
+        <>
+          <ReviewResolution resolution={state.review.resolution} time={time} />
+          <CaseEvidence review={state.review} time={time} />
+        </>
+      )}
     </dialog>
-  )
-}
-
-function ResolvedEvidence({ review, time }: { review: ResolvedReviewCase; time: TimeDisplay }) {
-  return (
-    <>
-      <section className="panel">
-        <h3>Analyst decision</h3>
-        <dl className="facts">
-          <dt>Decision</dt><dd>{review.resolution.decision === 'approve' ? 'Approved' : 'Rejected'}</dd>
-          <dt>Analyst</dt><dd>{review.resolution.analyst_id}</dd>
-          <dt>Resolved time</dt><dd><Timestamp value={review.resolution.resolved_at} display={time} /></dd>
-        </dl>
-      </section>
-      <CaseEvidence review={review} time={time} />
-    </>
   )
 }
