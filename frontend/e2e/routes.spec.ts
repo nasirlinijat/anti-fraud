@@ -385,3 +385,59 @@ test('review queue navigates to nearby and end pages and resets when the claim f
   await expect(pager).toContainText('Page 1 of 1')
   await expect(pager).toContainText('0 purchases')
 })
+
+const purchaseCase = (id: string, outcome: 'allow' | 'review' | 'block', resolution: object | null) => ({
+  purchase_id: id, transaction_id: `txn-${id}`, player_id: 'player-381', device_id: null, amount_minor: '72609', event_time: now,
+  queued_at: now, rule_score: 50, model_score: null, model_version: null, fired_rules: [], claimed_by: null, claimed_at: null,
+  ruleset_version: 3, player_purchases: [], device_activity: null, cvv_result: null, avs_result: null, three_ds_result: null,
+  account_events: [], ip_intel: null, model_reasons: [], outcome, resolution,
+})
+const match = (id: string, outcome: 'allow' | 'review' | 'block', review: string | null) => ({
+  purchase_id: id, transaction_id: `txn-${id}`, player_id: 'player-381', amount_minor: '72609', event_time: now, outcome, review,
+  matched_by: 'player',
+})
+
+test('searching a transaction opens its purchase details', async ({ page }) => {
+  const asked: string[] = []
+  await page.route('**/purchases/search?*', route => {
+    asked.push(new URL(route.request().url()).searchParams.get('q') ?? '')
+    return route.fulfill({ json: { items: [match('54', 'allow', null)] } })
+  })
+  await page.route('**/purchases/54', route => route.fulfill({ json: purchaseCase('54', 'allow', null) }))
+  await page.goto('/#/dashboard')
+  await page.getByRole('searchbox', { name: 'Search purchases' }).fill('  txn-54  ')
+  await page.getByRole('searchbox', { name: 'Search purchases' }).press('Enter')
+  await expect(page).toHaveURL(/#\/purchases\/54$/)
+  await expect(page.getByRole('heading', { name: 'txn-54' })).toBeVisible()
+  const decision = page.getByRole('region', { name: 'Decision and review' })
+  await expect(decision).toContainText('Allowed')
+  await expect(decision).toContainText('Not reviewed')
+  expect(asked).toEqual(['txn-54'])
+})
+
+test('several matches are listed and an open review links to its case', async ({ page }) => {
+  await page.route('**/purchases/search?*', route => route.fulfill({ json: { items: [match('55', 'review', 'open'), match('53', 'review', 'approved')] } }))
+  await page.route('**/purchases/53', route => route.fulfill({ json: purchaseCase('53', 'review', { decision: 'approve', analyst_id: 'reviewer-one', resolved_at: now }) }))
+  await page.goto('/#/dashboard')
+  const search = page.getByRole('searchbox', { name: 'Search purchases' })
+  await search.fill('player-381')
+  await search.press('Enter')
+  const results = page.getByRole('list', { name: 'Purchases matching player-381' })
+  await expect(results.getByRole('listitem')).toHaveCount(2)
+  await expect(results.getByRole('link', { name: /txn-55/ })).toHaveAttribute('href', '#/reviews/55')
+  await expect(results.getByRole('link', { name: /txn-53/ })).toContainText('approved')
+  await search.press('Escape')
+  await expect(results).toHaveCount(0)
+  await search.press('Enter')
+  await results.getByRole('link', { name: /txn-53/ }).click()
+  await expect(results).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Decision and review' })).toContainText('Approved by reviewer-one')
+})
+
+test('a search without matches says so', async ({ page }) => {
+  await page.route('**/purchases/search?*', route => route.fulfill({ json: { items: [] } }))
+  await page.goto('/#/dashboard')
+  await page.getByRole('searchbox', { name: 'Search purchases' }).fill('nobody')
+  await page.getByRole('searchbox', { name: 'Search purchases' }).press('Enter')
+  await expect(page.getByText('No purchase has the transaction ID, player ID or card token “nobody”.')).toBeVisible()
+})

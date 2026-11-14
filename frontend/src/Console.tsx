@@ -6,9 +6,11 @@ import AccountsPage from './pages/AccountsPage'
 import AssignmentsPage from './pages/AssignmentsPage'
 import BlocklistPage from './pages/BlocklistPage'
 import DashboardPage from './pages/DashboardPage'
+import PurchasePage from './pages/PurchasePage'
 import RulesetPage from './pages/RulesetPage'
 import SimulatorPage from './pages/SimulatorPage'
 import TesterPage from './pages/TesterPage'
+import { PurchaseSearch } from './PurchaseSearch'
 import ReviewQueue from './reviews/ReviewQueue'
 import type { Account, Role } from './session'
 import { ThemeSaveStatus, ThemeToggle } from './ThemeToggle'
@@ -18,6 +20,13 @@ import { usePolling } from './usePolling'
 type Readiness = 'checking' | 'ready' | 'unavailable'
 
 interface ConsolePage extends Destination {
+  roles: readonly Role[]
+  element: ReactNode
+}
+
+interface HiddenPage {
+  path: string
+  title: string
   roles: readonly Role[]
   element: ReactNode
 }
@@ -36,6 +45,10 @@ const pages: ConsolePage[] = [
   { path: '/tester', title: 'Tester', group: 'Tools', icon: Crosshair, roles: admins, element: <TesterPage /> },
   { path: '/simulator', title: 'Simulator', group: 'Tools', icon: Play, roles: admins, element: <SimulatorPage /> },
   { path: '/accounts', title: 'Accounts', group: 'Administration', icon: User, roles: admins, element: <AccountsPage /> },
+]
+
+const hiddenPages: HiddenPage[] = [
+  { path: '/purchases', title: 'Purchase', roles: everyone, element: <PurchasePage /> },
 ]
 
 function currentPath(): string {
@@ -69,9 +82,9 @@ function Console({ account }: { account: Account }) {
   const path = useHashPath()
   const allowed = pages.filter(page => page.roles.includes(account.role))
   const home = allowed[0]
-  const requested = pages.find(page => path === page.path || path.startsWith(`${page.path}/`))
+  const requested = [...pages, ...hiddenPages].find(page => path === page.path || path.startsWith(`${page.path}/`))
   const page = requested ?? home
-  const permitted = allowed.includes(page)
+  const permitted = page.roles.includes(account.role)
   const title = permitted ? page.title : 'Not available'
 
   useEffect(() => { document.title = `${title} · Anti-Fraud` }, [title])
@@ -87,6 +100,7 @@ function Console({ account }: { account: Account }) {
         <header className="console-topbar">
           <div className="mobile-brand"><Brand compact /></div>
           <p className="workspace-label">Anti-Fraud <span aria-hidden="true">/</span> <strong>{title}</strong></p>
+          <PurchaseSearch />
           <span className={`status-pill status-${readiness}`} role="status" aria-label={`Backend: ${readiness}`}>
             Backend: {readiness}
           </span>
