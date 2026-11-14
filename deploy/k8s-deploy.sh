@@ -26,6 +26,7 @@ ssh "${ssh_args[@]}" "$host" bash -s -- "$tag" <<'REMOTE'
 set -euo pipefail
 tag="$1"
 ns=anti-fraud
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 datadog_chart_version=3.270.1
 cd ~/anti-fraud
 if [ ! -f .env ]; then
