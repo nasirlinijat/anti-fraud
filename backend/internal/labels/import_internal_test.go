@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+func TestCheckImportArgs(t *testing.T) {
+	cases := []struct {
+		run, source string
+		ok          bool
+	}{
+		{"run-1", "ieee-cis", true},
+		{"run-1", "simulator", true},
+		{"", "ieee-cis", false},
+		{"run-1", "", false},
+		{"run-1", "IEEE-CIS", false},
+	}
+	for _, c := range cases {
+		err := checkImportArgs(c.run, c.source)
+		if (err == nil) != c.ok {
+			t.Errorf("checkImportArgs(%q, %q) = %v", c.run, c.source, err)
+		}
+	}
+}
+
 func TestReadColumnsFindsEachColumnInAnyOrder(t *testing.T) {
 	cases := []struct {
 		header string

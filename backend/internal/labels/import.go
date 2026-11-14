@@ -12,8 +12,8 @@ import (
 
 // ImportCSV validates and inserts a complete file atomically with bounded client memory.
 func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, source string) (int64, error) {
-	if run == "" || (source != "ieee-cis" && source != "simulator") {
-		return 0, errors.New("run and source (ieee-cis or simulator) are required")
+	if err := checkImportArgs(run, source); err != nil {
+		return 0, err
 	}
 	reader := csv.NewReader(input)
 	cols, err := readColumns(reader)
@@ -38,6 +38,13 @@ func ImportCSV(ctx context.Context, pool *pgxpool.Pool, input io.Reader, run, so
 		return 0, err
 	}
 	return n, nil
+}
+
+func checkImportArgs(run, source string) error {
+	if run == "" || (source != "ieee-cis" && source != "simulator") {
+		return errors.New("run and source (ieee-cis or simulator) are required")
+	}
+	return nil
 }
 
 type columns struct {
