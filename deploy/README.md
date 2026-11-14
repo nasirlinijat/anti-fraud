@@ -362,7 +362,7 @@ Purchases scored on k3s after the move are not in the Compose database. To keep 
 | Copy a backup to your computer | `ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP "kubectl -n anti-fraud exec db-0 -c postgres -- cat /backups/<file>" > <file>` |
 | Create a console account | *server*: `kubectl -n anti-fraud exec -it deploy/backend -c backend -- /create-account -username <name>` |
 
-`k8s-deploy.sh` deploys only commits on `main`, because only those have images. It reads `MODEL_FILE`, `SIMULATION_ENABLED`, `IP_INTEL_PROVIDER`, `SCORE_RATE_*`, `DB_MAX_CONNS`, `CONSOLE_HOST`, `API_HOST`, the `DD_` settings and every secret from `.env`. With `DD_API_KEY` set it also installs or updates the Datadog chart; `DD_APM_ENABLED=false` turns tracing off as before. Values in `.env` must not be quoted.
+`k8s-deploy.sh` deploys only commits on `main`, because only those have images. It reads `MODEL_FILE`, `SIMULATION_ENABLED`, `IP_INTEL_PROVIDER`, `SCORE_RATE_*`, `DB_MAX_CONNS`, `CONSOLE_HOST`, `API_HOST`, the `DD_` settings and every secret from `.env`. With `DD_API_KEY` set it also installs or updates the Datadog chart; `DD_APM_ENABLED=false` turns tracing off as before. Quoted values in `.env` work the same as with Compose: the quotes are not part of the value.
 
 Restoring a nightly dump over the live database on k3s (take a fresh backup first; this replaces all data):
 

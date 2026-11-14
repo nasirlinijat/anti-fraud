@@ -46,7 +46,12 @@ kubectl get namespace "$ns" > /dev/null 2>&1 || kubectl create namespace "$ns"
 secret_file="$(mktemp)"
 trap 'rm -f "$secret_file"' EXIT
 chmod 600 "$secret_file"
-grep -E '^(API_KEY|POSTGRES_PASSWORD|RUNTIME_DB_PASSWORD|LABELS_DB_PASSWORD|REVIEW_ANALYST_KEYS|OPERATOR_API_KEYS|CHARGEBACK_WEBHOOK_SECRET)=' .env > "$secret_file"
+for name in API_KEY POSTGRES_PASSWORD RUNTIME_DB_PASSWORD LABELS_DB_PASSWORD REVIEW_ANALYST_KEYS OPERATOR_API_KEYS CHARGEBACK_WEBHOOK_SECRET; do
+	if [ -n "${!name+x}" ]; then
+		printf '%s=%s
+' "$name" "${!name}"
+	fi
+done > "$secret_file"
 kubectl -n "$ns" create secret generic anti-fraud-secrets --from-env-file="$secret_file" --dry-run=client -o yaml | kubectl apply -f - > /dev/null
 secrets_checksum="$(sha256sum "$secret_file" | cut -d" " -f1)"
 echo "Secret anti-fraud-secrets applied"
