@@ -85,6 +85,44 @@ func TestParseRecordRejectsEachBrokenRule(t *testing.T) {
 	}
 }
 
+func TestLabelRowsStreamsRowsAndNamesTheFailingLine(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		rows    int
+		wantErr string
+	}{
+		{"all rows valid", "txn-1,1\ntxn-2,0\n", 2, ""},
+		{"rule broken on line 3", "txn-1,1\ntxn-2,yes\ntxn-3,0\n", 1, "line 3: is_fraud must be 0 or 1"},
+		{"broken CSV on line 2", "txn-1,1,extra\n", 0, "line 2: record on line 2: wrong number of fields"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reader := csv.NewReader(strings.NewReader("transaction_id,is_fraud\n" + c.body))
+			cols, err := readColumns(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := labelRows(reader, cols, "run-1", "ieee-cis")
+			n := 0
+			for rows.Next() {
+				values, err := rows.Values()
+				if err != nil || len(values) != 5 || values[1] != "run-1" {
+					t.Fatalf("row %d: %v, %v", n, values, err)
+				}
+				n++
+			}
+			got := ""
+			if rows.Err() != nil {
+				got = rows.Err().Error()
+			}
+			if n != c.rows || got != c.wantErr {
+				t.Fatalf("got %d rows and %q; want %d rows and %q", n, got, c.rows, c.wantErr)
+			}
+		})
+	}
+}
+
 func TestReadColumnsLeavesTheRecordsUnread(t *testing.T) {
 	reader := csv.NewReader(strings.NewReader("transaction_id,is_fraud\ntxn-1,1\n"))
 	if _, err := readColumns(reader); err != nil {
