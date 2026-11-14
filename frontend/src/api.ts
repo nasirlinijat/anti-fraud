@@ -326,6 +326,25 @@ export interface ReviewCase extends Review {
   account_events: AccountEvent[]
   ip_intel: IpIntel | null
   model_reasons?: ModelReason[]
+  card_velocity_evidence?: CardVelocityEvidence
+}
+
+export interface CardVelocityPurchase {
+  transaction_id: string
+  event_time: string
+  amount_minor: string
+  contributed: boolean
+  recorded_after_decision: boolean
+}
+
+export interface CardVelocityEvidence {
+  count: number
+  limit: number
+  window_start: string
+  window_end: string
+  records_available: boolean
+  context_truncated: boolean
+  purchases: CardVelocityPurchase[]
 }
 
 export interface PurchaseMatch {

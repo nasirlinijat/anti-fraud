@@ -79,9 +79,9 @@ func (f *fakePurchases) FindSavedDecision(_ context.Context, p models.Purchase) 
 	return nil, nil
 }
 
-func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (int, error) {
+func (f *fakePurchases) CardPurchasesLastHour(_ context.Context, card string, at time.Time) (models.CardVelocityHistory, error) {
 	f.countCard, f.countAt = card, at
-	return f.cardUses, f.countErr
+	return models.CardVelocityHistory{Count: f.cardUses}, f.countErr
 }
 
 func (f *fakePurchases) DeviceCardsLastHour(context.Context, string, string, time.Time) (int64, error) {

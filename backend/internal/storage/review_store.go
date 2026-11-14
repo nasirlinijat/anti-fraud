@@ -320,7 +320,7 @@ func scanQueueItem(row pgx.Row, extra ...any) (models.QueueItem, error) {
 	return item, nil
 }
 
-const caseEvidenceColumns = queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel, d.model_inputs`
+const caseEvidenceColumns = queueItemColumns + `, d.ruleset_version, p.cvv_result, p.avs_result, p.three_ds_result, d.ip_intel, d.model_inputs, d.card_velocity_evidence`
 
 // getReviewCase returns a purchase that is still awaiting review.
 const getReviewCase = `
@@ -400,8 +400,8 @@ func (s *ReviewStore) readCase(ctx context.Context, row pgx.Row, resolution *mod
 
 func (s *ReviewStore) readCaseWith(ctx context.Context, row pgx.Row, extra ...any) (models.CaseItem, error) {
 	var c models.CaseItem
-	var ipIntel, modelInputs []byte
-	dest := append([]any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel, &modelInputs}, extra...)
+	var ipIntel, modelInputs, cardVelocity []byte
+	dest := append([]any{&c.RulesetVersion, &c.CVVResult, &c.AVSResult, &c.ThreeDSResult, &ipIntel, &modelInputs, &cardVelocity}, extra...)
 	item, err := scanQueueItem(row, dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.CaseItem{}, models.ErrReviewNotFound
@@ -426,6 +426,9 @@ func (s *ReviewStore) readCaseWith(ctx context.Context, row pgx.Row, extra ...an
 	}
 	if c.AccountEvents, err = s.caseAccountEvents(ctx, item); err != nil {
 		return models.CaseItem{}, fmt.Errorf("list account events for case %d: %w", item.PurchaseID, err)
+	}
+	if c.CardVelocity, err = s.caseCardVelocity(ctx, item, cardVelocity); err != nil {
+		return models.CaseItem{}, fmt.Errorf("read card velocity evidence for case %d: %w", item.PurchaseID, err)
 	}
 	return c, nil
 }

@@ -50,8 +50,9 @@ type CaseItem struct {
 	// when no lookup was made.
 	IPIntel *ipintel.Result
 	// Resolution is present when reading a resolved case.
-	Resolution  *CaseResolution
-	ModelInputs map[string]float64
+	Resolution   *CaseResolution
+	ModelInputs  map[string]float64
+	CardVelocity *CardVelocityEvidence
 }
 
 // CaseResolution records the analyst's decision on a resolved case.

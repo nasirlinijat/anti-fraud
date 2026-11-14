@@ -75,7 +75,7 @@ func (d scoreDeps) expectUnsaved(p models.Purchase, rs scoring.Ruleset, cardUses
 	d.rulesets.EXPECT().Active(gomock.Any()).Return(rs, nil)
 	d.blocklist.EXPECT().Match(gomock.Any(), models.BlocklistSubject{CardToken: p.CardToken, PlayerID: p.PlayerID}).Return(models.BlocklistEntry{}, false, nil)
 	d.purchases.EXPECT().FeatureHistory(gomock.Any(), gomock.Any()).Return(features.History{}, nil)
-	d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), p.CardToken, p.EventTime).Return(cardUses, nil)
+	d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), p.CardToken, p.EventTime).Return(models.CardVelocityHistory{Count: cardUses}, nil)
 }
 
 func TestScoreWithRulesOnly(t *testing.T) {
@@ -179,7 +179,7 @@ func TestScoreReadsOnlyTheHistoryTheEnabledRulesNeed(t *testing.T) {
 			d.rulesets.EXPECT().Active(gomock.Any()).Return(rs, nil)
 			d.blocklist.EXPECT().Match(gomock.Any(), gomock.Any()).Return(models.BlocklistEntry{}, false, nil)
 			d.purchases.EXPECT().FeatureHistory(gomock.Any(), gomock.Any()).Return(features.History{}, nil)
-			d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), gomock.Any(), gomock.Any()).Return(0, nil)
+			d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), gomock.Any(), gomock.Any()).Return(models.CardVelocityHistory{}, nil)
 			d.purchases.EXPECT().DeviceCardsLastHour(gomock.Any(), device, p.CardToken, p.EventTime).Return(int64(1), nil).Times(tt.wantDevice)
 			d.purchases.EXPECT().TrustedHistory(gomock.Any(), p, int32(30)).Return(&scoring.TrustedPurchaseHistory{}, nil).Times(tt.wantTrustHist)
 			d.purchases.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(int64(1), nil)
@@ -258,7 +258,7 @@ func TestScoreReturnsEveryStoreError(t *testing.T) {
 			d.rulesets.EXPECT().Active(gomock.Any()).Return(rulesetWith(scoring.ModelOff), nil)
 			d.blocklist.EXPECT().Match(gomock.Any(), gomock.Any()).Return(models.BlocklistEntry{}, false, nil)
 			d.purchases.EXPECT().FeatureHistory(gomock.Any(), gomock.Any()).Return(features.History{}, nil)
-			d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), gomock.Any(), gomock.Any()).Return(0, errDatabase)
+			d.purchases.EXPECT().CardPurchasesLastHour(gomock.Any(), gomock.Any(), gomock.Any()).Return(models.CardVelocityHistory{}, errDatabase)
 		}},
 		{"save", func(d scoreDeps, p models.Purchase) {
 			d.expectUnsaved(p, rulesetWith(scoring.ModelOff), 0)

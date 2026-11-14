@@ -32,22 +32,33 @@ func NewPurchaseStore(conn Conn) *PurchaseStore {
 	return &PurchaseStore{conn: conn}
 }
 
-// CountCardPurchasesLastHourSQL counts the card's purchases in the hour up to $2.
-const CountCardPurchasesLastHourSQL = `
-SELECT count(*)
+const cardVelocityRange = `
 FROM purchases
 WHERE card_token = $1
-  AND event_time > $2::timestamptz - interval '1 hour'
-  AND event_time <= $2::timestamptz`
+  AND event_time > $2::timestamptz
+  AND event_time <= $3::timestamptz`
 
-// CardPurchasesLastHour counts saved purchases with the card in the hour before
-// at. A purchase exactly one hour earlier is not counted.
-func (s *PurchaseStore) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (int, error) {
-	var n int64
-	if err := s.conn.QueryRow(ctx, CountCardPurchasesLastHourSQL, cardToken, at.UTC()).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count card purchases: %w", err)
+// CardPurchasesLastHourSQL uses one snapshot for the count and the bounded set of IDs.
+const CardPurchasesLastHourSQL = `
+SELECT counted.uses,
+       CASE WHEN counted.uses BETWEEN 1 AND $4::bigint
+            THEN ARRAY(SELECT id ` + cardVelocityRange + ` LIMIT $4)
+            ELSE ARRAY[]::bigint[] END
+FROM (SELECT count(*) AS uses ` + cardVelocityRange + `) counted`
+
+// CardPurchasesLastHour counts saved purchases with the card in the hour
+// through at. The IDs are returned only when the complete set fits.
+func (s *PurchaseStore) CardPurchasesLastHour(ctx context.Context, cardToken string, at time.Time) (models.CardVelocityHistory, error) {
+	var history models.CardVelocityHistory
+	start := at.Add(-scoring.CardVelocityWindowMinutes * time.Minute)
+	if err := s.conn.QueryRow(ctx, CardPurchasesLastHourSQL, cardToken, start.UTC(), at.UTC(), int32(models.CardVelocityReferenceLimit)).
+		Scan(&history.Count, &history.PurchaseIDs); err != nil {
+		return models.CardVelocityHistory{}, fmt.Errorf("read card velocity history: %w", err)
 	}
-	return int(n), nil
+	if len(history.PurchaseIDs) != history.Count {
+		history.PurchaseIDs = nil
+	}
+	return history, nil
 }
 
 // CountDeviceCardsLastHourSQL counts the other cards used on the device in the
@@ -219,10 +230,10 @@ RETURNING id`
 const insertDecision = `
 INSERT INTO decisions (
     purchase_id, ruleset_version, outcome, rule_score, fired_rules, model_inputs, model_score,
-    model_score_unblended, scoring_latency_us, model_version, ip_intel
+    model_score_unblended, scoring_latency_us, model_version, ip_intel, card_velocity_evidence
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11
+    $8, $9, $10, $11, $12
 )`
 
 // Save stores a purchase and its decision in one transaction and returns the
@@ -267,7 +278,7 @@ func (s *PurchaseStore) Save(ctx context.Context, p models.Purchase, d models.De
 
 	_, err = tx.Exec(ctx, insertDecision,
 		id, int32(d.RulesetVersion), string(d.Result.Outcome), int32(d.Result.Score), firedJSON, inputsJSON,
-		d.ModelScore, d.ModelScoreUnblended, d.Latency.Microseconds(), d.ModelVersion, ipIntelJSON,
+		d.ModelScore, d.ModelScoreUnblended, d.Latency.Microseconds(), d.ModelVersion, ipIntelJSON, d.CardVelocity,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert decision for purchase %s: %w", p.TransactionID, err)
