@@ -671,6 +671,32 @@ export function startSimulation(settings: SimulationSettings, signal?: AbortSign
 export function stopSimulation(id: string, signal?: AbortSignal): Promise<SimulationRun> {
   return request(`/simulations/${encodeURIComponent(id)}/stop`, { method: 'POST', signal })
 }
+export type BlockReason = 'blocklist' | 'rules'
+export interface BlockedPurchase {
+  purchase_id: string
+  transaction_id: string
+  player_id: string
+  amount_minor: string
+  event_time: string
+  card_country: string | null
+  ip_country: string | null
+  device_id: string | null
+  reason: BlockReason
+  rule_score: number
+  block_threshold: number
+  ruleset_version: number
+  fired_rules: FiredRule[]
+  decided_at: string
+}
+export interface BlockedPurchasePage {
+  items: BlockedPurchase[]
+  next_cursor?: string
+}
+export function listBlockedPurchases(runId: string, before: string | null, signal?: AbortSignal): Promise<BlockedPurchasePage> {
+  const query = new URLSearchParams({ limit: '20' })
+  if (before) query.set('before', before)
+  return request(`/simulations/${encodeURIComponent(runId)}/blocked?${query}`, { signal })
+}
 
 export type QualitySource = 'simulator' | 'ieee-cis'
 

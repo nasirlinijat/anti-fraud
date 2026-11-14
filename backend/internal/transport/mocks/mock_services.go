@@ -636,6 +636,22 @@ func (m *MockSimulationService) EXPECT() *MockSimulationServiceMockRecorder {
 	return m.recorder
 }
 
+// BlockedPurchases mocks base method.
+func (m *MockSimulationService) BlockedPurchases(ctx context.Context, id string, before int64, limit int) ([]models.BlockedPurchase, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlockedPurchases", ctx, id, before, limit)
+	ret0, _ := ret[0].([]models.BlockedPurchase)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// BlockedPurchases indicates an expected call of BlockedPurchases.
+func (mr *MockSimulationServiceMockRecorder) BlockedPurchases(ctx, id, before, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlockedPurchases", reflect.TypeOf((*MockSimulationService)(nil).BlockedPurchases), ctx, id, before, limit)
+}
+
 // Get mocks base method.
 func (m *MockSimulationService) Get(ctx context.Context, id string) (models.SimulationRun, error) {
 	m.ctrl.T.Helper()

@@ -56,6 +56,21 @@ func (mr *MockStoreMockRecorder) Active(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Active", reflect.TypeOf((*MockStore)(nil).Active), ctx)
 }
 
+// BlockedPurchases mocks base method.
+func (m *MockStore) BlockedPurchases(ctx context.Context, runID string, beforeID int64, limit int) ([]models.BlockedPurchase, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlockedPurchases", ctx, runID, beforeID, limit)
+	ret0, _ := ret[0].([]models.BlockedPurchase)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BlockedPurchases indicates an expected call of BlockedPurchases.
+func (mr *MockStoreMockRecorder) BlockedPurchases(ctx, runID, beforeID, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlockedPurchases", reflect.TypeOf((*MockStore)(nil).BlockedPurchases), ctx, runID, beforeID, limit)
+}
+
 // FindByRequest mocks base method.
 func (m *MockStore) FindByRequest(ctx context.Context, operatorID, requestID string) (models.SimulationRun, bool, error) {
 	m.ctrl.T.Helper()

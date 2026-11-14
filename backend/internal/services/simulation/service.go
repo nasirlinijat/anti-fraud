@@ -47,6 +47,7 @@ type Store interface {
 	Active(ctx context.Context) (models.SimulationRun, error)
 	List(ctx context.Context, before string, limit int) ([]models.SimulationRun, error)
 	RequestStop(ctx context.Context, id, operatorID string) (bool, error)
+	BlockedPurchases(ctx context.Context, runID string, beforeID int64, limit int) ([]models.BlockedPurchase, error)
 }
 
 // Service owns background workers; database locks also exclude other processes.

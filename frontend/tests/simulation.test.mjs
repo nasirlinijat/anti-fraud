@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { defaultSimulationDraft, validateSimulation, isActive, uncertainStart } from '../src/simulation.ts'
 import { ApiError, request } from '../src/request.ts'
-import { startSimulation, stopSimulation, listSimulations, getSimulation } from '../src/api.ts'
+import { startSimulation, stopSimulation, listSimulations, getSimulation, listBlockedPurchases } from '../src/api.ts'
 const available = ['normal', 'card_testing']
 
 test('simulation defaults and mode-specific counts match the API', () => {
@@ -108,4 +108,14 @@ test('reads and writes send no API key and stop encodes the run ID', async ({ mo
   assert.equal(calls[1][0], '/simulations/run%2Fid')
   assert.equal(calls[2][0], '/simulations/run%2Fid/stop')
   assert.equal(calls[2][1].method, 'POST')
+})
+test('blocked purchases encode the run ID and pass the cursor only when set', async ({ mock }) => {
+  const calls = []
+  mock.method(globalThis, 'fetch', async (path) => {
+    calls.push(path)
+    return Response.json({ items: [] })
+  })
+  await listBlockedPurchases('run/id', null)
+  await listBlockedPurchases('run/id', '42')
+  assert.deepEqual(calls, ['/simulations/run%2Fid/blocked?limit=20', '/simulations/run%2Fid/blocked?limit=20&before=42'])
 })
