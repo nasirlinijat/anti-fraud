@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { AvsResult, CvvResult, IpIntel, ReviewCase, ThreeDsResult } from '../api'
 import { ModelRiskBadge, OutcomeBadge, RuleScoreBadge, Timestamp } from '../Display'
 import { formatUsdMinor } from '../displayFormat'
@@ -7,49 +7,56 @@ import { EmptyState } from '../ViewState'
 import { AccountEvents } from './AccountEvents'
 import { reasonLabel, reasonStrength, reasonValue, type ModelReason } from './modelReasons'
 
-export function CaseEvidence({ review, time }: { review: ReviewCase; time: TimeDisplay }) {
+export function CaseEvidence({ review, time, children }: { review: ReviewCase; time: TimeDisplay; children?: ReactNode }) {
   const id = useId()
   return (
     <>
-      <div className="case-grid">
-        <section className="panel" aria-labelledby={`${id}-purchase`}>
-          <h3 id={`${id}-purchase`}>Purchase</h3>
-          <PurchaseFacts review={review} time={time} />
+      <section className="case-evidence" aria-labelledby={`${id}-scoring-evidence`}>
+        <h3 id={`${id}-scoring-evidence`}>Evidence at scoring</h3>
+        <div className="case-grid">
+          <section className="panel" aria-labelledby={`${id}-purchase`}>
+            <h4 id={`${id}-purchase`}>Purchase</h4>
+            <PurchaseFacts review={review} time={time} />
+          </section>
+          <section className="panel" aria-labelledby={`${id}-scoring`}>
+            <h4 id={`${id}-scoring`}>Scoring</h4>
+            <ScoringFacts review={review} />
+          </section>
+        </div>
+        <section className="panel" aria-labelledby={`${id}-verification`}>
+          <h4 id={`${id}-verification`}>Payment verification</h4>
+          <VerificationFacts review={review} />
         </section>
-        <section className="panel" aria-labelledby={`${id}-scoring`}>
-          <h3 id={`${id}-scoring`}>Scoring</h3>
-          <ScoringFacts review={review} />
+        <section className="panel" aria-labelledby={`${id}-ip-intel`}>
+          <h4 id={`${id}-ip-intel`}>IP intelligence</h4>
+          <IpIntelFacts intel={review.ip_intel} />
         </section>
-      </div>
-      <section className="panel" aria-labelledby={`${id}-verification`}>
-        <h3 id={`${id}-verification`}>Payment verification</h3>
-        <VerificationFacts review={review} />
-      </section>
-      <section className="panel" aria-labelledby={`${id}-ip-intel`}>
-        <h3 id={`${id}-ip-intel`}>IP intelligence</h3>
-        <IpIntelFacts intel={review.ip_intel} />
-      </section>
-      <section className="panel" aria-labelledby={`${id}-rules`}>
-        <h3 id={`${id}-rules`}>Fired rules</h3>
-        <FiredRules review={review} />
-      </section>
-      {review.model_score !== null && (
-        <section className="panel" aria-labelledby={`${id}-reasons`}>
-          <h3 id={`${id}-reasons`}>Why this model risk</h3>
-          <ModelReasons reasons={review.model_reasons ?? []} />
+        <section className="panel" aria-labelledby={`${id}-rules`}>
+          <h4 id={`${id}-rules`}>Fired rules</h4>
+          <FiredRules review={review} />
         </section>
-      )}
-      <section className="panel" aria-labelledby={`${id}-history`}>
-        <h3 id={`${id}-history`}>Recent player purchases</h3>
-        <PlayerPurchases review={review} time={time} />
+        {review.model_score !== null && (
+          <section className="panel" aria-labelledby={`${id}-reasons`}>
+            <h4 id={`${id}-reasons`}>Why this model risk</h4>
+            <ModelReasons reasons={review.model_reasons ?? []} />
+          </section>
+        )}
       </section>
-      <section className="panel" aria-labelledby={`${id}-device`}>
-        <h3 id={`${id}-device`}>Recent device activity</h3>
-        <DeviceActivity review={review} time={time} />
-      </section>
-      <section className="panel" aria-labelledby={`${id}-account`}>
-        <h3 id={`${id}-account`}>Recent account events</h3>
-        <AccountEvents review={review} time={time} />
+      <section className="case-evidence" aria-labelledby={`${id}-context`}>
+        <h3 id={`${id}-context`}>Investigation context</h3>
+        <section className="panel" aria-labelledby={`${id}-history`}>
+          <h4 id={`${id}-history`}>Recent player purchases</h4>
+          <PlayerPurchases review={review} time={time} />
+        </section>
+        <section className="panel" aria-labelledby={`${id}-device`}>
+          <h4 id={`${id}-device`}>Recent device activity</h4>
+          <DeviceActivity review={review} time={time} />
+        </section>
+        <section className="panel" aria-labelledby={`${id}-account`}>
+          <h4 id={`${id}-account`}>Recent account events</h4>
+          <AccountEvents review={review} time={time} />
+        </section>
+        {children}
       </section>
     </>
   )
@@ -210,7 +217,7 @@ function DeviceActivity({ review, time }: { review: ReviewCase; time: TimeDispla
 
 function ModelReasons({ reasons }: { reasons: ModelReason[] }) {
   if (reasons.length === 0) {
-    return <EmptyState>Reasons are not available for this score: it was given by a different model version than the one running now.</EmptyState>
+    return <EmptyState>Model reasons are unavailable for this score.</EmptyState>
   }
   return (
     <>

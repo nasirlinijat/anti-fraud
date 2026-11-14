@@ -1,7 +1,7 @@
 import type { Decision, ReviewBlocks } from '../api'
 
 // A result shown to the reviewer; a failed one is shown as an error.
-export type Feedback = { text: string; failed?: boolean }
+export type Feedback = { text: string; failed?: boolean; caseId?: string }
 
 // The fixed order in which blocked values are named.
 const blockOrder = ['device', 'card', 'player'] as const

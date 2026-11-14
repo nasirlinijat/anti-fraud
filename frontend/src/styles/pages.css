@@ -253,10 +253,23 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   .review-table tbody tr:hover > td:last-child { background: color-mix(in srgb, var(--text) 6%, var(--surface)); }
 }
 
-.review-case {
+.review-case,
+.case-evidence {
   display: grid;
   gap: var(--space-md);
 }
+
+.case-evidence .panel > h4 {
+  margin-block-end: var(--space-md);
+  font-size: 1rem;
+}
+
+.panel + .case-evidence,
+.case-evidence + .case-evidence {
+  margin-block-start: var(--space-md);
+}
+
+.review-case > .case-evidence { margin-block-start: 0; }
 
 .review-case > .toolbar { margin: 0; }
 
@@ -291,8 +304,7 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   overflow: auto;
 }
 
-.resolved-case-dialog > .panel,
-.resolved-case-dialog > .case-grid {
+.resolved-case-dialog > .panel {
   margin-block-start: var(--space-md);
 }
 

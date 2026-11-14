@@ -145,7 +145,7 @@ test('an admin opens a claimed purchase from Assignments and returns with Back',
   await expect(page).toHaveURL(/#\/reviews\/demo-purchase$/)
   await expect(page.getByRole('heading', { name: 'demo-transaction' })).toBeVisible()
   await expect(page.getByText('Claimed by reviewer1').first()).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Why this model risk' })).toContainText('Reasons are not available')
+  await expect(page.getByRole('region', { name: 'Why this model risk' })).toContainText('Model reasons are unavailable for this score.')
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Assignments' })).toBeVisible()
   await page.goto('/#/reviews/demo-purchase')

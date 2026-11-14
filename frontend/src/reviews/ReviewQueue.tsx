@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { listReviewPage, type ClaimFilter, type NumberedQueuePage, type ReviewSort } from '../api'
+import { listReviewPage, type ClaimFilter, type NumberedQueuePage } from '../api'
 import { TimeDisplayToggle } from '../Display'
 import { useAccount } from '../sessionContext'
 import { PageHeader } from '../ui/PageHeader'
@@ -14,17 +14,19 @@ import { CaseView } from './ReviewCase'
 import { ReviewTable } from './ReviewTable'
 import { QueuePages } from './QueuePages'
 import type { Feedback } from './useDecisions'
+import { useQueuePages } from './useQueuePages'
 import { useReviewWork } from './useReviewWork'
 
 const REFRESH_MS = 3_000
 
 function ReviewQueue() {
   const heading = useRef<HTMLHeadingElement>(null)
+  const { username } = useAccount()
   return (
     <section aria-labelledby="reviews-heading">
       <PageHeader eyebrow="Operations" title="Review queue" headingId="reviews-heading" headingRef={heading}
         lead="Claim a purchase to work on it, then approve or reject it. Only the account that holds a claim can decide." />
-      <Queue heading={heading} />
+      <Queue key={username} heading={heading} />
     </section>
   )
 }
@@ -42,22 +44,10 @@ function useCaseAddress(): [string | null, (purchaseId: string | null) => void] 
   return [openCase, open]
 }
 
-function useQueuePages() {
-  const [number, setNumber] = useState(1)
-  const [sort, setSort] = useState<ReviewSort>('rule_score')
-  const [claimed, setClaimed] = useState<ClaimFilter>('all')
-  return {
-    number, sort, claimed, setNumber,
-    // A new order or filter starts again from its first page.
-    setSort: (next: ReviewSort) => { setSort(next); setNumber(1) },
-    setClaimed: (next: ClaimFilter) => { setClaimed(next); setNumber(1) },
-  }
-}
-
 function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   const { username, role } = useAccount()
   const time = useTimeDisplay()
-  const pages = useQueuePages()
+  const pages = useQueuePages(username)
   const { number, sort, claimed } = pages
   const [modelEnabled, setModelEnabled] = useState(false)
   const [page, setPage] = useState<NumberedQueuePage | null>(null)
@@ -100,8 +90,9 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   }
 
   function removeDecidedPurchase(id: string) {
-    if (openCase === id || document.activeElement?.closest('tr')?.dataset.purchaseId === id) heading.current?.focus()
-    if (openCase === id) setOpenCase(null)
+    const currentCase = caseInAddress(window.location.hash)
+    if (currentCase === id || document.activeElement?.closest('tr')?.dataset.purchaseId === id) heading.current?.focus()
+    if (currentCase === id) setOpenCase(null)
     setPage(current => current && { ...current, items: current.items.filter(row => row.purchase_id !== id) })
   }
 
@@ -115,7 +106,7 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
     <>
       <DecisionDialog confirmation={decisions.confirmation} blocks={decisions.blocks}
         onBlocksChange={decisions.setBlocks} onDismiss={decisions.dismiss}
-        onConfirm={action => void decisions.save(action)} />
+        onConfirm={action => void decisions.save(action, openCase === action.item.purchase_id ? openCase : undefined)} />
       <BatchDecisionDialog confirmation={batch.confirmation} blocks={batch.blocks}
         onBlocksChange={batch.setBlocks} onDismiss={batch.dismiss}
         onConfirm={action => void batch.save(action)} />
@@ -125,7 +116,7 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   if (openCase !== null) {
     return (
       <>
-        <QueueFeedback feedback={feedback} />
+        <QueueFeedback feedback={feedback} openCase={openCase} />
         <CaseView key={openCase} purchaseId={openCase} time={time} handlers={handlers} linked={work.linked}
           onBack={() => setOpenCase(null)} onOpen={openLinkedCase} />
         {dialog}
@@ -163,8 +154,9 @@ function Queue({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
   )
 }
 
-function QueueFeedback({ feedback, onRetry, pending = false }: {
+function QueueFeedback({ feedback, openCase, onRetry, pending = false }: {
   feedback: Feedback | null
+  openCase?: string
   onRetry?: () => void
   pending?: boolean
 }) {
@@ -172,6 +164,9 @@ function QueueFeedback({ feedback, onRetry, pending = false }: {
     <>
       <p className={feedback && !feedback.failed ? 'notice' : 'visually-hidden'} role="status">
         {feedback && !feedback.failed ? feedback.text : ''}
+        {feedback?.caseId && feedback.caseId !== openCase && !feedback.failed && (
+          <> <a href={caseAddress(feedback.caseId)}>View decision</a></>
+        )}
       </p>
       {feedback?.failed && <ErrorState polite onRetry={onRetry} pending={pending}>{feedback.text}</ErrorState>}
     </>
