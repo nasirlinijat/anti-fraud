@@ -87,6 +87,21 @@ func (mr *MockStoreMockRecorder) Publish(ctx, rs, operatorID, reportThresholds a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Publish", reflect.TypeOf((*MockStore)(nil).Publish), ctx, rs, operatorID, reportThresholds)
 }
 
+// RecentDecisions mocks base method.
+func (m *MockStore) RecentDecisions(ctx context.Context, limit int) ([]models.ReplayDecision, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecentDecisions", ctx, limit)
+	ret0, _ := ret[0].([]models.ReplayDecision)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecentDecisions indicates an expected call of RecentDecisions.
+func (mr *MockStoreMockRecorder) RecentDecisions(ctx, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecentDecisions", reflect.TypeOf((*MockStore)(nil).RecentDecisions), ctx, limit)
+}
+
 // Version mocks base method.
 func (m *MockStore) Version(ctx context.Context, version int32) (scoring.Ruleset, error) {
 	m.ctrl.T.Helper()

@@ -26,6 +26,7 @@ type Store interface {
 	Version(ctx context.Context, version int32) (scoring.Ruleset, error)
 	List(ctx context.Context) ([]models.RulesetSummary, error)
 	Publish(ctx context.Context, rs scoring.Ruleset, operatorID string, reportThresholds *scoring.ModelSettings) (scoring.Ruleset, error)
+	RecentDecisions(ctx context.Context, limit int) ([]models.ReplayDecision, error)
 }
 
 // Draft is a ruleset as an operator submits it. Nil fields were left out.

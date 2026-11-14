@@ -441,3 +441,35 @@ test('a search without matches says so', async ({ page }) => {
   await page.getByRole('searchbox', { name: 'Search purchases' }).press('Enter')
   await expect(page.getByText('No purchase has the transaction ID, player ID or card token “nobody”.')).toBeVisible()
 })
+
+test('Rulesets previews the impact of a draft before publishing', async ({ page }) => {
+  const active = { version: 3, created_at: now, note: '', review_threshold: 30, block_threshold: 80, rules: {},
+    model: { mode: 'assist', clear_below: 0.1, flag_at: 0.5 } }
+  await page.route('**/rulesets/active', route => route.fulfill({ json: active }))
+  await page.route('**/rulesets', route => route.fulfill({ json: { versions: [active] } }))
+  const sent: unknown[] = []
+  await page.route('**/rulesets/preview', route => {
+    sent.push(route.request().postDataJSON())
+    return route.fulfill({ json: {
+      decisions: 1000, before: { allow: 900, review: 80, block: 20 }, after: { allow: 880, review: 100, block: 20 },
+      changed: 20, uncertain: 3, uncertain_rules: ['new_account'], missing_model_scores: 0,
+      changes: [{ purchase_id: '55', transaction_id: 'txn-55', decided_at: now, before: 'allow', after: 'review', rule_score_before: 25,
+        rule_score_after: 25, uncertain: false }],
+    } })
+  })
+  await page.goto('/#/rulesets')
+  await page.getByLabel('Review threshold (points)').fill('25')
+  await page.getByRole('button', { name: 'Preview impact' }).click()
+  const panel = page.getByRole('region', { name: 'Preview impact' })
+  await expect(panel).toContainText('Replayed the last 1,000 decisions with this draft: 20 would change.')
+  const counts = panel.getByRole('region', { name: 'Outcomes before and after' })
+  await expect(counts.getByRole('row', { name: /Allowed/ })).toContainText('−20')
+  await expect(counts.getByRole('row', { name: /Sent to review/ })).toContainText('+20')
+  await expect(counts.getByRole('row', { name: /Blocked/ })).toContainText('no change')
+  await expect(panel).toContainText('3 decisions cannot be replayed exactly, because these rules were off or their settings changed: new_account')
+  await expect(panel.getByRole('region', { name: 'Purchases whose outcome would change' })).toContainText('txn-55')
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toMatchObject({ review_threshold: 25, block_threshold: 80 })
+  await page.getByLabel('Review threshold (points)').fill('26')
+  await expect(panel).toHaveCount(0)
+})

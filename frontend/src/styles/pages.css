@@ -663,3 +663,20 @@ summary { padding-block: var(--space-xs); cursor: pointer; }
   align-items: center;
   gap: var(--space-sm);
 }
+
+.publish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.ruleset-preview { display: grid; gap: var(--space-md); margin-block-start: var(--space-lg); }
+.ruleset-preview h2, .ruleset-preview p { margin: 0; }
+.ruleset-preview th .badge { margin-inline-start: var(--space-xs); }
+
+.ruleset-preview-uncertain {
+  padding: var(--space-sm) var(--space-md);
+  border-inline-start: 3px solid var(--chart-review);
+  background: var(--review-bg);
+  border-radius: 4px;
+}
