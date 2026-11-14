@@ -293,11 +293,14 @@ Server size: the server stays a `t3.small` (2 GiB), because the AWS Free plan al
 
    ```bash
    ssh -i ~/.ssh/anti-fraud.pem ubuntu@$IP
-   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC="--disable traefik --disable metrics-server" sh -
+   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.37.2+k3s1 INSTALL_K3S_EXEC=--disable=traefik,metrics-server sh -
    mkdir -p ~/.kube && sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config && sudo chown ubuntu: ~/.kube/config && chmod 600 ~/.kube/config
    curl -fsSL https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz | tar -xz linux-amd64/helm && sudo install linux-amd64/helm /usr/local/bin/helm && rm -r linux-amd64
+   echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc && export KUBECONFIG=$HOME/.kube/config
    kubectl get nodes
    ```
+
+   The setting has no spaces, so the same line also works from PowerShell, which drops inner double quotes when it calls `ssh`. k3s's own `kubectl` reads the root-only `/etc/rancher/k3s/k3s.yaml` unless `KUBECONFIG` points at the copy; `k8s-deploy.sh` sets it itself.
 
    k3s runs next to Docker. It takes ports 80 and 443 only when the chart's `edge` Service exists, which happens in step 2.
 
