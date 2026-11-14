@@ -401,6 +401,21 @@ func (mr *MockRulesetServiceMockRecorder) List(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockRulesetService)(nil).List), ctx)
 }
 
+// Preview mocks base method.
+func (m *MockRulesetService) Preview(ctx context.Context, d ruleset.Draft) (models.RulesetPreview, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Preview", ctx, d)
+	ret0, _ := ret[0].(models.RulesetPreview)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Preview indicates an expected call of Preview.
+func (mr *MockRulesetServiceMockRecorder) Preview(ctx, d any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Preview", reflect.TypeOf((*MockRulesetService)(nil).Preview), ctx, d)
+}
+
 // Publish mocks base method.
 func (m *MockRulesetService) Publish(ctx context.Context, d ruleset.Draft, operatorID string) (scoring.Ruleset, error) {
 	m.ctrl.T.Helper()

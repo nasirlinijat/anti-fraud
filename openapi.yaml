@@ -2555,6 +2555,52 @@ paths:
         "503":
           $ref: "#/components/responses/OperatorAccessUnavailable"
 
+  /rulesets/preview:
+    post:
+      tags: [Rulesets]
+      operationId: previewRuleset
+      summary: Preview how a draft ruleset would change recent decisions
+      description: |
+        Replays the newest 1,000 decisions with the draft, the same body as
+        POST /rulesets, and returns the outcomes before and after. Nothing is
+        saved and the active ruleset does not change.
+
+        Each decision keeps the rules that fired when it was scored and its
+        saved model score. The replay is exact for changed points, thresholds,
+        switched-off rules and model settings: blocklist matches stay blocked,
+        the draft's points of the fired rules are added, the draft's thresholds
+        decide, and in assist mode the draft's model thresholds adjust the
+        outcome. A decision is counted as `uncertain` when the draft switches on
+        a rule that was off, changes a rule's own settings (such as its limit),
+        or uses assist mode for a decision without a saved model score.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesetConfig"
+      responses:
+        "200":
+          description: The impact of the draft on recent decisions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesetPreview"
+        "400":
+          description: The draft is not a valid ruleset.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/SessionRequired"
+        "403":
+          $ref: "#/components/responses/RoleNotAllowed"
+        "503":
+          $ref: "#/components/responses/DatabaseUnavailable"
+
   /rulesets/active:
     get:
       tags: [Rulesets]
@@ -3109,6 +3155,70 @@ components:
                 resolved_at:
                   type: string
                   format: date-time
+
+    PreviewCounts:
+      type: object
+      required: [allow, review, block]
+      properties:
+        allow:
+          type: integer
+        review:
+          type: integer
+        block:
+          type: integer
+
+    RulesetPreview:
+      type: object
+      required: [decisions, before, after, changed, uncertain, uncertain_rules, missing_model_scores, changes]
+      properties:
+        decisions:
+          type: integer
+          description: How many recent decisions were replayed, at most 1,000.
+        before:
+          $ref: "#/components/schemas/PreviewCounts"
+        after:
+          $ref: "#/components/schemas/PreviewCounts"
+        changed:
+          type: integer
+          description: Decisions whose outcome would change.
+        uncertain:
+          type: integer
+          description: Decisions that cannot be replayed exactly.
+        uncertain_rules:
+          type: array
+          description: Rules the draft switches on or whose settings it changes, so their firing cannot be replayed.
+          items:
+            type: string
+        missing_model_scores:
+          type: integer
+          description: Decisions without a saved model score while the draft uses assist mode.
+        changes:
+          type: array
+          maxItems: 50
+          description: The newest changed decisions.
+          items:
+            type: object
+            required: [purchase_id, transaction_id, decided_at, before, after, rule_score_before, rule_score_after, uncertain]
+            properties:
+              purchase_id:
+                type: string
+              transaction_id:
+                type: string
+              decided_at:
+                type: string
+                format: date-time
+              before:
+                type: string
+                enum: [allow, review, block]
+              after:
+                type: string
+                enum: [allow, review, block]
+              rule_score_before:
+                type: integer
+              rule_score_after:
+                type: integer
+              uncertain:
+                type: boolean
 
     ResolvedReviewCase:
       allOf:

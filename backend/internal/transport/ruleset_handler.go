@@ -24,6 +24,7 @@ type RulesetService interface {
 	Version(ctx context.Context, version int32) (scoring.Ruleset, error)
 	List(ctx context.Context) ([]models.RulesetSummary, error)
 	Publish(ctx context.Context, d ruleset.Draft, operatorID string) (scoring.Ruleset, error)
+	Preview(ctx context.Context, d ruleset.Draft) (models.RulesetPreview, error)
 }
 
 type RulesetHandler struct {
@@ -40,6 +41,7 @@ func RegisterRulesetRoutes(mux *http.ServeMux, h *RulesetHandler, access platfor
 	mux.Handle("GET /rulesets/active", access.ConfigRead(http.HandlerFunc(h.getActive)))
 	mux.Handle("GET /rulesets/{version}", access.ConfigRead(http.HandlerFunc(h.getVersion)))
 	mux.Handle("POST /rulesets", access.ConfigWrite(h.publish))
+	mux.Handle("POST /rulesets/preview", access.ConfigRead(http.HandlerFunc(h.preview)))
 }
 
 type configPayload struct {
@@ -105,21 +107,29 @@ func (h *RulesetHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 	writeRuleset(w, http.StatusOK, rs)
 }
 
-func (h *RulesetHandler) publish(w http.ResponseWriter, r *http.Request, operatorID string) {
+func decodeConfigPayload(w http.ResponseWriter, r *http.Request) (*configPayload, bool) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRulesetBodyBytes))
 	dec.DisallowUnknownFields()
 	var payload *configPayload
 	if err := dec.Decode(&payload); err != nil {
 		writeRulesetDecodeError(w, err)
-		return
+		return nil, false
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); err != nil && err != io.EOF {
 		writeRulesetDecodeError(w, err)
-		return
+		return nil, false
 	}
 	if payload == nil || len(extra) != 0 {
 		platform.WriteError(w, http.StatusBadRequest, "request body must contain a single valid ruleset object")
+		return nil, false
+	}
+	return payload, true
+}
+
+func (h *RulesetHandler) publish(w http.ResponseWriter, r *http.Request, operatorID string) {
+	payload, ok := decodeConfigPayload(w, r)
+	if !ok {
 		return
 	}
 
