@@ -1,0 +1,6 @@
+apiVersion: v2
+name: anti-fraud
+description: Real-time fraud scoring API, review console, PostgreSQL, Redis and the HTTPS gateway.
+type: application
+version: 0.1.0
+appVersion: latest

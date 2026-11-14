@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-dbsetup-%d" .Release.Name .Release.Revision }}
+  labels:
+    {{- include "antifraud.labels" (dict "component" "dbsetup" "root" .) | nindent 4 }}
+  {{- if .Release.IsUpgrade }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- end }}
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        {{- include "antifraud.labels" (dict "component" "dbsetup" "root" .) | nindent 8 }}
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-db
+          image: {{ include "antifraud.image" (dict "component" "dbsetup" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["sh", "-c", "until pg_isready -h db -p 5432 -U \"$PGUSER\" -d \"$PGDATABASE\"; do sleep 2; done"]
+          env:
+            - name: PGUSER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+          resources:
+            {{- toYaml .Values.dbsetup.resources | nindent 12 }}
+      containers:
+        - name: dbsetup
+          image: {{ include "antifraud.image" (dict "component" "dbsetup" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["sh", "-c", "migrate -path /migrations -database \"$MIGRATE_URL\" up && psql -X -v ON_ERROR_STOP=1 -f /runtime-role.sql"]
+          env:
+            - name: PGHOST
+              value: db
+            - name: PGUSER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGPASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "POSTGRES_PASSWORD" "root" .) | nindent 14 }}
+            - name: RUNTIME_DB_PASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "RUNTIME_DB_PASSWORD" "root" .) | nindent 14 }}
+            - name: LABELS_DB_PASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "LABELS_DB_PASSWORD" "optional" true "root" .) | nindent 14 }}
+            - name: MIGRATE_URL
+              value: "postgres://$(PGUSER):$(PGPASSWORD)@db:5432/$(PGDATABASE)?sslmode=disable"
+          resources:
+            {{- toYaml .Values.dbsetup.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true

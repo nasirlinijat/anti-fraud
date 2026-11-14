@@ -1,0 +1,137 @@
+{{- $b := .Values.backend -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    {{- include "antifraud.labels" (dict "component" "backend" "root" .) | nindent 4 }}
+spec:
+  selector:
+    {{- include "antifraud.selector" (dict "component" "backend" "root" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $b.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    {{- include "antifraud.labels" (dict "component" "backend" "root" .) | nindent 4 }}
+spec:
+  replicas: {{ $b.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "antifraud.selector" (dict "component" "backend" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "antifraud.labels" (dict "component" "backend" "root" .) | nindent 8 }}
+      annotations:
+        {{- include "antifraud.checksum" . | nindent 8 }}
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-schema
+          image: {{ include "antifraud.image" (dict "component" "dbsetup" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: ["sh", "-c", "until psql -X -q -c 'SELECT 1 FROM simulation_runs LIMIT 1' >/dev/null 2>&1; do echo waiting for the database setup; sleep 2; done"]
+          env:
+            - name: PGHOST
+              value: db
+            - name: PGUSER
+              value: antifraud_api
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGPASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "RUNTIME_DB_PASSWORD" "root" .) | nindent 14 }}
+          resources:
+            {{- toYaml .Values.dbsetup.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: backend
+          image: {{ include "antifraud.image" (dict "component" "backend" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: PORT
+              value: {{ $b.port | quote }}
+            - name: API_KEY
+              {{- include "antifraud.secretRef" (dict "key" "API_KEY" "root" .) | nindent 14 }}
+            - name: RUNTIME_DB_PASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "RUNTIME_DB_PASSWORD" "root" .) | nindent 14 }}
+            - name: LABELS_DB_PASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "LABELS_DB_PASSWORD" "optional" true "root" .) | nindent 14 }}
+            - name: REVIEW_ANALYST_KEYS
+              {{- include "antifraud.secretRef" (dict "key" "REVIEW_ANALYST_KEYS" "optional" true "root" .) | nindent 14 }}
+            - name: OPERATOR_API_KEYS
+              {{- include "antifraud.secretRef" (dict "key" "OPERATOR_API_KEYS" "optional" true "root" .) | nindent 14 }}
+            - name: CHARGEBACK_WEBHOOK_SECRET
+              {{- include "antifraud.secretRef" (dict "key" "CHARGEBACK_WEBHOOK_SECRET" "optional" true "root" .) | nindent 14 }}
+            - name: DATABASE_URL
+              value: {{ printf "postgres://antifraud_api:$(RUNTIME_DB_PASSWORD)@db:5432/%s?sslmode=disable" .Values.postgres.database | quote }}
+            - name: LABELS_DATABASE_URL
+              value: {{ printf "postgres://antifraud_labels:$(LABELS_DB_PASSWORD)@db:5432/%s?sslmode=disable" .Values.postgres.database | quote }}
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: MODEL_PATH
+              value: {{ printf "/models/%s" $b.modelFile | quote }}
+            - name: SIMULATION_ENABLED
+              value: {{ $b.simulationEnabled | quote }}
+            - name: IP_INTEL_PROVIDER
+              value: {{ $b.ipIntelProvider | quote }}
+            {{- range $name, $value := dict "SCORE_RATE_LIMIT" $b.scoreRateLimit "SCORE_RATE_BURST" $b.scoreRateBurst "SCORE_TIMEOUT" $b.scoreTimeout "DB_MAX_CONNS" $b.dbMaxConns "TRACING_ENDPOINT" $b.tracingEndpoint "TRACING_SAMPLE_RATIO" $b.tracingSampleRatio "DOGSTATSD_ADDR" $b.dogstatsdAddr }}
+            {{- if ne (toString $value) "" }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $b.port }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault

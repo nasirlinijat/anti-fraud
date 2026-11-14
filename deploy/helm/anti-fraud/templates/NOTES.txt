@@ -1,0 +1,14 @@
+anti-fraud {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }} as release {{ .Release.Name }}.
+
+Watch the pods start (the backend waits for the database setup Job):
+  kubectl -n {{ .Release.Namespace }} get pods -w
+
+Console: {{ .Values.edge.consoleHost }}
+API:     {{ .Values.edge.apiHost }}
+
+Create the first admin account (asks for the password without showing it):
+  kubectl -n {{ .Release.Namespace }} exec -it deploy/backend -c backend -- /create-account -username <name>
+
+Check the API through the edge:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/edge 8088:80
+  curl -H "Host: {{ trimPrefix "http://" (trimPrefix "https://" .Values.edge.apiHost) }}" http://127.0.0.1:8088/health

@@ -1,0 +1,176 @@
+name: Helm
+
+on:
+  pull_request:
+    paths:
+      - backend/**
+      - frontend/**
+      - deploy/Caddyfile
+      - deploy/Dockerfile.edge
+      - deploy/helm/**
+      - .github/workflows/helm.yml
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - frontend/**
+      - deploy/Caddyfile
+      - deploy/Dockerfile.edge
+      - deploy/helm/**
+      - .github/workflows/helm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HELM_VERSION: v4.3.1
+  KUBECONFORM_VERSION: v0.8.0
+  KIND_VERSION: v0.33.0
+  CHART: deploy/helm/anti-fraud
+  CI_VALUES: deploy/helm/ci-values.yaml
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint
+        run: helm lint "$CHART" -f "$CI_VALUES"
+
+      - name: Render
+        run: |
+          helm template af "$CHART" -f "$CI_VALUES" > rendered.yaml
+          helm template af "$CHART" -f "$CI_VALUES" \
+            --set edge.persistence.enabled=true \
+            --set edge.service.type=LoadBalancer \
+            --set existingSecret=anti-fraud-secrets \
+            --set 'images.pullSecrets[0].name=ghcr' > rendered-production.yaml
+
+      - name: Missing secrets fail the render
+        run: |
+          if helm template af "$CHART" --set edge.consoleHost=https://c.example --set edge.apiHost=https://a.example > /dev/null 2>&1; then
+            echo "the chart rendered without secrets"
+            exit 1
+          fi
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz kubeconform
+          ./kubeconform -strict -summary rendered.yaml rendered-production.yaml
+
+  kind:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NS: anti-fraud
+      TAG: ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Build images
+        run: |
+          docker build -t "ghcr.io/nasirlinijat/anti-fraud-backend:$TAG" backend
+          docker build -t "ghcr.io/nasirlinijat/anti-fraud-dbsetup:$TAG" -f backend/Dockerfile.dbsetup backend
+          docker build -t "ghcr.io/nasirlinijat/anti-fraud-frontend:$TAG" frontend
+          docker build -t "ghcr.io/nasirlinijat/anti-fraud-edge:$TAG" -f deploy/Dockerfile.edge deploy
+          docker pull postgres:18-alpine
+          docker pull redis:8-alpine
+
+      - uses: helm/kind-action@v1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          cluster_name: anti-fraud
+
+      - name: Load images into the cluster
+        run: |
+          for image in backend dbsetup frontend edge; do
+            kind load docker-image --name anti-fraud "ghcr.io/nasirlinijat/anti-fraud-$image:$TAG"
+          done
+          kind load docker-image --name anti-fraud postgres:18-alpine redis:8-alpine
+
+      - name: Install
+        run: |
+          helm install af "$CHART" -f "$CI_VALUES" --set images.tag="$TAG" \
+            --namespace "$NS" --create-namespace --wait --timeout 8m
+          kubectl -n "$NS" wait --for=condition=complete job --all --timeout 2m
+          kubectl -n "$NS" get pods
+
+      - name: Forward the edge
+        run: |
+          kubectl -n "$NS" port-forward svc/edge 8088:80 > port-forward.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS -o /dev/null -H "Host: api.localhost" http://127.0.0.1:8088/health && exit 0
+            sleep 1
+          done
+          cat port-forward.log
+          exit 1
+
+      - name: Smoke test
+        run: |
+          api() { curl -fsS -H "Host: api.localhost" "$@"; }
+          console() { curl -fsS -H "Host: console.localhost" "$@"; }
+          api http://127.0.0.1:8088/ready
+          api -X POST http://127.0.0.1:8088/score \
+            -H "X-API-Key: $(yq '.secrets.apiKey' "$CI_VALUES")" \
+            -H "Content-Type: application/json" \
+            -d '{"transaction_id":"txn-ci-1","event_time":"2026-11-08T10:00:00Z","amount_minor":1999,"player_id":"player-ci","card_token":"card-ci"}' \
+            | tee score.json
+          grep -q '"outcome"' score.json
+          console http://127.0.0.1:8088/ | grep -qi '<html'
+          status=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: api.localhost" http://127.0.0.1:8088/admin/accounts)
+          test "$status" = 404
+          password=$(openssl rand -hex 16)
+          echo "$password" | kubectl -n "$NS" exec -i deploy/backend -c backend -- /create-account -username ci-admin
+          token=$(console -X POST http://127.0.0.1:8088/auth/login -H "Content-Type: application/json" \
+            -d "{\"username\":\"ci-admin\",\"password\":\"$password\"}" | jq -r .token)
+          console -H "Authorization: Bearer $token" http://127.0.0.1:8088/auth/me | grep -q ci-admin
+
+      - name: Upgrade runs the database setup first
+        run: |
+          helm upgrade af "$CHART" -f "$CI_VALUES" --set images.tag="$TAG" --set backend.scoreRateLimit=90 \
+            --namespace "$NS" --wait --timeout 8m
+          kubectl -n "$NS" get deploy backend -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SCORE_RATE_LIMIT")].value}' | grep -qx 90
+          curl -fsS -H "Host: api.localhost" http://127.0.0.1:8088/ready || {
+            pkill -f "port-forward svc/edge" || true
+            kubectl -n "$NS" port-forward svc/edge 8088:80 > port-forward.log 2>&1 &
+            sleep 3
+            curl -fsS -H "Host: api.localhost" http://127.0.0.1:8088/ready
+          }
+
+      - name: Rollback
+        run: |
+          helm rollback af 1 --namespace "$NS" --wait --timeout 8m
+          kubectl -n "$NS" get deploy backend -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SCORE_RATE_LIMIT")].value}' | grep -qx 80
+          kubectl -n "$NS" wait --for=condition=complete job --all --timeout 2m
+          pkill -f "port-forward svc/edge" || true
+          kubectl -n "$NS" port-forward svc/edge 8088:80 > port-forward.log 2>&1 &
+          sleep 3
+          curl -fsS -H "Host: api.localhost" http://127.0.0.1:8088/ready
+          helm history af --namespace "$NS"
+
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get all,pvc,secrets,events --sort-by=.metadata.creationTimestamp || true
+          kubectl -n "$NS" describe pods || true
+          for pod in $(kubectl -n "$NS" get pods -o name); do
+            echo "== $pod"
+            kubectl -n "$NS" logs "$pod" --all-containers --tail 100 || true
+          done
+          cat port-forward.log || true

@@ -1,0 +1,21 @@
+images:
+  pullPolicy: Never
+
+secrets:
+  apiKey: ci-service-key-0123456789abcdef
+  postgresPassword: ci-postgres-password
+  runtimeDbPassword: ci-runtime-password
+
+backend:
+  scoreRateLimit: "80"
+
+edge:
+  consoleHost: http://console.localhost
+  apiHost: http://api.localhost
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: false
+
+postgres:
+  storage: 1Gi

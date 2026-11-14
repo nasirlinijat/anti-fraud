@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    {{- include "antifraud.labels" (dict "component" "db" "root" .) | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "antifraud.selector" (dict "component" "db" "root" .) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    {{- include "antifraud.labels" (dict "component" "db" "root" .) | nindent 4 }}
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "antifraud.selector" (dict "component" "db" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "antifraud.labels" (dict "component" "db" "root" .) | nindent 8 }}
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ include "antifraud.image" (dict "component" "postgres" "root" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_PASSWORD
+              {{- include "antifraud.secretRef" (dict "key" "POSTGRES_PASSWORD" "root" .) | nindent 14 }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.postgres.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
