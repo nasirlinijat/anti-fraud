@@ -639,6 +639,25 @@ export interface SimulationHistory {
   next_cursor?: string
   available_scenarios: string[]
 }
+
+export interface SimulationAnswerPage {
+  items: SimulationAnswer[]
+  next_cursor?: string
+}
+
+export interface SimulationAnswer {
+  purchase_id: string
+  transaction_id: string
+  outcome: Outcome
+  answer: 'fraud' | 'legitimate' | 'unknown'
+}
+
+export function listSimulationAnswers(id: string, before: string | undefined, exceptions: boolean, signal: AbortSignal): Promise<SimulationAnswerPage> {
+  const params = new URLSearchParams({ limit: '20' })
+  if (before) params.set('before', before)
+  if (exceptions) params.set('filter', 'exceptions')
+  return request(`/simulations/${encodeURIComponent(id)}/answers?${params}`, { signal })
+}
 export function listSimulations(signal?: AbortSignal): Promise<SimulationHistory> {
   return request('/simulations?limit=10', { signal })
 }

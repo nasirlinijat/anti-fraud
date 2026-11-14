@@ -88,5 +88,7 @@ Review and block count as flagged. Precision is the fraudulent share of flags, r
 
 Only finalized answers contribute to metrics. Pending and quarantined intents are counted separately and never treated as legitimate purchases. Console runs show their recorded progress; CLI and replay runs have unknown total coverage because ingestion does not store an expected run size. No historical answers are guessed. Labels finalized before purchase verification was introduced need independent source verification; use fresh runs for acceptance comparisons.
 
+The Simulator’s [saved decision comparison](simulator.md#compare-saved-decisions-with-simulator-answers) uses the same restricted evaluation connection. It exposes individual answers to signed-in admins for the selected console run only.
+
 Demo reset removes finalized, pending, and quarantined evaluation state together
 with all purchases and simulation history. See [reset instructions](simulator.md#reset-demonstration-data).

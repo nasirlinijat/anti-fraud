@@ -124,7 +124,13 @@ Matching start retries with the same account and request_id return the original 
 
 History and counters are saved in PostgreSQL. `sent` counts saved decisions and is the sum of allowed, reviewed and blocked. The worker records an in-flight transaction before scoring and checkpoints its result afterwards. On recovery it reconciles that transaction against saved decisions and marks unfinished runs `interrupted`; it does not automatically continue their traffic. `pending: true` means an outcome still cannot be confirmed. A new run needs a new request_id. Database failures stop dispatch until recovery. Only console-managed runs share the active-run guard; separately launched CLI simulators are not controlled.
 
-A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results. This API does not expose fraud labels; the controller persists evaluation answers privately.
+A seed determines traffic given the same generator settings and time anchor. Actual outcomes also depend on existing history, blocklists, rules and model. Backfill should use a clean demonstration database when comparing results.
+
+### Compare saved decisions with simulator answers
+
+The selected run’s **Saved decisions** panel lists 20 purchases at a time, newest saved first. The transaction ID opens the purchase details page. **Reveal answers** adds the synthetic answer to each row. **Show misses and legitimate friction** searches the whole run for Fraud + Allow, Legitimate + Review, and Legitimate + Block. Answers start hidden when opening a run, and the panel refreshes every three seconds while the run is active.
+
+`GET /simulations/{id}/answers` requires an admin session and the restricted evaluation connection. Use `limit` from 1 to 50, the previous response’s `next_cursor` as `before`, and `filter=exceptions` for misses and friction. Only saved scoring outcomes and finalized simulator labels matching the selected run are compared. Missing, pending, and quarantined answers stay Unknown. The scoring and purchase-detail endpoints do not return answers.
 
 ## Reset demonstration data
 

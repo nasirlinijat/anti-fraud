@@ -349,6 +349,52 @@ paths:
         '403': {$ref: '#/components/responses/RoleNotAllowed'}
         '404': {description: Unknown run or disabled feature.}
         '503': {description: Database unavailable.}
+  /simulations/{id}/answers:
+    get:
+      tags: [Simulations]
+      operationId: listSimulationAnswers
+      summary: Compare saved simulator decisions with finalized synthetic answers
+      description: Admin console only. Uses the restricted evaluation connection and returns only rows for the selected console run. Pending or missing answers are unknown.
+      security: [{SessionAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - in: query
+          name: before
+          description: Exclusive cursor returned by the preceding page.
+          schema: {type: string, pattern: '^[1-9][0-9]*$'}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+        - in: query
+          name: filter
+          description: Select Fraud + Allow, Legitimate + Review, and Legitimate + Block before paging.
+          schema: {type: string, enum: [exceptions]}
+      responses:
+        '200':
+          description: Saved comparisons, newest purchase ID first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [purchase_id, transaction_id, outcome, answer]
+                      properties:
+                        purchase_id: {type: string}
+                        transaction_id: {type: string}
+                        outcome: {type: string, enum: [allow, review, block]}
+                        answer: {type: string, enum: [fraud, legitimate, unknown]}
+                  next_cursor: {type: string}
+        '400': {description: Invalid query.}
+        '401': {description: Missing or invalid session.}
+        '403': {$ref: '#/components/responses/RoleNotAllowed'}
+        '404': {description: Unknown run or disabled simulator.}
+        '503': {description: Evaluation connection unavailable.}
   /simulations/{id}/stop:
     post:
       tags: [Simulations]
