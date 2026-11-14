@@ -107,6 +107,23 @@ Send demo traffic to the server (from `backend`):
 go run ./cmd/simulator -url https://api.<dashed-ip>.sslip.io -api-key <API_KEY> -count 500 -rate 10
 ```
 
+## Container images
+
+The `Images` workflow (`.github/workflows/images.yml`) builds the backend and frontend images from their Dockerfiles. On a pull request it only builds them, so a broken Dockerfile fails the check. On every push to `main` it also publishes them to GitHub Container Registry:
+
+| Image | Tags |
+|---|---|
+| `ghcr.io/nasirlinijat/anti-fraud-backend` | `sha-<short commit>` for every main commit, and `latest` for the newest |
+| `ghcr.io/nasirlinijat/anti-fraud-frontend` | the same |
+
+Use the `sha-` tag to run an exact commit; `latest` moves with every merge. The images carry the repository as their source label, so they appear under the repository's **Packages**. The first publish creates each package; if a package is private, the repository owner makes it public in its **Package settings**, or a cluster pulls it with an image pull secret.
+
+```bash
+docker pull ghcr.io/nasirlinijat/anti-fraud-backend:latest
+```
+
+`deploy/deploy.sh` still builds the images on the server; these registry images are for Kubernetes and other machines that should run exactly what CI built.
+
 ## Choosing the model
 
 `MODEL_FILE` in `~/anti-fraud/.env` picks the model file from `backend/models/`:
